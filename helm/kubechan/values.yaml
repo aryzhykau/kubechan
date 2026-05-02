@@ -1,0 +1,199 @@
+## KubeChan Helm values
+## All fields are documented. Override via --set or -f values-override.yaml.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# cluster-watcher — detects cluster problems and manages ProblemCase CRDs
+# ---------------------------------------------------------------------------
+clusterWatcher:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: kubechan/cluster-watcher
+    tag: ""  # defaults to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+
+  # Seconds to wait after observing a symptom before creating a ProblemCase.
+  # Reduces noise from transient states.
+  debounceWindowSecs: 30
+
+  # Seconds a Pod must remain Pending before triggering PendingTooLong detector.
+  pendingTooLongThresholdSecs: 300
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ---------------------------------------------------------------------------
+# diagnostics-worker — collects evidence for ProblemCases
+# ---------------------------------------------------------------------------
+diagnosticsWorker:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: kubechan/diagnostics-worker
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  # Max lines of current container logs to collect per container.
+  logTailLines: 500
+
+  # Max lines of previous (crashed) container logs to collect per container.
+  prevLogTailLines: 200
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ---------------------------------------------------------------------------
+# backend-api — REST API, WebSocket hub, SQLite store
+# ---------------------------------------------------------------------------
+backendApi:
+  enabled: true
+  replicaCount: 1  # Must remain 1 — SQLite single-writer constraint
+  image:
+    repository: kubechan/backend-api
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  storage:
+    # hostPath: ""  # Set to a local path (dev only) to skip PVC and use a host directory instead.
+    pvc:
+      # Size of the PVC for SQLite data. Increase for large clusters or long retention.
+      size: 5Gi
+      # StorageClass name. Empty string uses the cluster default.
+      storageClass: ""
+      accessMode: ReadWriteOnce
+
+  retention:
+    # Days to retain evidence payloads in SQLite.
+    evidenceDays: 7
+    # Days to retain analysis results in SQLite.
+    analysisResultsDays: 30
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# llm-gateway — Bedrock prompt building and analysis
+# ---------------------------------------------------------------------------
+llmGateway:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: kubechan/llm-gateway
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  bedrock:
+    # AWS region for Bedrock calls.
+    region: us-east-1
+    # Bedrock model ID. Supported: qwen3-32b, qwen3-235b.
+    modelId: qwen3-32b
+    # Extended thinking token budget. 0 = disabled (/no_think mode).
+    thinkingBudget: 0
+    # Max tokens of evidence to include in a single analysis prompt.
+    evidenceTokenBudget: 120000
+
+  irsa:
+    # EKS IRSA role ARN for Bedrock access. Required for EKS deployments.
+    # Example: arn:aws:iam::123456789012:role/kubechan-llm-gateway
+    roleArn: ""
+
+  credentials:
+    # Kubernetes Secret name containing the Bedrock API key.
+    # Secret must have key: AWS_BEARER_TOKEN_BEDROCK
+    # Create: kubectl create secret generic <name> -n kubechan --from-literal=AWS_BEARER_TOKEN_BEDROCK=<key>
+    secretName: ""
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# frontend-ui — React web interface
+# ---------------------------------------------------------------------------
+frontendUi:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: kubechan/frontend-ui
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  # URL of the backend-api service as seen by nginx inside the cluster.
+  # Must be a FQDN when kubeDnsIP resolver is used (nginx bypasses search domain with set $var proxy_pass).
+  # Defaults to http://<fullname>-backend-api.<namespace>.svc.cluster.local:8080 if not set.
+  backendApiUrl: ""
+
+  # kube-dns ClusterIP. Used by nginx resolver to re-resolve upstreams dynamically.
+  # Default 10.96.0.10 works for kubeadm/Docker Desktop. Override for other distros.
+  kubeDnsIP: "10.96.0.10"
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: kubechan.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ---------------------------------------------------------------------------
+# Persona — tsundere assistant layer
+# ---------------------------------------------------------------------------
+persona:
+  # Enable persona-styled messages in the UI and analysis output.
+  enabled: false
+  # Enable idle chatter when no critical problems are active.
+  idleChatter: false
+  # Seconds between idle chatter messages (client-side timer).
+  idleIntervalSecs: 300
+
+# ---------------------------------------------------------------------------
+# Network Policy (optional hardening)
+# ---------------------------------------------------------------------------
+networkPolicy:
+  # Enable NetworkPolicy resources to restrict inter-service traffic.
+  enabled: false

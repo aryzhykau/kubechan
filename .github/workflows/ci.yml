@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Go: lint ───────────────────────────────────────────────────────────────
+  lint-go:
+    name: Lint Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Verify controller-gen output is up-to-date
+        run: |
+          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.0
+          controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
+          controller-gen crd paths="./api/..." output:crd:artifacts:config=helm/kubechan/crds/
+          git diff --exit-code || \
+            (echo "Generated files are out of date. Run 'make generate' and commit the result." && exit 1)
+
+  # ── Go: build + test ───────────────────────────────────────────────────────
+  build-test-go:
+    name: Build & Test Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: go mod tidy
+        run: go mod tidy && git diff --exit-code
+
+      - name: Build cluster-watcher
+        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./services/cluster-watcher/
+
+      - name: Build diagnostics-worker
+        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./services/diagnostics-worker/
+
+      - name: Build backend-api
+        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./services/backend-api/
+
+      - name: Test Go
+        run: go test -race -count=1 ./...
+
+  # ── Python: lint + test ────────────────────────────────────────────────────
+  lint-test-python:
+    name: Lint & Test Python
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/llm-gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: services/llm-gateway/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyright pytest
+
+      - name: Pyright
+        run: pyright .
+
+      - name: Pytest
+        run: python -m pytest -v
+
+  # ── Frontend: build ────────────────────────────────────────────────────────
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/frontend-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: services/frontend-ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+  # ── Helm: lint ─────────────────────────────────────────────────────────────
+  lint-helm:
+    name: Lint Helm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint helm/kubechan --values helm/kubechan/values-dev.yaml

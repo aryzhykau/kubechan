@@ -1,0 +1,71 @@
+## values-dev.yaml — Docker Desktop Kubernetes overrides
+## Usage: helm install kubechan ./helm/kubechan -f helm/kubechan/values-dev.yaml
+
+backendApi:
+  service:
+    type: NodePort
+    port: 8080
+    nodePort: 30080
+  storage:
+    # Mount a local host directory so DBeaver can open the SQLite file directly.
+    # The path must exist on the Docker Desktop VM (which shares /Users on macOS).
+    hostPath: /Users/andrejryzikov/kubechan/.data
+    pvc:
+      size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+clusterWatcher:
+  debounceWindowSecs: 5
+  pendingTooLongThresholdSecs: 60
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+diagnosticsWorker:
+  logTailLines: 100
+  prevLogTailLines: 50
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+llmGateway:
+  bedrock:
+    region: us-east-1
+    modelId: qwen3-32b
+    thinkingBudget: 0
+  credentials:
+    secretName: kubechan-bedrock-api-key
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+frontendUi:
+  service:
+    type: NodePort
+    port: 8080
+    nodePort: 30081
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi

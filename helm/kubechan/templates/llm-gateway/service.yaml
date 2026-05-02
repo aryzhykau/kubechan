@@ -1,0 +1,20 @@
+{{- if .Values.llmGateway.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubechan.fullname" . }}-llm-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: llm-gateway
+spec:
+  type: ClusterIP  # Internal only — never exposed externally
+  selector:
+    {{- include "kubechan.selectorLabels" . | nindent 4 }}
+    kubechan.io/component: llm-gateway
+  ports:
+    - name: http
+      port: {{ .Values.llmGateway.service.port }}
+      targetPort: http
+      protocol: TCP
+{{- end }}

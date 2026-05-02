@@ -1,0 +1,59 @@
+---
+# PVC backed by a non-existent storage class — will stay Pending forever.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-model-cache
+  namespace: test-incidents
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Gi
+  storageClassName: premium-nvme-ssd   # does not exist in this cluster
+---
+# ml-inference: mounts the unbound PVC — pod stays Pending (unschedulable).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-inference
+  namespace: test-incidents
+  labels:
+    app: ml-inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-inference
+  template:
+    metadata:
+      labels:
+        app: ml-inference
+    spec:
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: ml-model-cache
+      containers:
+        - name: ml-inference
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "[2026-05-02T10:05:00Z] INFO  ml-inference-server v0.9.1 starting"
+              echo "[2026-05-02T10:05:00Z] INFO  mounting model cache at /models"
+              echo "[2026-05-02T10:05:01Z] INFO  loading base model from /models/llama3-8b.gguf"
+              echo "[2026-05-02T10:05:01Z] INFO  ready"
+              sleep 3600
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

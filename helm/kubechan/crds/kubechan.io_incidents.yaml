@@ -1,0 +1,109 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: incidents.kubechan.io
+spec:
+  group: kubechan.io
+  names:
+    kind: Incident
+    listKind: IncidentList
+    plural: incidents
+    singular: incident
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .spec.rootResource.name
+      name: Root
+      type: string
+    - jsonPath: .status.activeProblemCases
+      name: Active
+      type: integer
+    - jsonPath: .status.openedAt
+      name: Opened
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Incident is the Schema for the incidents API.
+          It groups related ProblemCases that share a common workload root.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: IncidentSpec defines the desired state of Incident.
+            properties:
+              rootResource:
+                description: |-
+                  RootResource is the workload root (Deployment, StatefulSet, DaemonSet, etc.)
+                  that all member ProblemCases trace back to via owner references.
+                properties:
+                  kind:
+                    description: Kind is the Kubernetes resource kind (e.g., Pod, Deployment).
+                    type: string
+                  name:
+                    description: Name is the resource name.
+                    type: string
+                  namespace:
+                    description: Namespace of the resource. Empty for cluster-scoped resources.
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              problemCases:
+                description: |-
+                  ProblemCases is the list of ProblemCase names (in the same namespace) grouped
+                  into this incident.
+                items:
+                  type: string
+                type: array
+            required:
+            - rootResource
+            type: object
+          status:
+            description: IncidentStatus defines the observed state of Incident.
+            properties:
+              activeProblemCases:
+                description: ActiveProblemCases is the count of non-resolved ProblemCases in this incident.
+                type: integer
+              openedAt:
+                description: OpenedAt is when this incident was first opened.
+                format: date-time
+                type: string
+              resolvedAt:
+                description: ResolvedAt is when all member ProblemCases were resolved.
+                format: date-time
+                type: string
+              state:
+                default: open
+                description: State is the current lifecycle state of this incident.
+                enum:
+                - open
+                - resolved
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

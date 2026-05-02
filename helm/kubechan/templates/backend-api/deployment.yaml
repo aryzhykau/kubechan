@@ -1,0 +1,79 @@
+{{- if .Values.backendApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubechan.fullname" . }}-backend-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: backend-api
+spec:
+  replicas: 1  # Fixed: SQLite single-writer constraint
+  selector:
+    matchLabels:
+      {{- include "kubechan.selectorLabels" . | nindent 6 }}
+      kubechan.io/component: backend-api
+  template:
+    metadata:
+      labels:
+        {{- include "kubechan.selectorLabels" . | nindent 8 }}
+        kubechan.io/component: backend-api
+    spec:
+      serviceAccountName: {{ include "kubechan.fullname" . }}-backend-api
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend-api
+          image: "{{ .Values.backendApi.image.repository }}:{{ .Values.backendApi.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.backendApi.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: PORT
+              value: {{ .Values.backendApi.service.port | quote }}
+            - name: DB_PATH
+              value: /data/kubechan.db
+            - name: DEFAULT_NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: LLM_GATEWAY_URL
+              value: "http://{{ include "kubechan.fullname" . }}-llm-gateway:{{ .Values.llmGateway.service.port }}"
+            - name: EVIDENCE_RETENTION_DAYS
+              value: {{ .Values.backendApi.retention.evidenceDays | quote }}
+            - name: ANALYSIS_RETENTION_DAYS
+              value: {{ .Values.backendApi.retention.analysisResultsDays | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.backendApi.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.backendApi.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.backendApi.storage.hostPath }}
+          hostPath:
+            path: {{ .Values.backendApi.storage.hostPath }}
+            type: DirectoryOrCreate
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "kubechan.fullname" . }}-backend-api-data
+          {{- end }}
+{{- end }}

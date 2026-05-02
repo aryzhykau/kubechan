@@ -1,0 +1,23 @@
+{{- if .Values.frontendUi.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubechan.fullname" . }}-frontend-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: frontend-ui
+spec:
+  type: {{ .Values.frontendUi.service.type }}
+  selector:
+    {{- include "kubechan.selectorLabels" . | nindent 4 }}
+    kubechan.io/component: frontend-ui
+  ports:
+    - name: http
+      port: {{ .Values.frontendUi.service.port }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (eq .Values.frontendUi.service.type "NodePort") .Values.frontendUi.service.nodePort }}
+      nodePort: {{ .Values.frontendUi.service.nodePort }}
+      {{- end }}
+{{- end }}

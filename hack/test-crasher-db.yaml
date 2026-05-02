@@ -1,0 +1,44 @@
+---
+# Deployment that crashes immediately with realistic logs describing
+# a missing DATABASE_URL env var — useful for testing llm-gateway analysis.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+  namespace: test-incidents
+  labels:
+    app: api-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-server
+  template:
+    metadata:
+      labels:
+        app: api-server
+    spec:
+      containers:
+        - name: api-server
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "[2026-05-02T12:00:00Z] INFO  api-server starting up (version=1.4.2)"
+              echo "[2026-05-02T12:00:00Z] INFO  loading configuration from environment"
+              echo "[2026-05-02T12:00:00Z] ERROR missing required environment variable: DATABASE_URL"
+              echo "[2026-05-02T12:00:00Z] ERROR cannot initialise database connection pool: no connection string provided"
+              echo "[2026-05-02T12:00:00Z] FATAL application startup failed — exiting with code 1"
+              echo ""
+              echo "HINT: Set the DATABASE_URL environment variable on the Deployment."
+              echo "HINT: Example value: postgres://user:password@postgres-service:5432/appdb?sslmode=require"
+              echo "HINT: The Secret 'api-server-db-credentials' should exist in namespace 'test-incidents' and contain key 'DATABASE_URL'."
+              exit 1
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi

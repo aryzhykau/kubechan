@@ -1,0 +1,57 @@
+---
+# web-frontend: starts and keeps running, but liveness probe fails because
+# nothing actually listens on :8080 (Redis is "down", app runs in degraded mode).
+# Produces realistic upstream-dependency-failure logs with HINT lines.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-frontend
+  namespace: test-incidents
+  labels:
+    app: web-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-frontend
+  template:
+    metadata:
+      labels:
+        app: web-frontend
+    spec:
+      containers:
+        - name: web-frontend
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "[2026-05-02T10:00:01Z] INFO  web-frontend v2.3.0 starting"
+              echo "[2026-05-02T10:00:01Z] INFO  loading config from /etc/config/app.yaml"
+              echo "[2026-05-02T10:00:02Z] INFO  connecting to Redis at redis.test-incidents.svc.cluster.local:6379"
+              echo "[2026-05-02T10:00:02Z] ERROR dial tcp 10.96.45.23:6379: connect: connection refused"
+              echo "[2026-05-02T10:00:03Z] ERROR Redis ping failed (attempt 1/3): i/o timeout"
+              echo "[2026-05-02T10:00:04Z] ERROR Redis ping failed (attempt 2/3): i/o timeout"
+              echo "[2026-05-02T10:00:05Z] ERROR Redis ping failed (attempt 3/3): i/o timeout"
+              echo "[2026-05-02T10:00:05Z] WARN  Redis connection pool exhausted — session cache unavailable"
+              echo "[2026-05-02T10:00:05Z] WARN  HINT: Redis service may not be deployed in namespace test-incidents"
+              echo "[2026-05-02T10:00:05Z] WARN  HINT: Run: kubectl get pods -n test-incidents -l app=redis"
+              echo "[2026-05-02T10:00:05Z] WARN  HINT: Verify REDIS_HOST env var matches the Redis service name"
+              echo "[2026-05-02T10:00:06Z] INFO  starting HTTP server on :8080 (DEGRADED — cache disabled)"
+              echo "[2026-05-02T10:00:06Z] WARN  /healthz will return 503 until Redis is healthy"
+              # Nothing actually listens on :8080 — liveness probe will fail with ECONNREFUSED.
+              while true; do sleep 30; done
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi

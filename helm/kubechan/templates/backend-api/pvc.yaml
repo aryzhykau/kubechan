@@ -1,0 +1,19 @@
+{{- if and .Values.backendApi.enabled (not .Values.backendApi.storage.hostPath) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kubechan.fullname" . }}-backend-api-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: backend-api
+spec:
+  accessModes:
+    - {{ .Values.backendApi.storage.pvc.accessMode | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.backendApi.storage.pvc.size }}
+  {{- if .Values.backendApi.storage.pvc.storageClass }}
+  storageClassName: {{ .Values.backendApi.storage.pvc.storageClass | quote }}
+  {{- end }}
+{{- end }}

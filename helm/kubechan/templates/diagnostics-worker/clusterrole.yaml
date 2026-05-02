@@ -1,0 +1,62 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubechan.fullname" . }}-diagnostics-worker
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: diagnostics-worker
+rules:
+  # DiagnosticRun — watch pending, patch state + status
+  - apiGroups: ["kubechan.io"]
+    resources: ["diagnosticruns"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["kubechan.io"]
+    resources: ["diagnosticruns/status"]
+    verbs: ["get", "update", "patch"]
+  # Incident + ProblemCase — read to build evidence context
+  - apiGroups: ["kubechan.io"]
+    resources: ["incidents", "problemcases"]
+    verbs: ["get", "list", "watch"]
+  # Pod list + log subresource
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Events for context
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  # PVCs — existence + status for scheduling diagnosis
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  # ConfigMaps — content for dependency analysis
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Secrets — existence only (keys, not values) for dependency analysis
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  # Workload resources for context
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubechan.fullname" . }}-diagnostics-worker
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: diagnostics-worker
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubechan.fullname" . }}-diagnostics-worker
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubechan.fullname" . }}-diagnostics-worker
+    namespace: {{ .Release.Namespace }}

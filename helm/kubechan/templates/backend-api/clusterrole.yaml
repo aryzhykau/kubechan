@@ -1,0 +1,46 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubechan.fullname" . }}-backend-api
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: backend-api
+rules:
+  # Read cluster workloads for context (used by informer cache)
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  # ProblemCase — read only (cluster-watcher owns writes)
+  - apiGroups: ["kubechan.io"]
+    resources: ["problemcases"]
+    verbs: ["get", "list", "watch"]
+  # Incident — read only (cluster-watcher owns writes)
+  - apiGroups: ["kubechan.io"]
+    resources: ["incidents"]
+    verbs: ["get", "list", "watch"]
+  # DiagnosticRun — backend-api creates them (POST /analyze) and patches status
+  - apiGroups: ["kubechan.io"]
+    resources: ["diagnosticruns"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  - apiGroups: ["kubechan.io"]
+    resources: ["diagnosticruns/status"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubechan.fullname" . }}-backend-api
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: backend-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubechan.fullname" . }}-backend-api
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubechan.fullname" . }}-backend-api
+    namespace: {{ .Release.Namespace }}

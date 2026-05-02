@@ -1,0 +1,15 @@
+apiVersion: v2
+name: kubechan
+description: Kubernetes cluster problem detection, diagnosis, and AI-assisted remediation
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - monitoring
+  - ai
+  - diagnostics
+maintainers:
+  - name: KubeChan Authors
+sources:
+  - https://github.com/org/kubechan

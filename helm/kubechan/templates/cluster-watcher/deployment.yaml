@@ -1,0 +1,63 @@
+{{- if .Values.clusterWatcher.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubechan.fullname" . }}-cluster-watcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: cluster-watcher
+spec:
+  replicas: {{ .Values.clusterWatcher.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kubechan.selectorLabels" . | nindent 6 }}
+      kubechan.io/component: cluster-watcher
+  template:
+    metadata:
+      labels:
+        {{- include "kubechan.selectorLabels" . | nindent 8 }}
+        kubechan.io/component: cluster-watcher
+    spec:
+      serviceAccountName: {{ include "kubechan.fullname" . }}-cluster-watcher
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cluster-watcher
+          image: "{{ .Values.clusterWatcher.image.repository }}:{{ .Values.clusterWatcher.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.clusterWatcher.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: DEBOUNCE_WINDOW_SECS
+              value: {{ .Values.clusterWatcher.debounceWindowSecs | quote }}
+            - name: PENDING_TOO_LONG_THRESHOLD_SECS
+              value: {{ .Values.clusterWatcher.pendingTooLongThresholdSecs | quote }}
+            - name: CONTROL_NAMESPACE
+              value: {{ .Values.clusterWatcher.controlNamespace | default .Release.Namespace | quote }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: healthz
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: healthz
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.clusterWatcher.resources | nindent 12 }}
+{{- end }}

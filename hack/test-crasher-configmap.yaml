@@ -1,0 +1,75 @@
+---
+# ConfigMap has key "config.yaml" — will mount as /etc/app/config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: test-incidents
+data:
+  config.yaml: |
+    server:
+      port: 8080
+      timeout: 30s
+    database:
+      host: postgres.internal
+      port: 5432
+      name: apidb
+    auth:
+      jwt_secret_file: /run/secrets/jwt.key
+      token_expiry: 3600
+  ml: |
+    server:
+      port: 8080
+      timeout: 30s
+    database:
+      host: postgres.internal
+      port: 5432
+      name: apidb
+    auth:
+      jwt_secret_file: /run/secrets/jwt.key
+      token_expiry: 3600
+---
+# Deployment mounts the ConfigMap correctly but reads the WRONG filename.
+# ConfigMap key "config.yaml" → mounts at /etc/app/config.yaml
+# App reads                    →           /etc/app/app-config.yaml  ← doesn't exist
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: test-incidents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: busybox:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "api-gateway starting up..."
+              echo "Loading configuration..."
+              echo "Reading config from /etc/app/app-config.yaml"
+              if ! cat /etc/app/app-config.yaml > /dev/null 2>&1; then
+                echo "FATAL: configuration file not found: /etc/app/app-config.yaml"
+                echo "ERROR: open /etc/app/app-config.yaml: no such file or directory"
+                exit 1
+              fi
+              echo "Config loaded successfully"
+              while true; do sleep 60; done
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/app
+      volumes:
+        - name: config-volume
+          configMap:
+            name: api-gateway-config
+            # note: no 'items' override — mounts all keys as-is
+            # so the file appears as /etc/app/config.yaml
+            # but the app above reads /etc/app/app-config.yaml

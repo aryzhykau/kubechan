@@ -1,0 +1,57 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubechan.fullname" . }}-cluster-watcher
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: cluster-watcher
+rules:
+  # Core resources watched by reconcilers
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes", "events"]
+    verbs: ["get", "list", "watch"]
+  # EndpointSlices watched by ServiceReconciler
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  # Apps resources watched by DeploymentReconciler
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  # ProblemCase CRD — full lifecycle management
+  - apiGroups: ["kubechan.io"]
+    resources: ["problemcases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["kubechan.io"]
+    resources: ["problemcases/status"]
+    verbs: ["get", "update", "patch"]
+  # Incident CRD — created and managed by CorrelationReconciler
+  - apiGroups: ["kubechan.io"]
+    resources: ["incidents"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["kubechan.io"]
+    resources: ["incidents/status"]
+    verbs: ["get", "update", "patch"]
+  # Additional owner-reference walks for correlation
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "daemonsets"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubechan.fullname" . }}-cluster-watcher
+  labels:
+    {{- include "kubechan.labels" . | nindent 4 }}
+    kubechan.io/component: cluster-watcher
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubechan.fullname" . }}-cluster-watcher
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubechan.fullname" . }}-cluster-watcher
+    namespace: {{ .Release.Namespace }}
