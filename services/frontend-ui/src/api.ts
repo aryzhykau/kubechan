@@ -25,6 +25,69 @@ export interface DiagnosticRun {
   status: { state: string; evidenceRef?: string; collectionErrors?: string[] }
 }
 
+export interface DiagnosticRunSummary {
+  diagnosticRunId: string
+  incidentId: string
+  requestedAt: string
+  status: string
+  analysisResultId?: string
+  likelyRootCause?: string
+  confidence?: number
+  model?: string
+  analysisCreatedAt?: string
+}
+
+export interface K8sEvent {
+  type: string
+  reason: string
+  message: string
+  count: number
+  lastTime: string
+}
+
+export interface PodLog {
+  podName: string
+  phase: string
+  logs: string
+  prevLogs?: string
+  events: K8sEvent[]
+  dependencies?: {
+    configMaps: Array<{
+      name: string
+      missing?: boolean
+      keys?: string[]
+      mountPaths?: string[]
+      data?: Record<string, string>
+    }>
+    secrets: Array<{ name: string; missing?: boolean }>
+  }
+}
+
+export interface PVCInfo {
+  name: string
+  phase: string
+  storageClass?: string
+  requestedStorage?: string
+  events: K8sEvent[]
+}
+
+export interface EvidencePayload {
+  rootResource?: { kind: string; name: string; namespace?: string }
+  rootResourceEvents?: K8sEvent[]
+  workloadPodLogs?: PodLog[]
+  pvcInfos?: PVCInfo[]
+}
+
+export interface Evidence {
+  id: string
+  diagnosticRunId: string
+  incidentId: string
+  collectedAt: string
+  collectorVersion: string
+  payload: EvidencePayload
+  createdAt: string
+}
+
 export interface AnalyzeResponse {
   diagnosticRunId: string
   analysisRequestId: string
@@ -38,6 +101,7 @@ export interface AnalysisResult {
   status: string
   likelyRootCause: string
   confidence: number
+  userRating?: 'up' | 'down' | ''
   payload: {
     openingRant?: string
     likelyRootCause?: string
@@ -79,6 +143,38 @@ export const api = {
   getDiagnosticRun: (id: string) =>
     apiFetch<DiagnosticRun>(`/api/v1/diagnosticruns/${id}`),
 
+  listDiagnosticRuns: (incidentId?: string) =>
+    apiFetch<DiagnosticRunSummary[]>(
+      incidentId ? `/api/v1/diagnosticruns?incidentId=${encodeURIComponent(incidentId)}` : '/api/v1/diagnosticruns'
+    ),
+
+  getDiagnosticRunEvidence: (runId: string) =>
+    apiFetch<Evidence>(`/api/v1/diagnosticruns/${encodeURIComponent(runId)}/evidence`),
+
+  getDiagnosticRunAnalysisResult: (runId: string) =>
+    apiFetch<AnalysisResult>(`/api/v1/diagnosticruns/${encodeURIComponent(runId)}/analysisresult`),
+
+  deleteDiagnosticRun: (runId: string) =>
+    apiFetch<void>(`/api/v1/diagnosticruns/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
+
+  bulkDeleteDiagnosticRuns: (ids: string[]) =>
+    apiFetch<{ deleted: number }>('/api/v1/diagnosticruns', {
+      method: 'DELETE',
+      body: JSON.stringify({ ids }),
+    }),
+
   getAnalysisResult: (id: string) =>
     apiFetch<AnalysisResult>(`/api/v1/analysisresults/${id}`),
+
+  rateAnalysisResult: (id: string, rating: 'up' | 'down') =>
+    apiFetch<{ id: string; userRating: string }>(`/api/v1/analysisresults/${id}/rate`, {
+      method: 'POST',
+      body: JSON.stringify({ rating }),
+    }),
+
+  getKubeChanState: () =>
+    apiFetch<{ moodLevel: number; pokeCount: number }>('/api/v1/kubechan/state'),
+
+  poke: () =>
+    apiFetch<{ moodLevel: number; pokeCount: number }>('/api/v1/kubechan/poke', { method: 'POST' }),
 }

@@ -43,6 +43,11 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	// Skip resources in the control namespace — KubeChan doesn't monitor herself.
+	if req.Namespace == r.ControlNamespace {
+		return ctrl.Result{}, nil
+	}
+
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {

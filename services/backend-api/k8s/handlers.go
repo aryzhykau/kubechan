@@ -4,6 +4,7 @@
 package k8s
 
 import (
+	"context"
 	"log/slog"
 
 	"k8s.io/client-go/tools/cache"
@@ -75,12 +76,13 @@ func (h *problemCaseHandler) OnDelete(obj any) {
 // --- Incident handler ---
 
 type incidentHandler struct {
-	hub    *kubews.Hub
-	logger *slog.Logger
+	hub        *kubews.Hub
+	moodSyncer *MoodSyncer
+	logger     *slog.Logger
 }
 
-func newIncidentHandler(hub *kubews.Hub, logger *slog.Logger) cache.ResourceEventHandler {
-	return &incidentHandler{hub: hub, logger: logger}
+func newIncidentHandler(hub *kubews.Hub, moodSyncer *MoodSyncer, logger *slog.Logger) cache.ResourceEventHandler {
+	return &incidentHandler{hub: hub, moodSyncer: moodSyncer, logger: logger}
 }
 
 func (h *incidentHandler) OnAdd(obj any, _ bool) {
@@ -97,6 +99,9 @@ func (h *incidentHandler) OnAdd(obj any, _ bool) {
 		RootResourceName:   inc.Spec.RootResource.Name,
 		ActiveProblemCases: inc.Status.ActiveProblemCases,
 	}))
+	if h.moodSyncer != nil {
+		go h.moodSyncer.SyncFromIncidents(context.Background())
+	}
 }
 
 func (h *incidentHandler) OnUpdate(_, newObj any) {
@@ -117,6 +122,9 @@ func (h *incidentHandler) OnUpdate(_, newObj any) {
 		RootResourceName:   inc.Spec.RootResource.Name,
 		ActiveProblemCases: inc.Status.ActiveProblemCases,
 	}))
+	if h.moodSyncer != nil {
+		go h.moodSyncer.SyncFromIncidents(context.Background())
+	}
 }
 
 func (h *incidentHandler) OnDelete(obj any) {
@@ -130,6 +138,9 @@ func (h *incidentHandler) OnDelete(obj any) {
 		Name:      inc.Name,
 		State:     "resolved",
 	}))
+	if h.moodSyncer != nil {
+		go h.moodSyncer.SyncFromIncidents(context.Background())
+	}
 }
 
 // --- DiagnosticRun handler ---

@@ -22,6 +22,9 @@ clusterWatcher:
   # Seconds a Pod must remain Pending before triggering PendingTooLong detector.
   pendingTooLongThresholdSecs: 300
 
+  # Seconds a Deployment must have unavailable replicas before triggering DeploymentUnavailable detector.
+  unavailableThresholdSecs: 300
+
   resources:
     requests:
       cpu: 100m

@@ -63,6 +63,11 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	// Skip resources in the control namespace — KubeChan doesn't monitor herself.
+	if req.Namespace == r.ControlNamespace {
+		return ctrl.Result{}, nil
+	}
+
 	svc := &corev1.Service{}
 	if err := r.Get(ctx, req.NamespacedName, svc); err != nil {
 		if errors.IsNotFound(err) {

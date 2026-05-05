@@ -81,7 +81,21 @@ func main() {
 	// ── WebSocket hub ─────────────────────────────────────────────────────────
 	hub := ws.NewHub(logger)
 
-	watcher := &k8sclient.Watcher{Cache: informerCache, Hub: hub, Logger: logger}
+	defaultNS := envOr("DEFAULT_NAMESPACE", "kubechan")
+
+	// ── Mood syncer — singleton KubeChanState CRD ─────────────────────────────
+	moodSyncer := &k8sclient.MoodSyncer{
+		Client:    k8s,
+		Hub:       hub,
+		Namespace: defaultNS,
+		Logger:    logger,
+	}
+	if err := moodSyncer.EnsureState(ctx); err != nil {
+		logger.Error("ensuring KubeChanState singleton", "error", err)
+		// non-fatal — mood will degrade gracefully to 0
+	}
+
+	watcher := &k8sclient.Watcher{Cache: informerCache, Hub: hub, MoodSyncer: moodSyncer, Logger: logger}
 	go func() {
 		if err := watcher.Start(ctx); err != nil {
 			logger.Error("watcher error", "error", err)
@@ -89,19 +103,20 @@ func main() {
 	}()
 
 	// ── Handlers ──────────────────────────────────────────────────────────────
-	defaultNS := envOr("DEFAULT_NAMESPACE", "kubechan")
 
 	incidents := &handler.Incidents{K8s: k8s, DefaultNamespace: defaultNS}
 	problemcases := &handler.ProblemCases{K8s: k8s, DefaultNamespace: defaultNS}
-	diagnosticruns := &handler.DiagnosticRuns{K8s: k8s, DefaultNamespace: defaultNS}
+	diagnosticruns := &handler.DiagnosticRuns{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	analysis := &handler.Analysis{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	settings := &handler.Settings{DB: database}
+	kubechan := &handler.KubeChan{MoodSyncer: moodSyncer}
 	internal := &handler.Internal{
 		K8s:              k8s,
 		DB:               database,
 		DefaultNamespace: defaultNS,
 		LLMGatewayURL:    envOr("LLM_GATEWAY_URL", ""),
 		Hub:              hub,
+		MoodSyncer:       moodSyncer,
 		Logger:           logger,
 	}
 
@@ -125,12 +140,21 @@ func main() {
 		r.Get("/problemcases", problemcases.List)
 		r.Get("/problemcases/{id}", problemcases.Get)
 
+		r.Get("/diagnosticruns", diagnosticruns.List)
+		r.Delete("/diagnosticruns", diagnosticruns.BulkDelete)
 		r.Get("/diagnosticruns/{id}", diagnosticruns.Get)
+		r.Delete("/diagnosticruns/{id}", diagnosticruns.Delete)
+		r.Get("/diagnosticruns/{id}/evidence", diagnosticruns.GetEvidence)
+		r.Get("/diagnosticruns/{id}/analysisresult", diagnosticruns.GetAnalysisResult)
 		r.Get("/analysisresults/{id}", analysis.GetAnalysisResult)
+		r.Post("/analysisresults/{id}/rate", analysis.RateAnalysisResult)
 
 		r.Get("/settings", settings.Get)
 		r.Put("/settings", settings.Update)
 		r.Get("/persona/idle-message", settings.IdleMessage)
+
+		r.Get("/kubechan/state", kubechan.GetState)
+		r.Post("/kubechan/poke", kubechan.Poke)
 	})
 
 	r.Route("/internal", func(r chi.Router) {

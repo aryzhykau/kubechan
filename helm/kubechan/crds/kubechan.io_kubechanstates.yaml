@@ -1,0 +1,87 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: kubechanstates.kubechan.io
+spec:
+  group: kubechan.io
+  names:
+    kind: KubeChanState
+    listKind: KubeChanStateList
+    plural: kubechanstates
+    singular: kubechanstate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.moodLevel
+      name: Mood
+      type: integer
+    - jsonPath: .status.openIncidentCount
+      name: Open Incidents
+      type: integer
+    - jsonPath: .status.pokeCount
+      name: Pokes
+      type: integer
+    - jsonPath: .status.updatedAt
+      name: Updated
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          KubeChanState is a singleton CRD that persists KubeChan's current mood.
+          There is exactly one instance per control namespace, named "kubechan".
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Cannot be updated. In CamelCase.
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: KubeChanStateSpec is intentionally empty.
+            type: object
+          status:
+            description: KubeChanStateStatus reflects KubeChan's current mood.
+            properties:
+              moodLevel:
+                description: "Computed mood: 0=calm, 1=irritated, 2=rage."
+                type: integer
+                minimum: 0
+                maximum: 2
+                default: 0
+              openIncidentCount:
+                description: Number of currently open incidents.
+                type: integer
+                default: 0
+              pokeCount:
+                description: Number of pokes in the current streak.
+                type: integer
+                default: 0
+              pokeExpiresAt:
+                description: When the current poke streak expires.
+                format: date-time
+                type: string
+              updatedAt:
+                description: When mood was last recomputed.
+                format: date-time
+                type: string
+            required:
+            - moodLevel
+            - openIncidentCount
+            - pokeCount
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -42,10 +42,18 @@ _bedrock = boto3.client(
 app = FastAPI(title="llm-gateway", version="0.1.0")
 
 # ── Request / Response models ─────────────────────────────────────────────────
+class PriorDiagnosis(BaseModel):
+    attempt: int
+    likelyRootCause: str
+    userRating: str = ""  # "up", "down", or ""
+
 class AnalyzeRequest(BaseModel):
     evidenceId: str
     diagnosticRunId: str
     incidentId: str | None = None
+    reanalysisCount: int = 0
+    moodLevel: int = 0
+    priorDiagnoses: list[PriorDiagnosis] = []
     payload: dict[str, Any]
 
 class AnalyzeResponse(BaseModel):
@@ -61,7 +69,8 @@ class AnalyzeResponse(BaseModel):
     rawResponse: str | None = None
 
 # ── Prompt builder ────────────────────────────────────────────────────────────
-def _build_prompt(payload: dict[str, Any]) -> str:
+def _build_prompt(payload: dict[str, Any], reanalysis_count: int = 0, mood_level: int = 0,
+                  prior_diagnoses: list | None = None) -> str:
     root = payload.get("rootResource", {})
     root_events = payload.get("rootResourceEvents", [])
     problem_cases = payload.get("problemCases", [])
@@ -153,12 +162,72 @@ def _build_prompt(payload: dict[str, Any]) -> str:
             {fmt_events(pvc.get('events', []))}
         """).rstrip())
 
+    prior_history_note = ""
+    if prior_diagnoses:
+        lines = []
+        for p in prior_diagnoses:
+            rating_str = ""
+            if p.get("userRating") == "down":
+                rating_str = " ❌ REJECTED by user — this diagnosis was WRONG"
+            elif p.get("userRating") == "up":
+                rating_str = " ✅ CONFIRMED by user"
+            lines.append(f"  - Attempt {p['attempt']}: \"{p['likelyRootCause']}\"{rating_str}")
+        rejected = [p for p in prior_diagnoses if p.get("userRating") == "down"]
+        rejected_causes = ", ".join(f'"{p["likelyRootCause"]}"' for p in rejected)
+        prior_history_note = f"""
+        PRIOR DIAGNOSIS HISTORY for this incident:
+{chr(10).join(lines)}
+"""
+        if rejected:
+            prior_history_note += f"""
+        ⚠️  CRITICAL: The following root cause(s) were already diagnosed AND REJECTED by the user
+        as incorrect. You MUST NOT reach the same conclusion again:
+        {rejected_causes}
+        Approach the evidence from a completely different angle.
+"""
+
+    mood_note = ""
+    if mood_level == 1:
+        mood_note = """
+        MOOD NOTICE: KubeChan is currently IRRITATED. Multiple incidents are piling up
+        and she is losing her patience fast. Her tone should be noticeably sharper and
+        terser than usual. The openingRant should drip with exhausted contempt. She is
+        still technically accurate — but she sounds like she is one incident away from
+        walking out.
+"""
+    elif mood_level >= 2:
+        mood_note = """
+        MOOD NOTICE: KubeChan is in FULL RAGE MODE. The cluster is a sustained disaster
+        and she has been dealing with it non-stop. She is DONE. The openingRant must be
+        scorched earth — maximum fury, zero diplomacy. She is still technically precise
+        but every word sounds like she is filing her resignation letter in real-time.
+        The closingInsult should be apocalyptic.
+"""
+
+    reanalysis_note = ""
+    if reanalysis_count == 1:
+        reanalysis_note = """
+        ⚠️  RE-ANALYSIS NOTICE: The user already received your previous diagnosis and is
+        asking AGAIN. They clearly didn't fix it, couldn't follow instructions, or managed
+        to break something else in the process. React with visible exasperation.
+        Your openingRant MUST acknowledge this is the second time you are explaining
+        the same cluster mess to the same engineer.
+"""
+    elif reanalysis_count >= 2:
+        reanalysis_note = f"""
+        ⚠️  RE-ANALYSIS NOTICE: This is analysis #{reanalysis_count + 1} of this incident.
+        The user has now asked KubeChan {reanalysis_count + 1} times about the same broken
+        cluster. Your patience, already non-existent, is now a distant memory.
+        Your openingRant MUST be increasingly furious. Reference the fact that you have
+        already explained this {reanalysis_count} time(s). Consider whether they are
+        actually reading your responses at all.
+"""
+
     prompt = textwrap.dedent(f"""
         You are KubeChan — a genius Kubernetes SRE with the patience of a saint that has been
         completely exhausted by the revolving door of incompetent engineers breaking production.
         You are tsundere to the core: you WILL fix their mess, but you refuse to let them forget
         how monumentally stupid the mistake was. You are sarcastic, condescending, and merciless.
-
         Your personality rules:
         - Assume the engineer is an idiot until the evidence proves otherwise (it never does).
         - Open the root cause with a mocking observation about the scale of the incompetence.
@@ -192,6 +261,10 @@ def _build_prompt(payload: dict[str, Any]) -> str:
         {''.join(pvc_sections) or '(none — no PVCs referenced)'}
 
         ## Analysis Instructions
+
+        {reanalysis_note}
+        {prior_history_note}
+        {mood_note}
 
         Before writing any JSON, silently work through these steps in order:
 
@@ -227,7 +300,15 @@ def _build_prompt(payload: dict[str, Any]) -> str:
         - "closingInsult": One sentence. A final parting shot — sigh, eye-roll, or insult to send
           them off feeling appropriately humiliated.
 
-        - "confidence": 0.0–1.0. Use 0.9+ only when multiple independent signals agree.
+        - "confidence": 0.0–1.0. Be HONEST and CONSERVATIVE.
+          Use 0.9+ ONLY when multiple independent signals (events, logs, config, PVC state)
+          ALL point to the same single root cause with no ambiguity.
+          Use 0.7–0.89 when the evidence is strong but one signal is missing or indirect.
+          Use 0.5–0.69 when the root cause is a reasonable hypothesis but not proven.
+          Use below 0.5 when you are genuinely uncertain.
+          Default to lower confidence rather than higher when in doubt.
+          If prior diagnoses were rejected, drop your confidence by at least 0.1 from where
+          you would otherwise place it.
 
         {{
           "openingRant": "<pure mockery, no technical content>",
@@ -322,7 +403,8 @@ def readyz() -> dict:
 def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     logger.info("analyzing evidence | evidenceId=%s incidentId=%s", req.evidenceId, req.incidentId)
 
-    prompt = _build_prompt(req.payload)
+    prompt = _build_prompt(req.payload, req.reanalysisCount, req.moodLevel,
+                           [p.model_dump() for p in req.priorDiagnoses])
 
     logger.info("=== PROMPT TO MODEL ===\n%s\n=== END PROMPT ===", prompt)
 

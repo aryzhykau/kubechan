@@ -64,6 +64,11 @@ func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *DeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	// Skip resources in the control namespace — KubeChan doesn't monitor herself.
+	if req.Namespace == r.ControlNamespace {
+		return ctrl.Result{}, nil
+	}
+
 	deploy := &appsv1.Deployment{}
 	if err := r.Get(ctx, req.NamespacedName, deploy); err != nil {
 		if errors.IsNotFound(err) {

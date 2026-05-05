@@ -5,6 +5,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/org/kubechan/api/v1alpha1"
+	k8s "github.com/org/kubechan/services/backend-api/k8s"
 )
 
 // evidenceRequest is the body accepted by POST /internal/evidence.
@@ -48,6 +50,7 @@ type Internal struct {
 	DefaultNamespace string
 	LLMGatewayURL    string
 	Hub              interface{ Broadcast(msg []byte) }
+	MoodSyncer       *k8s.MoodSyncer
 	Logger           *slog.Logger
 }
 
@@ -150,10 +153,20 @@ func nullBytes(b []byte) any {
 
 // llmAnalyzeRequest is the body sent to llm-gateway POST /analyze.
 type llmAnalyzeRequest struct {
-	EvidenceID      string         `json:"evidenceId"`
-	DiagnosticRunID string         `json:"diagnosticRunId"`
-	IncidentID      string         `json:"incidentId,omitempty"`
-	Payload         map[string]any `json:"payload"`
+	EvidenceID      string              `json:"evidenceId"`
+	DiagnosticRunID string              `json:"diagnosticRunId"`
+	IncidentID      string              `json:"incidentId,omitempty"`
+	ReanalysisCount int                 `json:"reanalysisCount"`
+	MoodLevel       int                 `json:"moodLevel"`
+	PriorDiagnoses  []priorDiagnosis    `json:"priorDiagnoses,omitempty"`
+	Payload         map[string]any      `json:"payload"`
+}
+
+// priorDiagnosis is a previous analysis attempt for the same incident, with its user rating.
+type priorDiagnosis struct {
+	Attempt         int    `json:"attempt"`
+	LikelyRootCause string `json:"likelyRootCause"`
+	UserRating      string `json:"userRating"` // "up", "down", or ""
 }
 
 // llmAnalyzeResponse is the response from llm-gateway POST /analyze.
@@ -182,10 +195,51 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		return
 	}
 
+	// Count how many prior completed analyses exist for this incident.
+	var priorCount int
+	var priorDiagnoses []priorDiagnosis
+	if req.IncidentID != "" {
+		_ = h.DB.QueryRow(
+			`SELECT COUNT(*) FROM analysis_results WHERE incident_id = ?`,
+			req.IncidentID,
+		).Scan(&priorCount)
+
+		rows, err := h.DB.Query(
+			`SELECT likely_root_cause, COALESCE(user_rating, '') FROM analysis_results
+			 WHERE incident_id = ? AND status = 'completed'
+			 ORDER BY created_at ASC`,
+			req.IncidentID,
+		)
+		if err == nil {
+			defer rows.Close()
+			attempt := 1
+			for rows.Next() {
+				var rootCause, rating string
+				if err := rows.Scan(&rootCause, &rating); err == nil {
+					priorDiagnoses = append(priorDiagnoses, priorDiagnosis{
+						Attempt:         attempt,
+						LikelyRootCause: rootCause,
+						UserRating:      rating,
+					})
+					attempt++
+				}
+			}
+		}
+	}
+
+	// Read current mood from the KubeChanState singleton (fast cache read).
+	moodLevel := 0
+	if h.MoodSyncer != nil {
+		moodLevel = h.MoodSyncer.GetMoodLevel(context.Background())
+	}
+
 	body, err := json.Marshal(llmAnalyzeRequest{
 		EvidenceID:      evidenceID,
 		DiagnosticRunID: req.DiagnosticRunID,
 		IncidentID:      req.IncidentID,
+		ReanalysisCount: priorCount,
+		MoodLevel:       moodLevel,
+		PriorDiagnoses:  priorDiagnoses,
 		Payload:         payloadMap,
 	})
 	if err != nil {

@@ -67,23 +67,4 @@ func (h *ProblemCases) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, pc)
 }
 
-// DiagnosticRuns holds dependencies for DiagnosticRun handlers.
-type DiagnosticRuns struct {
-	K8s              client.Client
-	DefaultNamespace string
-}
 
-// Get handles GET /api/v1/diagnosticruns/{id}
-func (h *DiagnosticRuns) Get(w http.ResponseWriter, r *http.Request) {
-	ns, name := namespacedName(chi.URLParam(r, "id"), h.DefaultNamespace)
-	dr := &v1alpha1.DiagnosticRun{}
-	if err := h.K8s.Get(r.Context(), client.ObjectKey{Namespace: ns, Name: name}, dr); err != nil {
-		if apierrors.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "diagnosticrun not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, dr)
-}

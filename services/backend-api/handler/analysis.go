@@ -89,16 +89,16 @@ func (h *Analysis) GetAnalysisResult(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	row := h.DB.QueryRowContext(r.Context(),
 		`SELECT id, incident_id, diagnostic_run_id, model, status, likely_root_cause,
-		        confidence, payload, created_at
+		        confidence, payload, created_at, COALESCE(user_rating, '') as user_rating
 		 FROM analysis_results WHERE id = ?`, id)
 
 	var (
-		resultID, diagnosticRunID, model, status, payload, createdAt string
-		incidentID, likelyRootCause                                   sql.NullString
-		confidence                                                     sql.NullFloat64
+		resultID, diagnosticRunID, model, status, payload, createdAt, userRating string
+		incidentID, likelyRootCause                                               sql.NullString
+		confidence                                                                 sql.NullFloat64
 	)
 	if err := row.Scan(&resultID, &incidentID, &diagnosticRunID, &model, &status,
-		&likelyRootCause, &confidence, &payload, &createdAt); err != nil {
+		&likelyRootCause, &confidence, &payload, &createdAt, &userRating); err != nil {
 		if err == sql.ErrNoRows {
 			writeError(w, http.StatusNotFound, "analysis result not found")
 			return
@@ -119,6 +119,7 @@ func (h *Analysis) GetAnalysisResult(w http.ResponseWriter, r *http.Request) {
 		"likelyRootCause": likelyRootCause.String,
 		"confidence":      confidence.Float64,
 		"payload":         payloadObj,
+		"userRating":      userRating,
 		"createdAt":       createdAt,
 	})
 }
@@ -150,5 +151,56 @@ func (h *Analysis) GetEvidence(w http.ResponseWriter, r *http.Request) {
 		"collectorVersion": collectorVersion,
 		"payload":          payloadObj,
 		"createdAt":        createdAt,
+	})
+}
+
+// RateAnalysisResult handles POST /api/v1/analysisresults/{id}/rate
+// Body: {"rating": "up"|"down"}
+func (h *Analysis) RateAnalysisResult(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var body struct {
+		Rating string `json:"rating"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if body.Rating != "up" && body.Rating != "down" {
+		writeError(w, http.StatusBadRequest, "rating must be 'up' or 'down'")
+		return
+	}
+
+	res, err := h.DB.ExecContext(r.Context(),
+		`UPDATE analysis_results SET user_rating = ? WHERE id = ?`,
+		body.Rating, id,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		writeError(w, http.StatusNotFound, "analysis result not found")
+		return
+	}
+
+	// Return updated record with rating included.
+	row := h.DB.QueryRowContext(r.Context(),
+		`SELECT id, incident_id, likely_root_cause, confidence, user_rating
+		 FROM analysis_results WHERE id = ?`, id)
+	var (
+		resultID, userRating       string
+		incidentID, likelyRootCause sql.NullString
+		confidence                  sql.NullFloat64
+	)
+	_ = row.Scan(&resultID, &incidentID, &likelyRootCause, &confidence, &userRating)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":              resultID,
+		"incidentId":      incidentID.String,
+		"likelyRootCause": likelyRootCause.String,
+		"confidence":      confidence.Float64,
+		"userRating":      userRating,
 	})
 }

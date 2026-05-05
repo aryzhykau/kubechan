@@ -35,8 +35,10 @@ spec:
           env:
             - name: DEBOUNCE_WINDOW_SECS
               value: {{ .Values.clusterWatcher.debounceWindowSecs | quote }}
-            - name: PENDING_TOO_LONG_THRESHOLD_SECS
+            - name: PENDING_THRESHOLD_SECS
               value: {{ .Values.clusterWatcher.pendingTooLongThresholdSecs | quote }}
+            - name: UNAVAILABLE_THRESHOLD_SECS
+              value: {{ .Values.clusterWatcher.unavailableThresholdSecs | quote }}
             - name: CONTROL_NAMESPACE
               value: {{ .Values.clusterWatcher.controlNamespace | default .Release.Namespace | quote }}
           ports:

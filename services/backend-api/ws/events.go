@@ -16,6 +16,7 @@ const (
 	EventDiagnosticRunStateChanged = "DiagnosticRun.StateChanged"
 	EventAnalysisResultCompleted   = "AnalysisResult.Completed"
 	EventAnalysisResultFailed      = "AnalysisResult.Failed"
+	EventKubeChanStateUpdated      = "KubeChanState.Updated"
 )
 
 // BaseEvent is embedded in every WS event.
@@ -66,4 +67,12 @@ type AnalysisResultEvent struct {
 func Marshal(event any) []byte {
 	b, _ := json.Marshal(event)
 	return b
+}
+
+// KubeChanStateEvent is broadcast when KubeChan's mood changes.
+type KubeChanStateEvent struct {
+	BaseEvent
+	MoodLevel         int `json:"moodLevel"`
+	OpenIncidentCount int `json:"openIncidentCount"`
+	PokeCount         int `json:"pokeCount"`
 }

@@ -16,9 +16,10 @@ import (
 // Watcher starts informers for ProblemCase, Incident, and DiagnosticRun and
 // broadcasts change events through the WebSocket hub.
 type Watcher struct {
-	Cache  cache.Cache
-	Hub    *kubews.Hub
-	Logger *slog.Logger
+	Cache      cache.Cache
+	Hub        *kubews.Hub
+	MoodSyncer *MoodSyncer
+	Logger     *slog.Logger
 }
 
 // Start registers informers and blocks until ctx is cancelled.
@@ -50,7 +51,7 @@ func (w *Watcher) watchIncidents(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	inf.AddEventHandler(newIncidentHandler(w.Hub, w.Logger))
+	inf.AddEventHandler(newIncidentHandler(w.Hub, w.MoodSyncer, w.Logger))
 	return nil
 }
 

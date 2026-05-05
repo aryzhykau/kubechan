@@ -36,6 +36,7 @@ func main() {
 
 	debounceWindow := envDuration("DEBOUNCE_WINDOW_SECS", 30) * time.Second
 	pendingThreshold := envDuration("PENDING_THRESHOLD_SECS", 300) * time.Second
+	unavailableThreshold := envDuration("UNAVAILABLE_THRESHOLD_SECS", 300) * time.Second
 
 	controlNamespace := os.Getenv("CONTROL_NAMESPACE")
 	if controlNamespace == "" {
@@ -70,7 +71,7 @@ func main() {
 		&detector.PendingTooLongDetector{Threshold: pendingThreshold},
 	}
 	deployDetectors := []detector.Detector{
-		&detector.DeploymentUnavailableDetector{},
+		&detector.DeploymentUnavailableDetector{Threshold: unavailableThreshold},
 	}
 	svcDetectors := []detector.Detector{
 		&detector.ServiceNoEndpointsDetector{},

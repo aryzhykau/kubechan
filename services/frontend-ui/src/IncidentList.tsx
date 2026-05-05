@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { api, type Incident, type AnalysisResult } from './api'
+import { api, type Incident, type AnalysisResult, type DiagnosticRunSummary } from './api'
 import { useWebSocket, type WSEvent } from './useWebSocket'
+import { type ChatterEvent } from './chatter'
 
 function incidentLabel(incident: Incident): { title: string; sub: string } {
   const { rootResource } = incident.spec
@@ -28,22 +29,30 @@ interface AnalysisState {
   error?: string
 }
 
-function IncidentRow({ incident, onAnalyzed, onAnalysisStart, hasResult }: {
+function ConfidenceBadge({ confidence }: { confidence?: number }) {
+  if (confidence == null) return null
+  const pct = Math.round(confidence * 100)
+  const cls = pct >= 80 ? 'confidence-high' : pct >= 50 ? 'confidence-medium' : 'confidence-low'
+  return <span className={`confidence-badge ${cls}`}>{pct}%</span>
+}
+
+function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun }: {
   incident: Incident
   onAnalyzed: (name: string, runId: string) => void
   onAnalysisStart: (incidentName: string) => void
-  hasResult?: boolean
+  previousRun?: DiagnosticRunSummary
 }) {
   const [analysis, setAnalysis] = useState<AnalysisState>({ status: 'idle' })
   const id = incident.metadata.name
   const isResolved = incident.status.state === 'resolved'
   const { title, sub } = incidentLabel(incident)
 
+  // If a fresh result arrives via WS, flip to done.
   useEffect(() => {
-    if (hasResult && analysis.status !== 'idle') {
+    if (previousRun?.analysisResultId && analysis.status === 'collecting') {
       setAnalysis({ status: 'done' })
     }
-  }, [hasResult])
+  }, [previousRun?.analysisResultId])
 
   async function handleAnalyze() {
     setAnalysis({ status: 'pending' })
@@ -56,6 +65,9 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, hasResult }: {
       setAnalysis({ status: 'error', error: String(e) })
     }
   }
+
+  const isInFlight = analysis.status === 'pending' || analysis.status === 'collecting'
+  const alreadyAnalyzed = !!previousRun?.analysisResultId
 
   return (
     <div className={`incident-row ${isResolved ? 'resolved' : 'open'}`}>
@@ -81,19 +93,26 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, hasResult }: {
       )}
 
       <div className="incident-actions">
-        {!isResolved && analysis.status === 'idle' && !hasResult && (
-          <button className="btn-analyze" onClick={handleAnalyze}>
-            Ask KubeChan to help
-          </button>
-        )}
-        {(analysis.status === 'pending' || analysis.status === 'collecting') && !hasResult && (
+        {isInFlight && (
           <span className="status-text pending"><span className="spinner" /> KubeChan is on it…</span>
         )}
         {analysis.status === 'error' && (
           <span className="status-text error">✗ {analysis.error}</span>
         )}
-        {hasResult && (
-          <span className="status-text analyzed">✓ KubeChan analyzed</span>
+        {!isInFlight && analysis.status !== 'error' && (
+          <div className="incident-actions-row">
+            {alreadyAnalyzed && (
+              <span className="status-text analyzed">
+                ✓ analyzed
+                <ConfidenceBadge confidence={previousRun!.confidence} />
+              </span>
+            )}
+            {!isResolved && (
+              <button className="btn-analyze" onClick={handleAnalyze}>
+                {alreadyAnalyzed ? 'Ask KubeChan again' : 'Ask KubeChan to help'}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -103,21 +122,40 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, hasResult }: {
 export interface IncidentListProps {
   onAnalysisStart: (incidentName: string) => void
   onAnalysisComplete: (result: AnalysisResult, incidentName: string) => void
+  onAction?: (event: ChatterEvent) => void
 }
 
-export function IncidentList({ onAnalysisStart, onAnalysisComplete }: IncidentListProps) {
+export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction }: IncidentListProps) {
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [wsConnected, setWsConnected] = useState(false)
-  const [analyzedIncidents, setAnalyzedIncidents] = useState<Set<string>>(new Set())
+  // Map incidentId → most recent DiagnosticRunSummary that has an analysis result
+  const [priorRuns, setPriorRuns] = useState<Map<string, DiagnosticRunSummary>>(new Map())
 
   const load = useCallback(async () => {
     try {
-      const data = await api.listIncidents()
-      setIncidents(data.sort((a, b) =>
+      const [incData, runData] = await Promise.all([
+        api.listIncidents(),
+        api.listDiagnosticRuns(),
+      ])
+      setIncidents(incData.sort((a, b) =>
         (b.status.openedAt ?? '').localeCompare(a.status.openedAt ?? '')
       ))
+      // react to incident count
+      const open = incData.filter(i => i.status.state !== 'resolved')
+      if (open.length === 0) onAction?.('no-incidents')
+      else if (open.length >= 5) onAction?.('many-incidents')
+      // Build map: incidentId → latest run that has a completed analysis
+      const map = new Map<string, DiagnosticRunSummary>()
+      for (const run of runData) {
+        if (!run.incidentId) continue
+        const existing = map.get(run.incidentId)
+        if (!existing || run.requestedAt > existing.requestedAt) {
+          map.set(run.incidentId, run)
+        }
+      }
+      setPriorRuns(map)
       setError(null)
     } catch (e: unknown) {
       setError(String(e))
@@ -139,7 +177,22 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete }: IncidentLi
       if (analysisId) {
         api.getAnalysisResult(analysisId)
           .then(result => {
-            setAnalyzedIncidents(prev => new Set(prev).add(incidentId))
+            // Update priorRuns so the row reflects the fresh result immediately
+            setPriorRuns(prev => {
+              const next = new Map(prev)
+              next.set(incidentId, {
+                diagnosticRunId: result.diagnosticRunId,
+                incidentId,
+                requestedAt: result.createdAt,
+                status: 'completed',
+                analysisResultId: result.id,
+                likelyRootCause: result.likelyRootCause,
+                confidence: result.confidence,
+                model: result.model,
+                analysisCreatedAt: result.createdAt,
+              })
+              return next
+            })
             onAnalysisComplete(result, incidentId)
           })
           .catch(console.error)
@@ -179,7 +232,7 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete }: IncidentLi
           incident={inc}
           onAnalyzed={() => load()}
           onAnalysisStart={onAnalysisStart}
-          hasResult={analyzedIncidents.has(inc.metadata.name)}
+          previousRun={priorRuns.get(inc.metadata.name)}
         />
       ))}
 
@@ -192,7 +245,7 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete }: IncidentLi
               incident={inc}
               onAnalyzed={() => load()}
               onAnalysisStart={onAnalysisStart}
-              hasResult={analyzedIncidents.has(inc.metadata.name)}
+              previousRun={priorRuns.get(inc.metadata.name)}
             />
           ))}
         </details>
@@ -200,5 +253,3 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete }: IncidentLi
     </div>
   )
 }
-
-
