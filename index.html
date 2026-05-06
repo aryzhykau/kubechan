@@ -668,6 +668,7 @@
       <li><a href="#how-it-works">How it works</a></li>
       <li><a href="#features">Features</a></li>
       <li><a href="#quickstart">Quick start</a></li>
+      <li><a href="docs.html">Docs</a></li>
       <li class="nav-github">
         <a href="https://github.com/aryzhykau/kubechan" class="btn-github" target="_blank" rel="noopener noreferrer">
           <svg height="16" viewBox="0 0 16 16" width="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -1048,10 +1049,10 @@
       <div class="container">
         <p class="section-eyebrow">Quick start</p>
         <div class="section-divider"></div>
-        <h2 id="qs-heading">Up and running in minutes</h2>
+        <h2 id="qs-heading">Install with Helm in minutes</h2>
         <p class="section-lead">
-          KubeChan runs on Docker Desktop Kubernetes using Tilt for live-reload development.
-          No shared AWS credentials needed — configure your own LLM provider in the UI.
+          KubeChan ships as a Helm chart. Deploy it into any Kubernetes cluster with a single command.
+          No shared LLM credentials needed — each user configures their own provider in the UI.
         </p>
 
         <div class="quickstart-grid">
@@ -1060,33 +1061,33 @@
               <div class="qs-num" aria-hidden="true">1</div>
               <div>
                 <h4>Prerequisites</h4>
-                <p>Docker Desktop with Kubernetes enabled, Tilt ≥ 0.33, kubectl ≥ 1.28, Go 1.25+, Python 3.13+, and uv.</p>
+                <p>A running Kubernetes cluster (1.28+), <code style="font-family:monospace;color:var(--amber);font-size:0.88em">kubectl</code> configured, and Helm 3.</p>
               </div>
             </div>
             <div class="qs-step">
               <div class="qs-num" aria-hidden="true">2</div>
               <div>
-                <h4>Clone &amp; create data directory</h4>
-                <p>KubeChan stores its SQLite database on a host-mounted volume. Create the directory before starting.</p>
+                <h4>Install the CRDs</h4>
+                <p>KubeChan uses four custom resource definitions. Apply them before the Helm release so the controllers can start cleanly.</p>
               </div>
             </div>
             <div class="qs-step">
               <div class="qs-num" aria-hidden="true">3</div>
               <div>
-                <h4>Start the stack</h4>
-                <p>One command boots all five services, applies CRDs, and enables live-reload for all Go and Python services.</p>
+                <h4>Install with Helm</h4>
+                <p>A single <code style="font-family:monospace;color:var(--amber);font-size:0.88em">helm install</code> deploys all five services into the <code style="font-family:monospace;color:var(--amber);font-size:0.88em">kubechan</code> namespace.</p>
               </div>
             </div>
             <div class="qs-step">
               <div class="qs-num" aria-hidden="true">4</div>
               <div>
                 <h4>Configure LLM provider</h4>
-                <p>Open Settings → LLM Provider. Choose AWS Bedrock or GitHub Copilot, enter your credentials, and save.</p>
+                <p>Open Settings → LLM Provider in the UI. Choose AWS Bedrock or GitHub Copilot, enter your credentials, and save. No restart required.</p>
               </div>
             </div>
           </div>
 
-          <div class="terminal" role="region" aria-label="Quick start terminal commands">
+          <div class="terminal" role="region" aria-label="Helm install commands">
             <div class="terminal-bar">
               <span class="dot r" aria-hidden="true"></span>
               <span class="dot y" aria-hidden="true"></span>
@@ -1094,28 +1095,42 @@
               <span class="terminal-label">bash</span>
             </div>
             <div class="terminal-body">
-              <div><span class="term-comment"># Clone the repository</span></div>
-              <div><span class="term-prompt">$</span> <span class="term-cmd">git clone https://github.com/aryzhykau/kubechan.git</span></div>
-              <div><span class="term-prompt">$</span> <span class="term-cmd">cd kubechan</span></div>
+              <div><span class="term-comment"># Create namespace</span></div>
+              <div><span class="term-prompt">$</span> <span class="term-cmd">kubectl create namespace kubechan</span></div>
               <br/>
-              <div><span class="term-comment"># Create the data directory</span></div>
-              <div><span class="term-prompt">$</span> <span class="term-cmd">mkdir -p .data && chmod 777 .data</span></div>
+              <div><span class="term-comment"># Install CRDs (required before the Helm chart)</span></div>
+              <div><span class="term-prompt">$</span> <span class="term-cmd">kubectl apply -f \</span></div>
+              <div><span class="term-cmd">&nbsp;&nbsp;https://raw.githubusercontent.com/aryzhykau/kubechan/main/helm/kubechan/crds/kubechan.io_incidents.yaml \</span></div>
+              <div><span class="term-cmd">&nbsp;&nbsp;https://raw.githubusercontent.com/aryzhykau/kubechan/main/helm/kubechan/crds/kubechan.io_problemcases.yaml \</span></div>
+              <div><span class="term-cmd">&nbsp;&nbsp;https://raw.githubusercontent.com/aryzhykau/kubechan/main/helm/kubechan/crds/kubechan.io_diagnosticruns.yaml \</span></div>
+              <div><span class="term-cmd">&nbsp;&nbsp;https://raw.githubusercontent.com/aryzhykau/kubechan/main/helm/kubechan/crds/kubechan.io_kubechanstates.yaml</span></div>
               <br/>
-              <div><span class="term-comment"># Switch to Docker Desktop k8s context</span></div>
-              <div><span class="term-prompt">$</span> <span class="term-cmd">kubectl config use-context docker-desktop</span></div>
-              <div class="term-out">Switched to context "docker-desktop".</div>
+              <div><span class="term-comment"># Add the Helm repo and install</span></div>
+              <div><span class="term-prompt">$</span> <span class="term-cmd">helm repo add kubechan https://aryzhykau.github.io/kubechan</span></div>
+              <div><span class="term-prompt">$</span> <span class="term-cmd">helm repo update</span></div>
+              <div><span class="term-prompt">$</span> <span class="term-cmd">helm install kubechan kubechan/kubechan \</span></div>
+              <div><span class="term-cmd">&nbsp;&nbsp;--namespace kubechan \</span></div>
+              <div><span class="term-cmd">&nbsp;&nbsp;--set frontendUi.ingress.enabled=true \</span></div>
+              <div><span class="term-cmd">&nbsp;&nbsp;--set frontendUi.ingress.host=kubechan.example.com</span></div>
+              <div class="term-out">Release "kubechan" deployed.</div>
               <br/>
-              <div><span class="term-comment"># Start everything</span></div>
-              <div><span class="term-prompt">$</span> <span class="term-cmd">make dev-up</span></div>
-              <div class="term-out">namespace/kubechan created</div>
-              <div class="term-out">customresourcedefinition.apiextensions.k8s.io/incidents.kubechan.io configured</div>
-              <div class="term-out">Tilt started on http://localhost:10350</div>
-              <br/>
-              <div><span class="term-comment"># Open the UI</span></div>
-              <div><span class="term-prompt">$</span> <span class="term-cmd">open http://localhost:30081</span></div>
+              <div><span class="term-comment"># Check pods</span></div>
+              <div><span class="term-prompt">$</span> <span class="term-cmd">kubectl get pods -n kubechan</span></div>
+              <div class="term-out">NAME                                  READY   STATUS    AGE</div>
+              <div class="term-out">kubechan-backend-api-xxx              1/1     Running   30s</div>
+              <div class="term-out">kubechan-cluster-watcher-xxx          1/1     Running   30s</div>
+              <div class="term-out">kubechan-diagnostics-worker-xxx       1/1     Running   30s</div>
+              <div class="term-out">kubechan-llm-gateway-xxx              1/1     Running   30s</div>
+              <div class="term-out">kubechan-frontend-ui-xxx              1/1     Running   30s</div>
             </div>
           </div>
         </div>
+
+        <p style="margin-top:32px;font-size:0.9rem;color:var(--muted)">
+          For local development with Tilt, see the
+          <a href="docs.html#development" style="color:var(--blue);text-decoration:none">development guide</a>.
+          For all configuration options see the <a href="docs.html#configuration" style="color:var(--blue);text-decoration:none">full documentation</a>.
+        </p>
       </div>
     </section>
 
@@ -1135,7 +1150,8 @@
       <ul class="footer-links">
         <li><a href="https://github.com/aryzhykau/kubechan" target="_blank" rel="noopener noreferrer">GitHub</a></li>
         <li><a href="https://github.com/aryzhykau/kubechan/issues" target="_blank" rel="noopener noreferrer">Issues</a></li>
-        <li><a href="https://github.com/aryzhykau/kubechan/blob/main/README.md" target="_blank" rel="noopener noreferrer">Docs</a></li>
+        <li><a href="docs.html">Docs</a></li>
+        <li><a href="https://github.com/aryzhykau/kubechan" target="_blank" rel="noopener noreferrer">GitHub</a></li>
       </ul>
     </div>
     <p class="footer-copy">
