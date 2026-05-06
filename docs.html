@@ -3,1225 +3,346 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>KubeChan Documentation — Architecture, Use Cases & Configuration</title>
-  <meta name="description" content="Full documentation for KubeChan: service architecture diagram, use case walkthroughs, CRD reference, Helm configuration, and local development guide." />
+  <title>KubeChan Docs — Architecture &amp; Installation</title>
+  <meta name="description" content="KubeChan architecture diagram and Helm installation guide. Five services: cluster-watcher, diagnostics-worker, backend-api, llm-gateway, frontend-ui." />
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://aryzhykau.github.io/kubechan/docs.html" />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://aryzhykau.github.io/kubechan/docs.html" />
-  <meta property="og:title" content="KubeChan Docs — Architecture, Use Cases & Configuration" />
-  <meta property="og:description" content="Architecture diagram, incident pipeline walkthroughs, CRD reference, and Helm configuration for KubeChan." />
+  <meta property="og:title" content="KubeChan Docs — Architecture &amp; Installation" />
   <meta property="og:image" content="https://raw.githubusercontent.com/aryzhykau/kubechan/main/services/frontend-ui/public/kubechan-idle-1.png" />
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --bg:       #0a0e1a;
-      --surface:  #111827;
-      --surface2: #1a2235;
-      --border:   #1f2d4a;
-      --blue:     #4f8ef7;
-      --blue-dim: #2563eb;
-      --purple:   #a855f7;
-      --green:    #22c55e;
-      --amber:    #f59e0b;
-      --red:      #ef4444;
-      --text:     #f0f6fc;
-      --muted:    #8b949e;
-      --radius:   12px;
+      --bg: #0a0e1a; --surface: #111827; --surface2: #1a2235;
+      --border: #1f2d4a; --blue: #4f8ef7; --purple: #a855f7;
+      --green: #22c55e; --amber: #f59e0b; --text: #f0f6fc; --muted: #8b949e;
     }
-
     html { scroll-behavior: smooth; }
-
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+      line-height: 1.6; -webkit-font-smoothing: antialiased;
     }
-
-    /* ── NAV ── */
+    /* NAV */
     nav {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: rgba(10, 14, 26, 0.9);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(10,14,26,0.9); backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
-      padding: 0 24px;
-      height: 60px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      padding: 0 24px; height: 60px;
+      display: flex; align-items: center; justify-content: space-between;
     }
-    .nav-logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 700;
-      font-size: 1.1rem;
-      text-decoration: none;
-      color: var(--text);
-    }
+    .nav-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.1rem; text-decoration: none; color: var(--text); }
     .nav-logo img { width: 32px; height: auto; }
-    .nav-links { display: flex; align-items: center; gap: 8px; list-style: none; }
-    .nav-links a {
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 0.9rem;
-      padding: 6px 14px;
-      border-radius: 8px;
-      transition: color 0.2s, background 0.2s;
-    }
+    .nav-links { display: flex; align-items: center; gap: 6px; list-style: none; }
+    .nav-links a { color: var(--muted); text-decoration: none; font-size: .9rem; padding: 6px 14px; border-radius: 8px; transition: color .2s, background .2s; }
     .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--surface2); }
-    .btn-github {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      color: var(--text) !important;
-      padding: 7px 16px !important;
-      border-radius: 8px !important;
-      font-weight: 600;
-      font-size: 0.88rem !important;
-      transition: border-color 0.2s !important;
-    }
-    .btn-github:hover { border-color: var(--blue) !important; }
-
-    /* ── LAYOUT ── */
-    .docs-layout {
-      display: grid;
-      grid-template-columns: 240px 1fr;
-      max-width: 1280px;
-      margin: 0 auto;
-      min-height: calc(100vh - 60px);
-    }
-
-    /* ── SIDEBAR ── */
-    .docs-sidebar {
-      border-right: 1px solid var(--border);
-      padding: 32px 0;
-      position: sticky;
-      top: 60px;
-      height: calc(100vh - 60px);
-      overflow-y: auto;
-    }
-    .sidebar-group { margin-bottom: 28px; }
-    .sidebar-label {
-      font-size: 0.72rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--muted);
-      padding: 0 20px;
-      margin-bottom: 8px;
-    }
-    .sidebar-link {
-      display: block;
-      padding: 7px 20px;
-      font-size: 0.88rem;
-      color: var(--muted);
-      text-decoration: none;
-      border-left: 2px solid transparent;
-      transition: color 0.15s, border-color 0.15s, background 0.15s;
-    }
-    .sidebar-link:hover { color: var(--text); background: rgba(255,255,255,0.04); }
-    .sidebar-link.active { color: var(--blue); border-left-color: var(--blue); background: rgba(79,142,247,0.07); }
-
-    /* ── CONTENT ── */
-    .docs-content {
-      padding: 48px 56px;
-      min-width: 0;
-    }
-
-    /* ── SECTIONS ── */
-    .doc-section {
-      margin-bottom: 80px;
-      scroll-margin-top: 80px;
-    }
-    .section-eyebrow {
-      font-size: 0.78rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--blue);
-      margin-bottom: 10px;
-    }
-    h2 {
-      font-size: 2rem;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      line-height: 1.2;
-      margin-bottom: 12px;
-    }
-    h3 {
-      font-size: 1.2rem;
-      font-weight: 700;
-      margin: 36px 0 12px;
-    }
-    h4 {
-      font-size: 1rem;
-      font-weight: 700;
-      margin: 24px 0 8px;
-      color: var(--text);
-    }
-    .section-divider {
-      width: 48px;
-      height: 4px;
-      background: linear-gradient(90deg, var(--blue), var(--purple));
-      border-radius: 2px;
-      margin-bottom: 28px;
-    }
-    p { color: var(--muted); line-height: 1.75; margin-bottom: 16px; }
+    .btn-gh { display: flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border); color: var(--text) !important; padding: 7px 16px !important; border-radius: 8px !important; font-weight: 600; font-size: .88rem !important; transition: border-color .2s !important; }
+    .btn-gh:hover { border-color: var(--blue) !important; }
+    /* CONTENT */
+    main { max-width: 920px; margin: 0 auto; padding: 56px 24px 80px; }
+    section { margin-bottom: 72px; }
+    .eyebrow { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--blue); margin-bottom: 10px; }
+    h2 { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; margin-bottom: 10px; }
+    h3 { font-size: 1.05rem; font-weight: 700; margin: 32px 0 10px; color: var(--text); }
+    p { color: var(--muted); margin-bottom: 14px; font-size: .95rem; }
     p strong { color: var(--text); }
-    a { color: var(--blue); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-
-    /* ── CODE ── */
-    code {
-      font-family: 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
-      background: var(--surface2);
-      color: var(--amber);
-      padding: 2px 7px;
-      border-radius: 5px;
-      font-size: 0.85em;
+    code { font-family: 'SF Mono', Consolas, monospace; background: var(--surface2); color: var(--amber); padding: 2px 6px; border-radius: 4px; font-size: .86em; }
+    /* DIAGRAM */
+    .diagram-wrap {
+      margin: 28px 0 16px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 14px;
+      padding: 24px 16px 16px; overflow-x: auto;
     }
-    .terminal {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      font-family: 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
-      margin: 20px 0;
-    }
-    .terminal-bar {
-      background: var(--surface2);
-      padding: 10px 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      border-bottom: 1px solid var(--border);
-    }
-    .dot { width: 12px; height: 12px; border-radius: 50%; }
-    .dot.r { background: #ff5f56; }
-    .dot.y { background: #ffbd2e; }
-    .dot.g { background: #27c93f; }
-    .terminal-label { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
-    .terminal-body { padding: 20px 24px; font-size: 0.85rem; line-height: 1.85; }
-    .term-comment { color: #6e7681; }
-    .term-prompt { color: var(--green); }
-    .term-cmd { color: var(--text); }
-    .term-out { color: var(--muted); }
-
-    /* ── DIAGRAM ── */
-    .arch-diagram {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 32px;
-      margin: 24px 0;
-      overflow-x: auto;
-    }
-    .arch-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      align-items: start;
-    }
-    .arch-col { display: flex; flex-direction: column; gap: 12px; }
-    .arch-node {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 16px 18px;
-      position: relative;
-    }
-    .arch-node.primary { border-color: var(--blue); }
-    .arch-node.accent  { border-color: var(--purple); }
-    .arch-node.go      { border-top: 3px solid var(--blue); }
-    .arch-node.python  { border-top: 3px solid var(--amber); }
-    .arch-node.react   { border-top: 3px solid var(--purple); }
-    .arch-node.k8s     { border-top: 3px solid var(--green); }
-    .arch-node-title {
-      font-weight: 700;
-      font-size: 0.95rem;
-      margin-bottom: 6px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .arch-node-sub { font-size: 0.78rem; color: var(--muted); }
-    .arch-tag {
-      display: inline-block;
-      font-size: 0.68rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 2px 8px;
-      border-radius: 4px;
-    }
-    .arch-tag.go     { background: rgba(79,142,247,0.15); color: var(--blue); }
-    .arch-tag.py     { background: rgba(245,158,11,0.15); color: var(--amber); }
-    .arch-tag.ts     { background: rgba(168,85,247,0.15); color: var(--purple); }
-    .arch-tag.crd    { background: rgba(34,197,94,0.15);  color: var(--green); }
-    .arch-arrows {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding-top: 40px;
-    }
-    .arch-arrow {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.78rem;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-    .arrow-line {
-      width: 32px;
-      height: 2px;
-      background: var(--border);
-      position: relative;
-    }
-    .arrow-line::after {
-      content: '▶';
-      position: absolute;
-      right: -8px;
-      top: -7px;
-      font-size: 0.7rem;
-      color: var(--muted);
-    }
-
-    /* ── TABLES ── */
-    .table-wrap {
-      overflow-x: auto;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--surface);
-      margin: 20px 0;
-    }
-    table { width: 100%; border-collapse: collapse; }
-    thead { background: var(--surface2); }
-    th {
-      padding: 12px 18px;
-      text-align: left;
-      font-size: 0.78rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-    }
-    td {
-      padding: 12px 18px;
-      border-top: 1px solid var(--border);
-      font-size: 0.88rem;
-      color: var(--muted);
-    }
-    td strong { color: var(--text); }
-    td code { font-size: 0.82em; }
-
-    /* ── USE CASE CARDS ── */
-    .usecase-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      margin: 24px 0;
-    }
-    .usecase-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 28px;
-      transition: border-color 0.2s;
-    }
-    .usecase-card:hover { border-color: var(--blue); }
-    .usecase-icon { font-size: 1.8rem; margin-bottom: 14px; }
-    .usecase-card h4 { font-size: 1rem; font-weight: 700; margin: 0 0 10px; color: var(--text); }
-    .usecase-card p { font-size: 0.88rem; margin: 0; }
-    .usecase-steps {
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .usecase-step {
-      display: flex;
-      gap: 10px;
-      font-size: 0.83rem;
-      color: var(--muted);
-    }
-    .usecase-step-num {
-      font-weight: 700;
-      color: var(--blue);
-      flex-shrink: 0;
-      width: 16px;
-    }
-
-    /* ── CALLOUT ── */
-    .callout {
-      border-radius: var(--radius);
-      padding: 18px 22px;
-      margin: 20px 0;
-      display: flex;
-      gap: 14px;
-      align-items: flex-start;
-      font-size: 0.9rem;
-    }
-    .callout.info    { background: rgba(79,142,247,0.08);  border: 1px solid rgba(79,142,247,0.25); }
-    .callout.warning { background: rgba(245,158,11,0.08);  border: 1px solid rgba(245,158,11,0.25); }
-    .callout.success { background: rgba(34,197,94,0.08);   border: 1px solid rgba(34,197,94,0.25); }
-    .callout-icon { font-size: 1.2rem; flex-shrink: 0; line-height: 1; }
-    .callout-body { color: var(--muted); }
-    .callout-body strong { color: var(--text); display: block; margin-bottom: 4px; }
-
-    /* ── BADGE ── */
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      font-size: 0.72rem;
-      font-weight: 700;
-      padding: 2px 9px;
-      border-radius: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-left: 8px;
-      vertical-align: middle;
-    }
-    .badge.optional  { background: rgba(79,142,247,0.1);  color: var(--blue); }
-    .badge.required  { background: rgba(239,68,68,0.1);   color: var(--red); }
-    .badge.default   { background: rgba(34,197,94,0.1);   color: var(--green); }
-
-    /* ── VALUES TABLE STRIPING ── */
-    tbody tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
-
-    /* ── FOOTER ── */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 36px 24px;
-    }
-    .footer-inner {
-      max-width: 1280px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 20px;
-    }
-    .footer-logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 700;
-      color: var(--text);
-      text-decoration: none;
-    }
-    .footer-logo img { width: 28px; height: auto; }
-    .footer-tagline { font-size: 0.82rem; color: var(--muted); margin-top: 4px; }
-    .footer-links { display: flex; gap: 24px; list-style: none; }
-    .footer-links a { color: var(--muted); text-decoration: none; font-size: 0.85rem; transition: color 0.2s; }
-    .footer-links a:hover { color: var(--text); }
-    .footer-copy { font-size: 0.8rem; color: var(--muted); text-align: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); max-width: 1280px; margin-left: auto; margin-right: auto; }
-
-    /* ── RESPONSIVE ── */
-    @media (max-width: 960px) {
-      .docs-layout { grid-template-columns: 1fr; }
-      .docs-sidebar { display: none; }
-      .docs-content { padding: 32px 20px; }
-      .arch-grid { grid-template-columns: 1fr; }
-      .usecase-grid { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 600px) {
-      nav .nav-links li:not(.nav-github) { display: none; }
-    }
+    .diagram-wrap svg { display: block; width: 100%; min-width: 640px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); font-size: .78rem; color: var(--muted); }
+    .legend-item { display: flex; align-items: center; gap: 7px; }
+    .legend-line { width: 28px; height: 2px; border-radius: 1px; flex-shrink: 0; }
+    /* TERMINAL */
+    .terminal { background: #0d1117; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; font-family: 'SF Mono', Consolas, monospace; margin: 14px 0; }
+    .tb { background: var(--surface2); padding: 9px 16px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--border); }
+    .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .dot.r { background: #ff5f56; } .dot.y { background: #ffbd2e; } .dot.g { background: #27c93f; }
+    .tl { font-size: .76rem; color: var(--muted); margin-left: auto; }
+    .tc { padding: 18px 22px; font-size: .84rem; line-height: 1.85; }
+    .cm { color: #6e7681; } .pr { color: var(--green); } .cd { color: var(--text); } .ou { color: var(--muted); }
+    /* CALLOUT */
+    .callout { border-radius: 10px; padding: 14px 18px; margin: 16px 0; display: flex; gap: 12px; align-items: flex-start; font-size: .88rem; border: 1px solid; }
+    .callout.warn { background: rgba(245,158,11,.07); border-color: rgba(245,158,11,.25); }
+    .callout.info { background: rgba(79,142,247,.07); border-color: rgba(79,142,247,.25); }
+    .callout p { margin: 0; color: var(--muted); } .callout strong { color: var(--text); }
+    /* FOOTER */
+    footer { border-top: 1px solid var(--border); padding: 32px 24px; }
+    .fi { max-width: 920px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .fl { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); text-decoration: none; }
+    .fl img { width: 26px; height: auto; }
+    .ft { font-size: .8rem; color: var(--muted); margin-top: 3px; }
+    .flinks { display: flex; gap: 20px; list-style: none; }
+    .flinks a { color: var(--muted); text-decoration: none; font-size: .85rem; transition: color .2s; }
+    .flinks a:hover { color: var(--text); }
+    @media (max-width: 600px) { nav .nav-links li:not(:last-child) { display: none; } h2 { font-size: 1.5rem; } }
   </style>
 </head>
 <body>
 
-  <!-- ═══════════════ NAV ═══════════════ -->
-  <nav aria-label="Main navigation">
-    <a href="index.html" class="nav-logo">
-      <img src="https://raw.githubusercontent.com/aryzhykau/kubechan/main/services/frontend-ui/public/kubechan-idle-1.png" alt="KubeChan logo" />
-      KubeChan
-    </a>
-    <ul class="nav-links">
-      <li><a href="index.html">Home</a></li>
-      <li><a href="index.html#features">Features</a></li>
-      <li><a href="index.html#quickstart">Quick start</a></li>
-      <li><a href="docs.html" class="active">Docs</a></li>
-      <li class="nav-github">
-        <a href="https://github.com/aryzhykau/kubechan" class="btn-github" target="_blank" rel="noopener noreferrer">
-          <svg height="16" viewBox="0 0 16 16" width="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-          GitHub
-        </a>
-      </li>
-    </ul>
-  </nav>
+<nav aria-label="Main navigation">
+  <a href="index.html" class="nav-logo">
+    <img src="https://raw.githubusercontent.com/aryzhykau/kubechan/main/services/frontend-ui/public/kubechan-idle-1.png" alt="KubeChan" />
+    KubeChan
+  </a>
+  <ul class="nav-links">
+    <li><a href="index.html">Home</a></li>
+    <li><a href="index.html#features">Features</a></li>
+    <li><a href="index.html#quickstart">Quick start</a></li>
+    <li><a href="docs.html" class="active">Docs</a></li>
+    <li>
+      <a href="https://github.com/aryzhykau/kubechan" class="btn-gh" target="_blank" rel="noopener noreferrer">
+        <svg height="16" viewBox="0 0 16 16" width="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </li>
+  </ul>
+</nav>
 
-  <div class="docs-layout">
+<main>
 
-    <!-- ═══════════════ SIDEBAR ═══════════════ -->
-    <aside class="docs-sidebar" aria-label="Documentation navigation">
-      <div class="sidebar-group">
-        <p class="sidebar-label">Overview</p>
-        <a href="#architecture" class="sidebar-link">Architecture</a>
-        <a href="#how-it-works" class="sidebar-link">How it works</a>
+  <!-- ARCHITECTURE -->
+  <section id="architecture" aria-labelledby="arch-h">
+    <p class="eyebrow">Architecture</p>
+    <h2 id="arch-h">How the services connect</h2>
+    <p>
+      Five services run inside your Kubernetes cluster. <strong>cluster-watcher</strong> detects anomalies
+      and writes CRDs. <strong>diagnostics-worker</strong> collects evidence from the cluster.
+      <strong>backend-api</strong> orchestrates everything — it's the central hub.
+      <strong>llm-gateway</strong> calls the LLM. <strong>frontend-ui</strong> shows results in real time.
+      Nothing ever writes to your workloads.
+    </p>
+
+    <div class="diagram-wrap">
+      <!--
+        viewBox: 0 0 780 470
+        Layout:
+          Row 1  (y≈12–68):   K8s Cluster  (center)
+          Row 2  (y≈160–242): cluster-watcher (left) | backend-api (center) | diagnostics-worker (right)
+          Row 3  (y≈310–342): User (above frontend-ui)
+          Row 4  (y≈390–454): llm-gateway (left) | frontend-ui (right)
+      -->
+      <svg viewBox="0 0 780 470" fill="none" xmlns="http://www.w3.org/2000/svg"
+           role="img" aria-label="KubeChan service architecture diagram showing five services connected by arrows">
+        <defs>
+          <marker id="ah-green"  markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#22c55e"/></marker>
+          <marker id="ah-blue"   markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#4f8ef7"/></marker>
+          <marker id="ah-amber"  markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#f59e0b"/></marker>
+          <marker id="ah-purple" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#a855f7"/></marker>
+          <marker id="ah-muted"  markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#8b949e"/></marker>
+        </defs>
+
+        <!-- ════ BOXES ════ -->
+
+        <!-- Kubernetes Cluster -->
+        <rect x="215" y="12" width="350" height="56" rx="10" fill="#0a0e1a" stroke="#22c55e" stroke-width="1.5"/>
+        <text x="390" y="35" text-anchor="middle" fill="#f0f6fc" font-size="13" font-weight="700" font-family="system-ui,sans-serif">&#9096;  Kubernetes Cluster</text>
+        <text x="390" y="55" text-anchor="middle" fill="#8b949e" font-size="10" font-family="system-ui,sans-serif">Pods · Deployments · Services · Nodes · Events</text>
+
+        <!-- cluster-watcher -->
+        <rect x="12" y="168" width="178" height="68" rx="8" fill="#0a0e1a" stroke="#4f8ef7" stroke-width="1.5"/>
+        <text x="101" y="191" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700" font-family="system-ui,sans-serif">cluster-watcher</text>
+        <text x="101" y="208" text-anchor="middle" fill="#4f8ef7" font-size="9.5" font-weight="600" font-family="system-ui,sans-serif">Go · controller-runtime</text>
+        <text x="101" y="224" text-anchor="middle" fill="#8b949e" font-size="9" font-family="system-ui,sans-serif">5 detectors · debounce window</text>
+
+        <!-- backend-api (central hub — slightly thicker border) -->
+        <rect x="302" y="160" width="176" height="82" rx="8" fill="#0a0e1a" stroke="#4f8ef7" stroke-width="2"/>
+        <text x="390" y="183" text-anchor="middle" fill="#f0f6fc" font-size="13" font-weight="700" font-family="system-ui,sans-serif">backend-api</text>
+        <text x="390" y="200" text-anchor="middle" fill="#4f8ef7" font-size="9.5" font-weight="600" font-family="system-ui,sans-serif">Go · chi · SQLite</text>
+        <text x="390" y="216" text-anchor="middle" fill="#8b949e" font-size="9" font-family="system-ui,sans-serif">REST · WebSocket hub</text>
+        <text x="390" y="232" text-anchor="middle" fill="#8b949e" font-size="9" font-family="system-ui,sans-serif">async LLM dispatch</text>
+
+        <!-- diagnostics-worker -->
+        <rect x="590" y="168" width="178" height="68" rx="8" fill="#0a0e1a" stroke="#4f8ef7" stroke-width="1.5"/>
+        <text x="679" y="191" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700" font-family="system-ui,sans-serif">diagnostics-worker</text>
+        <text x="679" y="208" text-anchor="middle" fill="#4f8ef7" font-size="9.5" font-weight="600" font-family="system-ui,sans-serif">Go · controller-runtime</text>
+        <text x="679" y="224" text-anchor="middle" fill="#8b949e" font-size="9" font-family="system-ui,sans-serif">logs · events · ConfigMaps · PVCs</text>
+
+        <!-- User -->
+        <circle cx="571" cy="320" r="19" fill="#1a2235" stroke="#8b949e" stroke-width="1.2"/>
+        <text x="571" y="326" text-anchor="middle" fill="#8b949e" font-size="14" font-family="system-ui,sans-serif">&#128100;</text>
+        <text x="571" y="352" text-anchor="middle" fill="#8b949e" font-size="9" font-family="system-ui,sans-serif">User</text>
+
+        <!-- llm-gateway -->
+        <rect x="50" y="390" width="168" height="64" rx="8" fill="#0a0e1a" stroke="#f59e0b" stroke-width="1.5"/>
+        <text x="134" y="413" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700" font-family="system-ui,sans-serif">llm-gateway</text>
+        <text x="134" y="430" text-anchor="middle" fill="#f59e0b" font-size="9.5" font-weight="600" font-family="system-ui,sans-serif">Python · FastAPI · uv</text>
+        <text x="134" y="446" text-anchor="middle" fill="#8b949e" font-size="9" font-family="system-ui,sans-serif">AWS Bedrock · GitHub Copilot</text>
+
+        <!-- frontend-ui -->
+        <rect x="490" y="390" width="162" height="64" rx="8" fill="#0a0e1a" stroke="#a855f7" stroke-width="1.5"/>
+        <text x="571" y="413" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700" font-family="system-ui,sans-serif">frontend-ui</text>
+        <text x="571" y="430" text-anchor="middle" fill="#a855f7" font-size="9.5" font-weight="600" font-family="system-ui,sans-serif">React 19 · Vite · MUI</text>
+        <text x="571" y="446" text-anchor="middle" fill="#8b949e" font-size="9" font-family="system-ui,sans-serif">nginx · WebSocket client</text>
+
+        <!-- ════ ARROWS ════ -->
+
+        <!-- 1. K8s → cluster-watcher  (green — "watches") -->
+        <path d="M 285,68 C 240,118 160,118 101,168" stroke="#22c55e" stroke-width="1.5" marker-end="url(#ah-green)"/>
+        <rect x="143" y="97" width="56" height="14" rx="3" fill="#0a0e1a"/>
+        <text x="171" y="108" text-anchor="middle" fill="#22c55e" font-size="9" font-family="system-ui,sans-serif">watches</text>
+
+        <!-- 2. K8s → diagnostics-worker  (green — "reads evidence") -->
+        <path d="M 495,68 C 540,118 622,118 679,168" stroke="#22c55e" stroke-width="1.5" marker-end="url(#ah-green)"/>
+        <rect x="548" y="97" width="84" height="14" rx="3" fill="#0a0e1a"/>
+        <text x="590" y="108" text-anchor="middle" fill="#22c55e" font-size="9" font-family="system-ui,sans-serif">reads evidence</text>
+
+        <!-- 3. cluster-watcher → backend-api  (blue — "Incident/ProblemCase CRDs") -->
+        <line x1="190" y1="200" x2="302" y2="200" stroke="#4f8ef7" stroke-width="1.5" marker-end="url(#ah-blue)"/>
+        <rect x="192" y="183" width="108" height="14" rx="3" fill="#0a0e1a"/>
+        <text x="246" y="194" text-anchor="middle" fill="#4f8ef7" font-size="8.5" font-family="system-ui,sans-serif">Incident/ProblemCase CRDs</text>
+
+        <!-- 4. backend-api → diagnostics-worker  (blue — "DiagnosticRun CRD") — top lane -->
+        <line x1="478" y1="192" x2="590" y2="192" stroke="#4f8ef7" stroke-width="1.5" marker-end="url(#ah-blue)"/>
+        <rect x="483" y="179" width="102" height="13" rx="3" fill="#0a0e1a"/>
+        <text x="534" y="189" text-anchor="middle" fill="#4f8ef7" font-size="8.5" font-family="system-ui,sans-serif">DiagnosticRun CRD</text>
+
+        <!-- 5. diagnostics-worker → backend-api  (amber — "POST /evidence") — bottom lane -->
+        <line x1="590" y1="213" x2="478" y2="213" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#ah-amber)"/>
+        <rect x="484" y="216" width="100" height="13" rx="3" fill="#0a0e1a"/>
+        <text x="534" y="226" text-anchor="middle" fill="#f59e0b" font-size="8.5" font-family="system-ui,sans-serif">POST /evidence</text>
+
+        <!-- 6. backend-api → llm-gateway  (amber — "POST /analyze") -->
+        <path d="M 338,242 C 288,312 185,316 134,390" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#ah-amber)"/>
+        <rect x="190" y="300" width="80" height="14" rx="3" fill="#0a0e1a"/>
+        <text x="230" y="311" text-anchor="middle" fill="#f59e0b" font-size="9" font-family="system-ui,sans-serif">POST /analyze</text>
+
+        <!-- 7. backend-api → frontend-ui  (purple — "REST + WebSocket") -->
+        <path d="M 442,242 C 480,315 530,315 571,390" stroke="#a855f7" stroke-width="1.5" marker-end="url(#ah-purple)"/>
+        <rect x="476" y="300" width="100" height="14" rx="3" fill="#0a0e1a"/>
+        <text x="526" y="311" text-anchor="middle" fill="#a855f7" font-size="9" font-family="system-ui,sans-serif">REST + WebSocket</text>
+
+        <!-- 8. User → frontend-ui  (muted dashed — user opens the UI) -->
+        <line x1="571" y1="339" x2="571" y2="390" stroke="#8b949e" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ah-muted)"/>
+
+      </svg>
+
+      <div class="legend">
+        <div class="legend-item"><div class="legend-line" style="background:#22c55e"></div>Kubernetes API watch / read</div>
+        <div class="legend-item"><div class="legend-line" style="background:#4f8ef7"></div>CRD creation / informer event</div>
+        <div class="legend-item"><div class="legend-line" style="background:#f59e0b"></div>HTTP POST (evidence / analyze)</div>
+        <div class="legend-item"><div class="legend-line" style="background:#a855f7"></div>REST API + WebSocket</div>
+        <div class="legend-item" style="gap:7px">
+          <svg width="28" height="10" aria-hidden="true"><line x1="0" y1="5" x2="28" y2="5" stroke="#8b949e" stroke-width="2" stroke-dasharray="4 3"/></svg>
+          User interaction
+        </div>
       </div>
-      <div class="sidebar-group">
-        <p class="sidebar-label">Use cases</p>
-        <a href="#usecase-crashloop" class="sidebar-link">CrashLoopBackOff</a>
-        <a href="#usecase-oom" class="sidebar-link">OOMKilled pods</a>
-        <a href="#usecase-pending" class="sidebar-link">Stuck pending pods</a>
-        <a href="#usecase-endpoints" class="sidebar-link">Service routing failures</a>
-        <a href="#usecase-manual" class="sidebar-link">Manual incident reporting</a>
-      </div>
-      <div class="sidebar-group">
-        <p class="sidebar-label">Services</p>
-        <a href="#service-cluster-watcher" class="sidebar-link">cluster-watcher</a>
-        <a href="#service-diagnostics-worker" class="sidebar-link">diagnostics-worker</a>
-        <a href="#service-backend-api" class="sidebar-link">backend-api</a>
-        <a href="#service-llm-gateway" class="sidebar-link">llm-gateway</a>
-        <a href="#service-frontend-ui" class="sidebar-link">frontend-ui</a>
-      </div>
-      <div class="sidebar-group">
-        <p class="sidebar-label">Reference</p>
-        <a href="#crds" class="sidebar-link">CRD reference</a>
-        <a href="#configuration" class="sidebar-link">Helm configuration</a>
-        <a href="#development" class="sidebar-link">Local development</a>
-      </div>
-    </aside>
-
-    <!-- ═══════════════ CONTENT ═══════════════ -->
-    <main class="docs-content">
-
-      <!-- ARCHITECTURE -->
-      <section id="architecture" class="doc-section" aria-labelledby="arch-heading">
-        <p class="section-eyebrow">Architecture</p>
-        <div class="section-divider"></div>
-        <h2 id="arch-heading">Service architecture</h2>
-        <p>
-          KubeChan is a microservices system. All components run inside your Kubernetes cluster as
-          standard Deployments. They communicate through Kubernetes CRDs (acting as an internal
-          message bus), a REST API, and WebSockets. <strong>No component ever writes to user workloads.</strong>
-        </p>
-
-        <!-- Visual architecture diagram -->
-        <div class="arch-diagram" role="img" aria-label="KubeChan service architecture diagram">
-          <div class="arch-grid">
-
-            <!-- Column 1: Inputs -->
-            <div class="arch-col">
-              <h4 style="color:var(--muted);font-size:0.78rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin:0 0 8px;">Cluster &amp; User</h4>
-
-              <div class="arch-node k8s">
-                <div class="arch-node-title">
-                  <span>☸️</span>
-                  Kubernetes cluster
-                </div>
-                <div class="arch-node-sub">Pods · Deployments · Services<br/>Ingresses · Nodes · Events</div>
-              </div>
-
-              <div class="arch-node go">
-                <div class="arch-node-title">
-                  <span>🔍</span>
-                  cluster-watcher
-                  <span class="arch-tag go">Go</span>
-                </div>
-                <div class="arch-node-sub">Watches all workload resources.<br/>Runs 5 detectors. Writes ProblemCase + Incident CRDs.</div>
-              </div>
-
-              <div class="arch-node" style="border-top:3px solid var(--muted);">
-                <div class="arch-node-title">👤 User</div>
-                <div class="arch-node-sub">Manual incident reporting via frontend UI</div>
-              </div>
-            </div>
-
-            <!-- Column 2: Core -->
-            <div class="arch-col">
-              <h4 style="color:var(--muted);font-size:0.78rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin:0 0 8px;">Orchestration</h4>
-
-              <div class="arch-node go primary" style="border-top:3px solid var(--blue);">
-                <div class="arch-node-title">
-                  <span>🗄️</span>
-                  backend-api
-                  <span class="arch-tag go">Go</span>
-                </div>
-                <div class="arch-node-sub">
-                  REST API · WebSocket hub<br/>
-                  SQLite store · async LLM dispatch<br/>
-                  chi router · controller-runtime informer
-                </div>
-              </div>
-
-              <div class="arch-node go">
-                <div class="arch-node-title">
-                  <span>🔬</span>
-                  diagnostics-worker
-                  <span class="arch-tag go">Go</span>
-                </div>
-                <div class="arch-node-sub">
-                  Reconciles DiagnosticRun CRDs.<br/>
-                  Collects logs, events, ConfigMaps,<br/>
-                  PVCs, Ingresses. POSTs evidence.
-                </div>
-              </div>
-
-              <div class="arch-node k8s" style="padding:14px 18px;">
-                <div class="arch-node-title" style="font-size:0.82rem;">
-                  <span class="arch-tag crd">CRD</span> &nbsp;Incident
-                </div>
-                <div class="arch-node-sub">Groups ProblemCases by workload root</div>
-                <div style="margin-top:8px;">
-                  <span class="arch-tag crd">CRD</span>&nbsp; ProblemCase &nbsp;
-                  <span class="arch-tag crd">CRD</span>&nbsp; DiagnosticRun
-                </div>
-              </div>
-            </div>
-
-            <!-- Column 3: Output -->
-            <div class="arch-col">
-              <h4 style="color:var(--muted);font-size:0.78rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin:0 0 8px;">Analysis &amp; UI</h4>
-
-              <div class="arch-node python">
-                <div class="arch-node-title">
-                  <span>🐍</span>
-                  llm-gateway
-                  <span class="arch-tag py">Python</span>
-                </div>
-                <div class="arch-node-sub">
-                  FastAPI · builds prompt from evidence.<br/>
-                  AWS Bedrock (Qwen3-32B/235B)<br/>
-                  or GitHub Copilot.<br/>
-                  Returns structured JSON analysis.
-                </div>
-              </div>
-
-              <div class="arch-node react">
-                <div class="arch-node-title">
-                  <span>⚛️</span>
-                  frontend-ui
-                  <span class="arch-tag ts">TypeScript</span>
-                </div>
-                <div class="arch-node-sub">
-                  React 19 · Vite · MUI v9 · nginx.<br/>
-                  Live WebSocket updates.<br/>
-                  KubeChan sidebar character.<br/>
-                  LLM provider settings per user.
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          <!-- Flow arrows legend -->
-          <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:24px;">
-            <div style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--muted);">
-              <span style="color:var(--green)">──▶</span> ProblemCase / Incident CRDs
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--muted);">
-              <span style="color:var(--blue)">──▶</span> DiagnosticRun CRD
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--muted);">
-              <span style="color:var(--amber)">──▶</span> POST /internal/evidence
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--muted);">
-              <span style="color:var(--purple)">──▶</span> POST /analyze → JSON response
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--muted);">
-              <span style="color:var(--red)">──▶</span> WebSocket broadcast
-            </div>
-          </div>
-        </div>
-
-        <div class="callout info">
-          <span class="callout-icon">ℹ️</span>
-          <div class="callout-body">
-            <strong>Read-only by design</strong>
-            No component in KubeChan has write access to user workloads. The LLM never calls the Kubernetes API directly. Evidence is collected by the diagnostics-worker and passed to the gateway, ensuring secret values are never forwarded.
-          </div>
-        </div>
-      </section>
-
-      <!-- HOW IT WORKS -->
-      <section id="how-it-works" class="doc-section" aria-labelledby="hiw-heading">
-        <p class="section-eyebrow">Incident lifecycle</p>
-        <div class="section-divider"></div>
-        <h2 id="hiw-heading">From anomaly to root cause</h2>
-        <p>
-          Every incident — whether auto-detected or user-reported — goes through the same evidence collection
-          and LLM analysis pipeline. The only difference is how the <strong>Incident CRD</strong> is created.
-        </p>
-
-        <h3>Auto pipeline</h3>
-        <p>cluster-watcher continuously reconciles all Pods, Deployments, Services, and Nodes.
-        When a detector fires, it writes a <code>ProblemCase</code> CRD. The <code>CorrelationReconciler</code>
-        walks the owner-reference chain to the workload root and groups ProblemCases into a single <code>Incident</code>.</p>
-
-        <h3>Manual pipeline</h3>
-        <p>The user opens "+ Report an issue" in the UI, selects the affected resource, writes a description,
-        and optionally tags related resources (Deployments, ConfigMaps, Ingresses, PVCs, Services).
-        backend-api creates the Incident, DiagnosticRun, and analysis request in one transaction.</p>
-
-        <h3>Needs-more-info loop</h3>
-        <p>When the LLM returns <code>confidence &lt; 0.65</code>, it sets <code>needsMoreInfo: true</code>
-        and returns a list of <code>suggestedResources</code> with reasons. The user can add those resources
-        and trigger a new DiagnosticRun — evidence from both runs is merged before the next analysis call.</p>
-      </section>
-
-      <!-- USE CASES -->
-      <section id="use-cases" class="doc-section" aria-labelledby="uc-heading">
-        <p class="section-eyebrow">Use cases</p>
-        <div class="section-divider"></div>
-        <h2 id="uc-heading">Real-world troubleshooting scenarios</h2>
-        <p>These are the most common situations where KubeChan provides immediate value.</p>
-
-        <div class="usecase-grid">
-
-          <article class="usecase-card" id="usecase-crashloop">
-            <div class="usecase-icon">🔁</div>
-            <h4>CrashLoopBackOff — application keeps restarting</h4>
-            <p>A pod enters CrashLoopBackOff. Normally you'd grep logs, check events, and guess the cause.</p>
-            <div class="usecase-steps">
-              <div class="usecase-step"><span class="usecase-step-num">1</span>cluster-watcher detects CrashLoopBackOff and creates a ProblemCase CRD within seconds.</div>
-              <div class="usecase-step"><span class="usecase-step-num">2</span>An Incident appears in the UI automatically. Click "Ask KubeChan to help".</div>
-              <div class="usecase-step"><span class="usecase-step-num">3</span>diagnostics-worker collects current and previous crash logs, K8s events, and any mounted ConfigMaps.</div>
-              <div class="usecase-step"><span class="usecase-step-num">4</span>KubeChan's analysis identifies whether the crash is a config error, OOM, missing secret, or application bug — with the exact log line as evidence.</div>
-            </div>
-          </article>
-
-          <article class="usecase-card" id="usecase-oom">
-            <div class="usecase-icon">💥</div>
-            <h4>OOMKilled — container killed by memory pressure</h4>
-            <p>Pods are restarting with exit code 137. Resource limits may be missing or wrong.</p>
-            <div class="usecase-steps">
-              <div class="usecase-step"><span class="usecase-step-num">1</span>CrashLoopBackOff detector fires. Previous container logs capture the OOMKilled exit code.</div>
-              <div class="usecase-step"><span class="usecase-step-num">2</span>Evidence includes pod spec resource limits (or their absence) and ConfigMap values that may set heap sizes.</div>
-              <div class="usecase-step"><span class="usecase-step-num">3</span>LLM pinpoints whether the limit is missing, too low, or set incorrectly via environment variable.</div>
-              <div class="usecase-step"><span class="usecase-step-num">4</span>Recommendation includes the exact <code>resources.limits.memory</code> field to set.</div>
-            </div>
-          </article>
-
-          <article class="usecase-card" id="usecase-pending">
-            <div class="usecase-icon">⏳</div>
-            <h4>Pending pod — stuck waiting to be scheduled</h4>
-            <p>A pod has been in Pending for minutes. Could be resource pressure, missing PVC, taint mismatch, or image pull failure.</p>
-            <div class="usecase-steps">
-              <div class="usecase-step"><span class="usecase-step-num">1</span>PendingTooLongDetector fires after the configured threshold (default 5 min).</div>
-              <div class="usecase-step"><span class="usecase-step-num">2</span>Evidence includes scheduler events, PVC phase and events, and node taints.</div>
-              <div class="usecase-step"><span class="usecase-step-num">3</span>If PVC is the root cause, KubeChan explains the storage class, binding status, and what to check.</div>
-              <div class="usecase-step"><span class="usecase-step-num">4</span>If it needs node information, it requests it via the needs-more-info flow.</div>
-            </div>
-          </article>
-
-          <article class="usecase-card" id="usecase-endpoints">
-            <div class="usecase-icon">🔌</div>
-            <h4>Service has no endpoints — traffic going nowhere</h4>
-            <p>A Service exists but no pod is matching its selector. Requests time out silently.</p>
-            <div class="usecase-steps">
-              <div class="usecase-step"><span class="usecase-step-num">1</span>ServiceNoEndpointsDetector fires when a Service has zero ready endpoints.</div>
-              <div class="usecase-step"><span class="usecase-step-num">2</span>Evidence includes Deployment status, pod label selectors, and any Ingress rules pointing at this Service.</div>
-              <div class="usecase-step"><span class="usecase-step-num">3</span>LLM compares Service selector with pod labels and identifies the mismatch or missing pods.</div>
-              <div class="usecase-step"><span class="usecase-step-num">4</span>Recommendation shows the exact selector diff to fix.</div>
-            </div>
-          </article>
-
-          <article class="usecase-card" id="usecase-manual">
-            <div class="usecase-icon">🖊️</div>
-            <h4>Manual incident — "something is broken but no alert fired"</h4>
-            <p>The cluster looks healthy but your application is misbehaving. No detector fired.</p>
-            <div class="usecase-steps">
-              <div class="usecase-step"><span class="usecase-step-num">1</span>Click "+ Report an issue". Select the root resource (Deployment, Service, Ingress, etc.).</div>
-              <div class="usecase-step"><span class="usecase-step-num">2</span>Write a description: "Users are getting 502 errors on /api/checkout since the last deploy".</div>
-              <div class="usecase-step"><span class="usecase-step-num">3</span>Optionally tag related resources: the backend Deployment, the ConfigMap, the Ingress.</div>
-              <div class="usecase-step"><span class="usecase-step-num">4</span>Your description is included verbatim in the LLM prompt alongside all collected evidence.</div>
-            </div>
-          </article>
-
-          <article class="usecase-card">
-            <div class="usecase-icon">🔄</div>
-            <h4>Re-analysis with augmented context</h4>
-            <p>The LLM returned a low-confidence result and asked for more information.</p>
-            <div class="usecase-steps">
-              <div class="usecase-step"><span class="usecase-step-num">1</span>A "Needs more info" banner appears in the UI with suggested resource kinds and the LLM's reasoning.</div>
-              <div class="usecase-step"><span class="usecase-step-num">2</span>Click "Add context & Re-analyze". Select the suggested resources from name autocomplete.</div>
-              <div class="usecase-step"><span class="usecase-step-num">3</span>A new DiagnosticRun is created. Evidence from both runs is merged and re-sent to the LLM.</div>
-              <div class="usecase-step"><span class="usecase-step-num">4</span>The new analysis has access to the full combined evidence set and produces a higher-confidence result.</div>
-            </div>
-          </article>
-
-        </div>
-      </section>
-
-      <!-- SERVICE: cluster-watcher -->
-      <section id="service-cluster-watcher" class="doc-section" aria-labelledby="cw-heading">
-        <p class="section-eyebrow">Service reference</p>
-        <div class="section-divider"></div>
-        <h2 id="cw-heading">cluster-watcher</h2>
-        <p>
-          A Go controller built with <a href="https://github.com/kubernetes-sigs/controller-runtime" target="_blank" rel="noopener">controller-runtime</a>.
-          It watches Pods, Deployments, Services, Nodes, and Kubernetes Events. For each reconcile event it
-          runs a set of <strong>detectors</strong> and writes <code>ProblemCase</code> and <code>Incident</code> CRDs.
-          A per-resource debounce window suppresses noise during rollouts.
-        </p>
-
-        <h3>Detectors</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Detector</th><th>Watches</th><th>Trigger</th></tr></thead>
-            <tbody>
-              <tr><td><code>CrashLoopBackOffDetector</code></td><td>Pod</td><td>Container state = <code>CrashLoopBackOff</code></td></tr>
-              <tr><td><code>ImagePullBackOffDetector</code></td><td>Pod</td><td>Container waiting reason = <code>ImagePullBackOff</code> or <code>ErrImagePull</code></td></tr>
-              <tr><td><code>PendingTooLongDetector</code></td><td>Pod</td><td>Pod phase = Pending for &gt; threshold (default 5 min)</td></tr>
-              <tr><td><code>DeploymentUnavailableDetector</code></td><td>Deployment</td><td>Unavailable replicas &gt; 0 for &gt; threshold (default 5 min)</td></tr>
-              <tr><td><code>ServiceNoEndpointsDetector</code></td><td>Service / Endpoints</td><td>Service has 0 ready endpoints</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>Key environment variables</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>DEBOUNCE_WINDOW_SECS</code></td><td><code>30</code></td><td>Seconds before re-evaluating a workload after last event</td></tr>
-              <tr><td><code>PENDING_THRESHOLD_SECS</code></td><td><code>300</code></td><td>Seconds before a Pending pod is flagged</td></tr>
-              <tr><td><code>UNAVAILABLE_THRESHOLD_SECS</code></td><td><code>300</code></td><td>Seconds before an unavailable Deployment is flagged</td></tr>
-              <tr><td><code>CONTROL_NAMESPACE</code></td><td><code>kubechan</code></td><td>Namespace where CRDs are written</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- SERVICE: diagnostics-worker -->
-      <section id="service-diagnostics-worker" class="doc-section" aria-labelledby="dw-heading">
-        <h2 id="dw-heading">diagnostics-worker</h2>
-        <p>
-          Reconciles <code>DiagnosticRun</code> CRDs. When a DiagnosticRun appears in <code>pending</code> state,
-          the worker collects a structured evidence payload for the referenced incident's root resource,
-          then POSTs it to backend-api.
-        </p>
-
-        <h3>Evidence collected per workload</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Evidence type</th><th>Details</th></tr></thead>
-            <tbody>
-              <tr><td><strong>Pod status</strong></td><td>Phase, conditions, container states, restart counts</td></tr>
-              <tr><td><strong>Current logs</strong></td><td>Last N lines of stdout (configurable via <code>LOG_TAIL_LINES</code>)</td></tr>
-              <tr><td><strong>Previous crash logs</strong></td><td>Last N lines from the previous terminated container (configurable via <code>PREV_LOG_TAIL_LINES</code>)</td></tr>
-              <tr><td><strong>Kubernetes events</strong></td><td>Events on the pod and the root resource (Deployment, StatefulSet, etc.)</td></tr>
-              <tr><td><strong>ConfigMaps</strong></td><td>All keys and values (sensitive keys redacted). Includes mount path and env var injection information.</td></tr>
-              <tr><td><strong>Secrets</strong></td><td>Existence check only — names collected, values never forwarded</td></tr>
-              <tr><td><strong>PVC</strong></td><td>Phase, storage class, capacity, and events</td></tr>
-              <tr><td><strong>Ingresses</strong></td><td>All Ingresses in the workload namespace — auto-discovered. Includes rules, paths, backends, annotations.</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>Key environment variables</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>BACKEND_API_URL</code></td><td><code>http://kubechan-backend-api:8080</code></td><td>Where to POST evidence</td></tr>
-              <tr><td><code>LOG_TAIL_LINES</code></td><td><code>500</code></td><td>Lines of current container logs to collect</td></tr>
-              <tr><td><code>PREV_LOG_TAIL_LINES</code></td><td><code>200</code></td><td>Lines of previous (crashed) container logs</td></tr>
-              <tr><td><code>CONTROL_NAMESPACE</code></td><td><code>kubechan</code></td><td>Namespace to watch for DiagnosticRun CRDs</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- SERVICE: backend-api -->
-      <section id="service-backend-api" class="doc-section" aria-labelledby="ba-heading">
-        <h2 id="ba-heading">backend-api</h2>
-        <p>
-          The central orchestration layer. Serves the REST and WebSocket API for the frontend,
-          stores all state in a local SQLite database (auto-migrated on startup),
-          dispatches async analysis requests to llm-gateway, and broadcasts events to connected clients.
-        </p>
-
-        <div class="callout warning">
-          <span class="callout-icon">⚠️</span>
-          <div class="callout-body">
-            <strong>Single-writer constraint</strong>
-            Set <code>replicaCount: 1</code> for backend-api. SQLite does not support concurrent writers. Horizontal scaling requires replacing SQLite with PostgreSQL.
-          </div>
-        </div>
-
-        <h3>API reference</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>GET</code></td><td><code>/api/v1/incidents</code></td><td>List incidents (filterable by state, namespace)</td></tr>
-              <tr><td><code>GET</code></td><td><code>/api/v1/incidents/{id}</code></td><td>Get a single incident</td></tr>
-              <tr><td><code>POST</code></td><td><code>/api/v1/incidents/manual</code></td><td>Create a manual incident and kick off analysis</td></tr>
-              <tr><td><code>POST</code></td><td><code>/api/v1/incidents/{id}/analyze</code></td><td>Trigger a new DiagnosticRun for an existing incident</td></tr>
-              <tr><td><code>POST</code></td><td><code>/api/v1/incidents/{id}/augment</code></td><td>Add related resources and re-analyze</td></tr>
-              <tr><td><code>POST</code></td><td><code>/api/v1/incidents/{id}/resolve</code></td><td>Mark an incident resolved (patches CRD status)</td></tr>
-              <tr><td><code>GET</code></td><td><code>/api/v1/incidents/{id}/evidence</code></td><td>Fetch latest collected evidence</td></tr>
-              <tr><td><code>GET</code></td><td><code>/api/v1/diagnosticruns</code></td><td>List DiagnosticRun summaries with analysis results</td></tr>
-              <tr><td><code>DELETE</code></td><td><code>/api/v1/diagnosticruns</code></td><td>Bulk-delete DiagnosticRun records</td></tr>
-              <tr><td><code>GET</code></td><td><code>/api/v1/analysisresults/{id}</code></td><td>Fetch an analysis result by ID</td></tr>
-              <tr><td><code>POST</code></td><td><code>/api/v1/analysisresults/{id}/rate</code></td><td>Submit thumbs-up/down feedback</td></tr>
-              <tr><td><code>GET</code></td><td><code>/api/v1/me/llm-settings</code></td><td>Get current user's LLM settings (secrets masked)</td></tr>
-              <tr><td><code>PUT</code></td><td><code>/api/v1/me/llm-settings</code></td><td>Update LLM provider and credentials</td></tr>
-              <tr><td><code>GET</code></td><td><code>/api/v1/llm/models</code></td><td>List available models per provider</td></tr>
-              <tr><td><code>GET</code></td><td><code>/ws</code></td><td>WebSocket connection for push events</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>WebSocket events</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Event</th><th>Trigger</th></tr></thead>
-            <tbody>
-              <tr><td><code>Incident.Created</code></td><td>New Incident CRD detected by informer</td></tr>
-              <tr><td><code>Incident.Updated</code></td><td>Incident CRD changed (e.g. new ProblemCase added)</td></tr>
-              <tr><td><code>Incident.Resolved</code></td><td>Incident status set to resolved</td></tr>
-              <tr><td><code>Analysis.Completed</code></td><td>LLM response stored; includes <code>analysisId</code>, <code>incidentId</code>, <code>needsMoreInfo</code>, <code>suggestedResources</code></td></tr>
-              <tr><td><code>DiagnosticRun.Updated</code></td><td>DiagnosticRun status changes (pending → running → completed)</td></tr>
-              <tr><td><code>KubeChanState.Updated</code></td><td>Mood level changed based on open incident count</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- SERVICE: llm-gateway -->
-      <section id="service-llm-gateway" class="doc-section" aria-labelledby="lg-heading">
-        <h2 id="lg-heading">llm-gateway</h2>
-        <p>
-          A Python FastAPI service that acts as the stable interface between backend-api and LLM providers.
-          All provider credentials are passed per-request from backend-api — no shared environment-variable
-          credentials are required.
-        </p>
-
-        <h3>Supported providers</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Provider</th><th>Auth</th><th>Models</th></tr></thead>
-            <tbody>
-              <tr>
-                <td><strong>AWS Bedrock</strong></td>
-                <td>Bearer API key <em>or</em> IAM access key + secret</td>
-                <td><code>qwen3-32b</code> (default) · <code>qwen3-235b</code> · any full Bedrock model ID</td>
-              </tr>
-              <tr>
-                <td><strong>GitHub Copilot</strong></td>
-                <td>GitHub personal access token</td>
-                <td>Any model available through the Copilot API</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>Analysis response fields</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>openingRant</code></td><td>string</td><td>KubeChan's scathing opening remark — shown in the sidebar speech bubble</td></tr>
-              <tr><td><code>likelyRootCause</code></td><td>string</td><td>One-sentence technical root cause</td></tr>
-              <tr><td><code>evidenceChain</code></td><td>string</td><td>Specific log lines, event messages, or config values that prove the cause</td></tr>
-              <tr><td><code>recommendation</code></td><td>string</td><td>Numbered kubectl/config steps to resolve the issue</td></tr>
-              <tr><td><code>closingInsult</code></td><td>string</td><td>KubeChan's parting shot</td></tr>
-              <tr><td><code>confidence</code></td><td>float 0–1</td><td>Model confidence in the diagnosis</td></tr>
-              <tr><td><code>needsMoreInfo</code></td><td>bool</td><td><code>true</code> when evidence is insufficient (confidence &lt; 0.65)</td></tr>
-              <tr><td><code>suggestedResources</code></td><td>list</td><td><code>{kind, reason}</code> pairs — required when <code>needsMoreInfo</code> is true</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>Key environment variables</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>EVIDENCE_TOKEN_BUDGET</code></td><td><code>120000</code></td><td>Max tokens of evidence forwarded to the model per request</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- SERVICE: frontend-ui -->
-      <section id="service-frontend-ui" class="doc-section" aria-labelledby="fu-heading">
-        <h2 id="fu-heading">frontend-ui</h2>
-        <p>
-          A React 19 single-page application served by nginx. It connects to backend-api via REST and
-          maintains a persistent WebSocket connection for live updates.
-        </p>
-
-        <h3>Key features</h3>
-        <ul style="padding-left:20px;color:var(--muted);display:flex;flex-direction:column;gap:8px;font-size:0.9rem;margin-bottom:16px;">
-          <li>Incident list with open/resolved sections, sortable by <code>openedAt</code></li>
-          <li>Expandable details panel: root resource, problem cases, related resources, KubeChan suggestions</li>
-          <li>Live WebSocket updates — "Needs more info" banner appears immediately without a page reload</li>
-          <li>AugmentIncidentModal with name autocomplete for adding related resources</li>
-          <li>KubeChan sidebar: pose transitions (idle → thinking → speaking → chatter), mood system, poke escalation</li>
-          <li>LLM provider settings page — AWS Bedrock and GitHub Copilot, per-user credentials, never returned in GET responses</li>
-          <li>Diagnostics page — list and bulk-delete DiagnosticRuns, expand analysis results</li>
-          <li>Thumbs-up/down feedback on analysis results</li>
-        </ul>
-
-        <h3>KubeChan character poses</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Pose</th><th>When shown</th></tr></thead>
-            <tbody>
-              <tr><td><code>idle</code></td><td>No active analysis. Mood level (0–2) affects idle reaction lines.</td></tr>
-              <tr><td><code>thinking</code></td><td>DiagnosticRun in progress — evidence being collected or LLM call in flight.</td></tr>
-              <tr><td><code>speaking</code></td><td>Analysis complete — 5-section result displayed in speech bubble with confidence badge.</td></tr>
-              <tr><td><code>chatter</code></td><td>Reacting to a WebSocket event (new incident, resolved, poke, rating). Clears automatically.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- CRD REFERENCE -->
-      <section id="crds" class="doc-section" aria-labelledby="crds-heading">
-        <p class="section-eyebrow">Reference</p>
-        <div class="section-divider"></div>
-        <h2 id="crds-heading">CRD reference</h2>
-        <p>All CRDs live in the <code>kubechan</code> namespace and use the API group <code>kubechan.io</code>.</p>
-
-        <h3>Incident</h3>
-        <p>Groups one or more ProblemCases sharing a workload root. Also created directly for manual incidents.</p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>spec.rootResource</code></td><td>object</td><td>kind, name, namespace of the affected workload</td></tr>
-              <tr><td><code>spec.problemCases</code></td><td>[]string</td><td>Names of member ProblemCase CRDs</td></tr>
-              <tr><td><code>spec.source</code></td><td>enum</td><td><code>auto</code> | <code>manual</code></td></tr>
-              <tr><td><code>spec.userMessage</code></td><td>string</td><td>User's description (manual only)</td></tr>
-              <tr><td><code>spec.relatedResources</code></td><td>[]ResourceRef</td><td>User-tagged related resources (manual only)</td></tr>
-              <tr><td><code>status.state</code></td><td>enum</td><td><code>open</code> | <code>resolved</code></td></tr>
-              <tr><td><code>status.openedAt</code></td><td>timestamp</td><td>When the incident was created</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>ProblemCase</h3>
-        <p>Represents a single detected anomaly on a specific resource.</p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>spec.affectedResource</code></td><td>object</td><td>kind, name, namespace of the affected resource</td></tr>
-              <tr><td><code>spec.detector</code></td><td>string</td><td>Name of the detector that created this case</td></tr>
-              <tr><td><code>spec.severity</code></td><td>enum</td><td><code>critical</code> | <code>high</code> | <code>medium</code></td></tr>
-              <tr><td><code>spec.symptoms</code></td><td>[]string</td><td>Human-readable symptom descriptions</td></tr>
-              <tr><td><code>status.state</code></td><td>enum</td><td><code>open</code> | <code>investigating</code> | <code>resolved</code></td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>DiagnosticRun</h3>
-        <p>A request to collect evidence for an incident. Created by backend-api when analysis is triggered.</p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>spec.incidentRef</code></td><td>string</td><td>Name of the parent Incident CRD</td></tr>
-              <tr><td><code>spec.triggeredBy</code></td><td>string</td><td><code>user</code> | username for augment runs</td></tr>
-              <tr><td><code>status.phase</code></td><td>enum</td><td><code>pending</code> → <code>running</code> → <code>completed</code> | <code>failed</code></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- HELM CONFIGURATION -->
-      <section id="configuration" class="doc-section" aria-labelledby="cfg-heading">
-        <p class="section-eyebrow">Configuration</p>
-        <div class="section-divider"></div>
-        <h2 id="cfg-heading">Helm configuration</h2>
-        <p>
-          All services are configured via <code>values.yaml</code>. Override using <code>--set key=value</code>
-          or a custom values file (<code>-f my-values.yaml</code>).
-        </p>
-
-        <h3>cluster-watcher</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>clusterWatcher.debounceWindowSecs</code></td><td><code>30</code></td><td>Debounce window in seconds before creating a ProblemCase</td></tr>
-              <tr><td><code>clusterWatcher.pendingTooLongThresholdSecs</code></td><td><code>300</code></td><td>Pending pod threshold in seconds</td></tr>
-              <tr><td><code>clusterWatcher.unavailableThresholdSecs</code></td><td><code>300</code></td><td>Unavailable deployment threshold in seconds</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>diagnostics-worker</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>diagnosticsWorker.logTailLines</code></td><td><code>500</code></td><td>Lines of current container logs to collect</td></tr>
-              <tr><td><code>diagnosticsWorker.prevLogTailLines</code></td><td><code>200</code></td><td>Lines of previous (crashed) container logs</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>backend-api</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>backendApi.replicaCount</code></td><td><code>1</code></td><td>Must be 1 — SQLite single-writer constraint</td></tr>
-              <tr><td><code>backendApi.storage.pvc.size</code></td><td><code>5Gi</code></td><td>PVC size for SQLite database</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>llm-gateway</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
-            <tbody>
-              <tr><td><code>llmGateway.evidenceTokenBudget</code></td><td><code>120000</code></td><td>Max tokens of evidence forwarded per analysis request</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3>Example override file</h3>
-        <div class="terminal">
-          <div class="terminal-bar">
-            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-            <span class="terminal-label">my-values.yaml</span>
-          </div>
-          <div class="terminal-body">
-            <div><span class="term-comment"># Tune detection sensitivity</span></div>
-            <div><span class="term-cmd">clusterWatcher:</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;debounceWindowSecs: 60</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;pendingTooLongThresholdSecs: 120</span></div>
-            <br/>
-            <div><span class="term-comment"># Collect more logs for verbose apps</span></div>
-            <div><span class="term-cmd">diagnosticsWorker:</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;logTailLines: 1000</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;prevLogTailLines: 500</span></div>
-            <br/>
-            <div><span class="term-comment"># Larger DB volume for busy clusters</span></div>
-            <div><span class="term-cmd">backendApi:</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;storage:</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;&nbsp;&nbsp;pvc:</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;size: 20Gi</span></div>
-            <br/>
-            <div><span class="term-comment"># Enable Ingress for frontend</span></div>
-            <div><span class="term-cmd">frontendUi:</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;ingress:</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;&nbsp;&nbsp;enabled: true</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;&nbsp;&nbsp;host: kubechan.example.com</span></div>
-          </div>
-        </div>
-
-        <div class="terminal" style="margin-top:16px;">
-          <div class="terminal-bar">
-            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-            <span class="terminal-label">bash</span>
-          </div>
-          <div class="terminal-body">
-            <div><span class="term-prompt">$</span> <span class="term-cmd">helm upgrade --install kubechan kubechan/kubechan \</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;--namespace kubechan \</span></div>
-            <div><span class="term-cmd">&nbsp;&nbsp;-f my-values.yaml</span></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- LOCAL DEVELOPMENT -->
-      <section id="development" class="doc-section" aria-labelledby="dev-heading">
-        <p class="section-eyebrow">Development</p>
-        <div class="section-divider"></div>
-        <h2 id="dev-heading">Local development with Tilt</h2>
-        <p>
-          For contributors or local experimentation, KubeChan uses
-          <a href="https://tilt.dev" target="_blank" rel="noopener">Tilt</a> for live-reload development
-          on Docker Desktop Kubernetes.
-        </p>
-
-        <h3>Prerequisites</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Tool</th><th>Version</th><th>Install</th></tr></thead>
-            <tbody>
-              <tr><td>Docker Desktop</td><td>latest</td><td>Enable Kubernetes in settings</td></tr>
-              <tr><td>Tilt</td><td>≥ 0.33</td><td><code>brew install tilt</code></td></tr>
-              <tr><td>kubectl</td><td>≥ 1.28</td><td>Bundled with Docker Desktop</td></tr>
-              <tr><td>Go</td><td>1.25+</td><td><code>brew install go</code></td></tr>
-              <tr><td>Python</td><td>3.13+</td><td>Managed by uv</td></tr>
-              <tr><td>uv</td><td>≥ 0.5</td><td><code>brew install uv</code></td></tr>
-              <tr><td>Helm</td><td>3+</td><td><code>brew install helm</code></td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="terminal">
-          <div class="terminal-bar">
-            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-            <span class="terminal-label">bash — local dev setup</span>
-          </div>
-          <div class="terminal-body">
-            <div><span class="term-comment"># Clone and enter the repo</span></div>
-            <div><span class="term-prompt">$</span> <span class="term-cmd">git clone https://github.com/aryzhykau/kubechan.git && cd kubechan</span></div>
-            <br/>
-            <div><span class="term-comment"># Create the SQLite data directory</span></div>
-            <div><span class="term-prompt">$</span> <span class="term-cmd">mkdir -p .data && chmod 777 .data</span></div>
-            <br/>
-            <div><span class="term-comment"># Switch to Docker Desktop context</span></div>
-            <div><span class="term-prompt">$</span> <span class="term-cmd">kubectl config use-context docker-desktop</span></div>
-            <br/>
-            <div><span class="term-comment"># Start everything (creates namespace, applies CRDs, runs Tilt)</span></div>
-            <div><span class="term-prompt">$</span> <span class="term-cmd">make dev-up</span></div>
-            <div class="term-out">namespace/kubechan created</div>
-            <div class="term-out">Tilt started on http://localhost:10350</div>
-            <br/>
-            <div><span class="term-comment"># UI is available at</span></div>
-            <div><span class="term-prompt">$</span> <span class="term-cmd">open http://localhost:30081</span></div>
-          </div>
-        </div>
-
-        <div class="callout info" style="margin-top:24px;">
-          <span class="callout-icon">💡</span>
-          <div class="callout-body">
-            <strong>Dev overrides</strong>
-            Tilt uses <code>helm/kubechan/values-dev.yaml</code> which sets shorter debounce windows (5s), smaller resource limits, and NodePort services for easy local access.
-          </div>
-        </div>
-      </section>
-
-    </main>
-  </div>
-
-  <!-- ═══════════════ FOOTER ═══════════════ -->
-  <footer>
-    <div class="footer-inner">
-      <div>
-        <a href="index.html" class="footer-logo">
-          <img src="https://raw.githubusercontent.com/aryzhykau/kubechan/main/services/frontend-ui/public/kubechan-idle-1.png"
-               alt="KubeChan logo" width="28" />
-          KubeChan
-        </a>
-        <p class="footer-tagline">AI-powered Kubernetes troubleshooting — with attitude.</p>
-      </div>
-      <ul class="footer-links">
-        <li><a href="index.html">Home</a></li>
-        <li><a href="https://github.com/aryzhykau/kubechan" target="_blank" rel="noopener noreferrer">GitHub</a></li>
-        <li><a href="https://github.com/aryzhykau/kubechan/issues" target="_blank" rel="noopener noreferrer">Issues</a></li>
-      </ul>
     </div>
-    <p class="footer-copy">KubeChan is open-source software. KubeChan never modifies cluster state.</p>
-  </footer>
+  </section>
+
+  <!-- INSTALLATION -->
+  <section id="installation" aria-labelledby="inst-h">
+    <p class="eyebrow">Installation</p>
+    <h2 id="inst-h">Install with Helm</h2>
+    <p>KubeChan ships as a Helm chart. All five services are deployed in a single release into the <strong>kubechan</strong> namespace. No shared LLM credentials are needed at deploy time — each user configures their own provider in the UI.</p>
+
+    <div class="callout warn">
+      <span style="font-size:1.1rem;flex-shrink:0;line-height:1.4">&#9888;&#65039;</span>
+      <p><strong>Prerequisites:</strong> Kubernetes 1.28+, <code>kubectl</code>, Helm 3. Docker Desktop with Kubernetes enabled works for local testing.</p>
+    </div>
+
+    <h3>1. Create namespace and apply CRDs</h3>
+    <p>CRDs must be applied before the Helm release so the controllers can start cleanly.</p>
+    <div class="terminal">
+      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span></div>
+      <div class="tc">
+        <div><span class="pr">$</span> <span class="cd">kubectl create namespace kubechan</span></div>
+        <br/>
+        <div><span class="cm"># Apply all four CRDs</span></div>
+        <div><span class="pr">$</span> <span class="cd">kubectl apply --server-side -f \</span></div>
+        <div><span class="cd">&nbsp;&nbsp;https://raw.githubusercontent.com/aryzhykau/kubechan/main/helm/kubechan/crds/kubechan.io_incidents.yaml \</span></div>
+        <div><span class="cd">&nbsp;&nbsp;https://raw.githubusercontent.com/aryzhykau/kubechan/main/helm/kubechan/crds/kubechan.io_problemcases.yaml \</span></div>
+        <div><span class="cd">&nbsp;&nbsp;https://raw.githubusercontent.com/aryzhykau/kubechan/main/helm/kubechan/crds/kubechan.io_diagnosticruns.yaml \</span></div>
+        <div><span class="cd">&nbsp;&nbsp;https://raw.githubusercontent.com/aryzhykau/kubechan/main/helm/kubechan/crds/kubechan.io_kubechanstates.yaml</span></div>
+      </div>
+    </div>
+
+    <h3>2. Clone and install</h3>
+    <div class="terminal">
+      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span></div>
+      <div class="tc">
+        <div><span class="pr">$</span> <span class="cd">git clone https://github.com/aryzhykau/kubechan.git &amp;&amp; cd kubechan</span></div>
+        <br/>
+        <div><span class="pr">$</span> <span class="cd">helm install kubechan ./helm/kubechan \</span></div>
+        <div><span class="cd">&nbsp;&nbsp;--namespace kubechan</span></div>
+        <br/>
+        <div><span class="cm"># Verify all pods are running</span></div>
+        <div><span class="pr">$</span> <span class="cd">kubectl get pods -n kubechan</span></div>
+        <div class="ou">NAME                                  READY   STATUS    AGE</div>
+        <div class="ou">kubechan-backend-api-xxx              1/1     Running   40s</div>
+        <div class="ou">kubechan-cluster-watcher-xxx          1/1     Running   40s</div>
+        <div class="ou">kubechan-diagnostics-worker-xxx       1/1     Running   40s</div>
+        <div class="ou">kubechan-llm-gateway-xxx              1/1     Running   40s</div>
+        <div class="ou">kubechan-frontend-ui-xxx              1/1     Running   40s</div>
+      </div>
+    </div>
+
+    <h3>3. Configure LLM provider</h3>
+    <p>Open the UI, go to <strong>Settings &#8594; LLM Provider</strong>, choose AWS Bedrock or GitHub Copilot, enter your credentials, and save. No restart needed.</p>
+
+    <h3>Common value overrides</h3>
+    <div class="terminal">
+      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">my-values.yaml</span></div>
+      <div class="tc">
+        <div><span class="cm"># Detect problems faster (default debounce: 30s)</span></div>
+        <div><span class="cd">clusterWatcher:</span></div>
+        <div><span class="cd">&nbsp;&nbsp;debounceWindowSecs: 10</span></div>
+        <br/>
+        <div><span class="cm"># More log lines for verbose services</span></div>
+        <div><span class="cd">diagnosticsWorker:</span></div>
+        <div><span class="cd">&nbsp;&nbsp;logTailLines: 1000</span></div>
+        <div><span class="cd">&nbsp;&nbsp;prevLogTailLines: 500</span></div>
+        <br/>
+        <div><span class="cm"># Expose via Ingress</span></div>
+        <div><span class="cd">frontendUi:</span></div>
+        <div><span class="cd">&nbsp;&nbsp;ingress:</span></div>
+        <div><span class="cd">&nbsp;&nbsp;&nbsp;&nbsp;enabled: true</span></div>
+        <div><span class="cd">&nbsp;&nbsp;&nbsp;&nbsp;host: kubechan.example.com</span></div>
+        <br/>
+        <div><span class="cm"># Larger DB volume (default: 5Gi)</span></div>
+        <div><span class="cd">backendApi:</span></div>
+        <div><span class="cd">&nbsp;&nbsp;storage:</span></div>
+        <div><span class="cd">&nbsp;&nbsp;&nbsp;&nbsp;pvc:</span></div>
+        <div><span class="cd">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;size: 20Gi</span></div>
+      </div>
+    </div>
+    <div class="terminal">
+      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span></div>
+      <div class="tc">
+        <div><span class="pr">$</span> <span class="cd">helm upgrade --install kubechan ./helm/kubechan \</span></div>
+        <div><span class="cd">&nbsp;&nbsp;--namespace kubechan -f my-values.yaml</span></div>
+      </div>
+    </div>
+
+    <div class="callout info" style="margin-top:28px">
+      <span style="font-size:1.1rem;flex-shrink:0;line-height:1.4">&#128161;</span>
+      <p><strong>Local development:</strong> Run <code>make dev-up</code> in the repo root. This uses Tilt with Docker Desktop Kubernetes and enables live-reload for all services. Requires Go 1.25+, Python 3.13+, uv, Tilt &#8805; 0.33.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="fi">
+    <div>
+      <a href="index.html" class="fl">
+        <img src="https://raw.githubusercontent.com/aryzhykau/kubechan/main/services/frontend-ui/public/kubechan-idle-1.png" alt="KubeChan" width="26" />
+        KubeChan
+      </a>
+      <p class="ft">AI-powered Kubernetes troubleshooting &#8212; with attitude.</p>
+    </div>
+    <ul class="flinks">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="https://github.com/aryzhykau/kubechan" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+      <li><a href="https://github.com/aryzhykau/kubechan/issues" target="_blank" rel="noopener noreferrer">Issues</a></li>
+    </ul>
+  </div>
+</footer>
 
 </body>
 </html>
