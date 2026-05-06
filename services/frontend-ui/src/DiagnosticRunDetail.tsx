@@ -199,20 +199,26 @@ export function DiagnosticRunDetail({ runId, onBack, onResultLoaded, onAction }:
   const [evidence, setEvidence] = useState<Evidence | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [triggeredBy, setTriggeredBy] = useState<{ userId: string; username: string } | null>(null)
 
   useEffect(() => {
     onAction?.('open-run')
     setLoading(true)
     setError(null)
     setEvidence(null)
+    setTriggeredBy(null)
 
     Promise.allSettled([
       api.getDiagnosticRunEvidence(runId),
       api.getDiagnosticRunAnalysisResult(runId),
-    ]).then(([evidenceRes, resultRes]) => {
+      api.getDiagnosticRun(runId),
+    ]).then(([evidenceRes, resultRes, runDetailRes]) => {
       if (evidenceRes.status === 'fulfilled') setEvidence(evidenceRes.value)
       const result = resultRes.status === 'fulfilled' ? resultRes.value : null
       onResultLoaded?.(result, runId)
+      if (runDetailRes.status === 'fulfilled' && runDetailRes.value.triggeredBy) {
+        setTriggeredBy(runDetailRes.value.triggeredBy)
+      }
       if (evidenceRes.status === 'rejected' && resultRes.status === 'rejected') {
         setError('No evidence or analysis found for this run.')
       }
@@ -225,6 +231,9 @@ export function DiagnosticRunDetail({ runId, onBack, onResultLoaded, onAction }:
       <div className="diag-detail-header">
         <button className="btn-back" onClick={onBack}>← Back</button>
         <span className="diag-run-id-large" title={runId}>{runId}</span>
+        {triggeredBy && (
+          <span className="diag-triggered-by muted">triggered by {triggeredBy.username}</span>
+        )}
       </div>
 
       {loading && <div className="loading">Loading…</div>}

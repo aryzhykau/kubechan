@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { getToken } from './api'
 
 export interface WSEvent {
   type: string
@@ -14,7 +15,9 @@ export function useWebSocket(onMessage: Handler) {
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${protocol}://${window.location.host}/ws`
+    const token = getToken()
+    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : ''
+    const url = `${protocol}://${window.location.host}/ws${tokenParam}`
     const ws = new WebSocket(url)
     wsRef.current = ws
 

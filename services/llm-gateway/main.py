@@ -1,24 +1,28 @@
-"""llm-gateway — AWS Bedrock analysis gateway."""
+"""llm-gateway — multi-provider LLM analysis gateway (Bedrock + Copilot)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
 import textwrap
+from abc import ABC, abstractmethod
 from typing import Any
 
 import boto3
+import copilot as copilot_sdk
 from botocore.config import Config
+from copilot.generated.session_events import AssistantMessageData
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 logger = logging.getLogger("llm-gateway")
 logging.basicConfig(level=logging.INFO)
 
-# ── Config ────────────────────────────────────────────────────────────────────
-BEDROCK_REGION = os.getenv("BEDROCK_REGION", "us-east-1")
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "qwen3-32b")
+# ── Default config (used when no per-user credentials are supplied) ───────────
+DEFAULT_BEDROCK_REGION = os.getenv("BEDROCK_REGION", "us-east-1")
+DEFAULT_BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "qwen3-32b")
 THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "0"))
 EVIDENCE_TOKEN_BUDGET = int(os.getenv("EVIDENCE_TOKEN_BUDGET", "120000"))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "4096"))
@@ -33,13 +37,7 @@ _INFERENCE_PROFILES: dict[str, str] = {
 def _resolve_model_id(model_id: str) -> str:
     return _INFERENCE_PROFILES.get(model_id, model_id)
 
-_bedrock = boto3.client(
-    "bedrock-runtime",
-    region_name=BEDROCK_REGION,
-    config=Config(retries={"max_attempts": 3, "mode": "adaptive"}),
-)
-
-app = FastAPI(title="llm-gateway", version="0.1.0")
+app = FastAPI(title="llm-gateway", version="0.2.0")
 
 # ── Request / Response models ─────────────────────────────────────────────────
 class PriorDiagnosis(BaseModel):
@@ -55,6 +53,8 @@ class AnalyzeRequest(BaseModel):
     moodLevel: int = 0
     priorDiagnoses: list[PriorDiagnosis] = []
     userMessage: str = ""
+    provider: str = "bedrock"
+    credentials: dict[str, Any] = {}
     payload: dict[str, Any]
 
 class SuggestedResource(BaseModel):
@@ -422,52 +422,105 @@ def _build_prompt(payload: dict[str, Any], reanalysis_count: int = 0, mood_level
         prompt = prompt[:char_budget] + "\n...(truncated)"
     return prompt
 
-# ── Bedrock call ──────────────────────────────────────────────────────────────
-def _call_bedrock(prompt: str) -> tuple[str, int]:
-    """Returns (raw_text, thinking_tokens_used)."""
-    model_id = _resolve_model_id(BEDROCK_MODEL_ID)
+# ── Provider interface ────────────────────────────────────────────────────────
+class LLMProvider(ABC):
+    @abstractmethod
+    async def call(self, prompt: str) -> tuple[str, int]:
+        """Call the LLM. Returns (raw_text, thinking_tokens_used)."""
 
-    messages = [{"role": "user", "content": prompt}]
+    @abstractmethod
+    def model_id(self) -> str:
+        """Human-readable model identifier for logging / storage."""
 
-    body: dict[str, Any] = {
-        "messages": messages,
-        "max_tokens": MAX_TOKENS,
-        "anthropic_version": "bedrock-2023-05-31",
-    }
 
-    # Qwen3 uses the Converse API, not the Anthropic messages API.
-    # Use converse() for model-agnostic access.
-    converse_body: dict[str, Any] = {
-        "messages": [{"role": "user", "content": [{"text": prompt}]}],
-    }
-    inference_config: dict[str, Any] = {"maxTokens": MAX_TOKENS, "temperature": TEMPERATURE}
-    if THINKING_BUDGET > 0:
-        inference_config["thinkingConfig"] = {"thinkingBudgetTokens": THINKING_BUDGET}
+class BedrockProvider(LLMProvider):
+    """Calls AWS Bedrock using the Converse API (sync boto3 offloaded to thread)."""
 
-    response = _bedrock.converse(
-        modelId=model_id,
-        messages=converse_body["messages"],
-        inferenceConfig=inference_config,
-    )
+    def __init__(self, credentials: dict[str, Any]) -> None:
+        region = credentials.get("region") or DEFAULT_BEDROCK_REGION
+        access_key = credentials.get("accessKeyId") or ""
+        secret_key = credentials.get("secretAccessKey") or ""
+        self._model = credentials.get("modelId") or DEFAULT_BEDROCK_MODEL_ID
 
-    output = response.get("output", {})
-    message = output.get("message", {})
-    content = message.get("content", [])
+        kwargs: dict[str, Any] = {
+            "region_name": region,
+            "config": Config(retries={"max_attempts": 3, "mode": "adaptive"}),
+        }
+        if access_key and secret_key:
+            kwargs["aws_access_key_id"] = access_key
+            kwargs["aws_secret_access_key"] = secret_key
 
-    text = ""
-    thinking_tokens = 0
-    for block in content:
-        if block.get("type") == "thinking":
-            thinking_tokens = THINKING_BUDGET
-        elif block.get("type") == "text":
-            text = block.get("text", "")
-        elif "text" in block:
-            text = block["text"]
+        self._bedrock = boto3.client("bedrock-runtime", **kwargs)
 
-    if not text:
-        raise ValueError(f"No text in Bedrock response: {json.dumps(response)[:500]}")
+    def model_id(self) -> str:
+        return _resolve_model_id(self._model)
 
-    return text, thinking_tokens
+    def _sync_call(self, prompt: str) -> tuple[str, int]:
+        inference_config: dict[str, Any] = {"maxTokens": MAX_TOKENS, "temperature": TEMPERATURE}
+        if THINKING_BUDGET > 0:
+            inference_config["thinkingConfig"] = {"thinkingBudgetTokens": THINKING_BUDGET}
+
+        response = self._bedrock.converse(
+            modelId=self.model_id(),
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig=inference_config,
+        )
+
+        output = response.get("output", {})
+        message = output.get("message", {})
+        content = message.get("content", [])
+
+        text = ""
+        thinking_tokens = 0
+        for block in content:
+            if block.get("type") == "thinking":
+                thinking_tokens = THINKING_BUDGET
+            elif block.get("type") == "text":
+                text = block.get("text", "")
+            elif "text" in block:
+                text = block["text"]
+
+        if not text:
+            raise ValueError(f"No text in Bedrock response: {json.dumps(response)[:500]}")
+
+        return text, thinking_tokens
+
+    async def call(self, prompt: str) -> tuple[str, int]:
+        return await asyncio.to_thread(self._sync_call, prompt)
+
+
+class CopilotProvider(LLMProvider):
+    """Calls GitHub Copilot via the official github-copilot-sdk."""
+
+    def __init__(self, credentials: dict[str, Any]) -> None:
+        token = credentials.get("token") or ""
+        if not token:
+            raise ValueError("Copilot credentials must include 'token'")
+        self._token = token
+        self._model = credentials.get("modelId") or "gpt-4.1"
+
+    def model_id(self) -> str:
+        return self._model
+
+    async def call(self, prompt: str) -> tuple[str, int]:
+        config = copilot_sdk.SubprocessConfig(github_token=self._token)
+        async with copilot_sdk.CopilotClient(config) as client:
+            async with await client.create_session() as session:
+                await session.set_model(self._model)
+                response = await session.send_and_wait(prompt, timeout=300.0)
+                if response is None:
+                    raise ValueError("No response received from Copilot")
+                if isinstance(response.data, AssistantMessageData):
+                    return response.data.content, 0
+                raise ValueError(f"Unexpected Copilot response type: {type(response.data)}")
+
+
+def _make_provider(provider_name: str, credentials: dict[str, Any]) -> LLMProvider:
+    """Instantiate the appropriate LLMProvider from provider name + credentials."""
+    if provider_name == "copilot":
+        return CopilotProvider(credentials)
+    # Default: bedrock (even if provider_name is empty or "bedrock")
+    return BedrockProvider(credentials)
 
 def _parse_llm_json(raw: str) -> dict[str, Any]:
     """Extract JSON from LLM output, tolerating markdown fences."""
@@ -496,8 +549,9 @@ def readyz() -> dict:
     return {"status": "ok"}
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
-    logger.info("analyzing evidence | evidenceId=%s incidentId=%s", req.evidenceId, req.incidentId)
+async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
+    logger.info("analyzing evidence | evidenceId=%s incidentId=%s provider=%s",
+                req.evidenceId, req.incidentId, req.provider)
 
     prompt = _build_prompt(req.payload, req.reanalysisCount, req.moodLevel,
                            [p.model_dump() for p in req.priorDiagnoses],
@@ -506,10 +560,11 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     logger.info("=== PROMPT TO MODEL ===\n%s\n=== END PROMPT ===", prompt)
 
     try:
-        raw, thinking_tokens = _call_bedrock(prompt)
+        provider = _make_provider(req.provider, req.credentials)
+        raw, thinking_tokens = await provider.call(prompt)
     except Exception as exc:
-        logger.exception("bedrock call failed")
-        raise HTTPException(status_code=502, detail=f"Bedrock error: {exc}") from exc
+        logger.exception("LLM provider call failed | provider=%s", req.provider)
+        raise HTTPException(status_code=502, detail=f"LLM provider error: {exc}") from exc
 
     logger.info("=== RAW MODEL RESPONSE ===\n%s\n=== END RESPONSE ===", raw)
 
@@ -534,7 +589,7 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 
     return AnalyzeResponse(
         evidenceId=req.evidenceId,
-        model=_resolve_model_id(BEDROCK_MODEL_ID),
+        model=provider.model_id(),
         openingRant=_str(parsed.get("openingRant"), "..."),
         likelyRootCause=_str(parsed.get("likelyRootCause"), "Unknown"),
         evidenceChain=_str(parsed.get("evidenceChain")),

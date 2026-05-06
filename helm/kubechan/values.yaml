@@ -184,6 +184,24 @@ frontendUi:
       memory: 128Mi
 
 # ---------------------------------------------------------------------------
+# Auth — user authentication and admin bootstrap
+# ---------------------------------------------------------------------------
+auth:
+  # Name of the K8s Secret that holds (or will hold) the admin password.
+  # Secret key: "password". If the Secret does not exist on first startup,
+  # backend-api generates a random password and creates the Secret.
+  adminSecretName: kubechan-admin-credentials
+
+  # Name of the K8s Secret that holds the JWT signing key.
+  # Secret key: "secret". Must be at least 32 bytes.
+  # Create manually: kubectl create secret generic kubechan-jwt-secret \
+  #   -n kubechan --from-literal=secret=$(openssl rand -base64 48)
+  jwtSecretName: kubechan-jwt-secret
+
+  # JWT token lifetime in hours.
+  jwtTtlHours: 24
+
+# ---------------------------------------------------------------------------
 # Persona — tsundere assistant layer
 # ---------------------------------------------------------------------------
 persona:

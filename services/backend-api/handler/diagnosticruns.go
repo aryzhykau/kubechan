@@ -34,7 +34,32 @@ func (h *DiagnosticRuns) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, dr)
+
+	// Resolve triggered_by attribution from analysis_requests.
+	type triggeredByInfo struct {
+		UserID   string `json:"userId"`
+		Username string `json:"username"`
+	}
+	var attribution *triggeredByInfo
+	var triggeredByUserID, triggeredByUsername sql.NullString
+	_ = h.DB.QueryRowContext(r.Context(),
+		`SELECT ar.triggered_by, u.username
+		 FROM analysis_requests ar
+		 LEFT JOIN users u ON u.id = ar.triggered_by
+		 WHERE ar.diagnostic_run_id = ?
+		 LIMIT 1`, name,
+	).Scan(&triggeredByUserID, &triggeredByUsername)
+	if triggeredByUserID.Valid && triggeredByUserID.String != "" {
+		attribution = &triggeredByInfo{
+			UserID:   triggeredByUserID.String,
+			Username: triggeredByUsername.String,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"diagnosticRun": dr,
+		"triggeredBy":   attribution,
+	})
 }
 
 // runSummary is returned by List.

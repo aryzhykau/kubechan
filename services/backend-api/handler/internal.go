@@ -153,14 +153,16 @@ func nullBytes(b []byte) any {
 
 // llmAnalyzeRequest is the body sent to llm-gateway POST /analyze.
 type llmAnalyzeRequest struct {
-	EvidenceID      string              `json:"evidenceId"`
-	DiagnosticRunID string              `json:"diagnosticRunId"`
-	IncidentID      string              `json:"incidentId,omitempty"`
-	ReanalysisCount int                 `json:"reanalysisCount"`
-	MoodLevel       int                 `json:"moodLevel"`
-	PriorDiagnoses  []priorDiagnosis    `json:"priorDiagnoses,omitempty"`
-	UserMessage     string              `json:"userMessage,omitempty"`
-	Payload         map[string]any      `json:"payload"`
+	EvidenceID      string           `json:"evidenceId"`
+	DiagnosticRunID string           `json:"diagnosticRunId"`
+	IncidentID      string           `json:"incidentId,omitempty"`
+	ReanalysisCount int              `json:"reanalysisCount"`
+	MoodLevel       int              `json:"moodLevel"`
+	PriorDiagnoses  []priorDiagnosis `json:"priorDiagnoses,omitempty"`
+	UserMessage     string           `json:"userMessage,omitempty"`
+	Provider        string           `json:"provider,omitempty"`
+	Credentials     map[string]any   `json:"credentials,omitempty"`
+	Payload         map[string]any   `json:"payload"`
 }
 
 // priorDiagnosis is a previous analysis attempt for the same incident, with its user rating.
@@ -246,6 +248,25 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	// Extract userMessage from the payload (set for manual incidents).
 	userMessage, _ := payloadMap["userMessage"].(string)
 
+	// Look up the triggering user's LLM provider + credentials.
+	provider := ""
+	var credentials map[string]any
+	var triggeredBy sql.NullString
+	_ = h.DB.QueryRow(
+		`SELECT triggered_by FROM analysis_requests WHERE diagnostic_run_id = ? LIMIT 1`,
+		req.DiagnosticRunID,
+	).Scan(&triggeredBy)
+	if triggeredBy.Valid && triggeredBy.String != "" {
+		var credsJSON string
+		err := h.DB.QueryRow(
+			`SELECT provider, credentials FROM user_llm_settings WHERE user_id = ?`,
+			triggeredBy.String,
+		).Scan(&provider, &credsJSON)
+		if err == nil {
+			_ = json.Unmarshal([]byte(credsJSON), &credentials)
+		}
+	}
+
 	body, err := json.Marshal(llmAnalyzeRequest{
 		EvidenceID:      evidenceID,
 		DiagnosticRunID: req.DiagnosticRunID,
@@ -254,6 +275,8 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		MoodLevel:       moodLevel,
 		PriorDiagnoses:  priorDiagnoses,
 		UserMessage:     userMessage,
+		Provider:        provider,
+		Credentials:     credentials,
 		Payload:         payloadMap,
 	})
 	if err != nil {
@@ -288,15 +311,20 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		needsMoreInfoInt = 1
 	}
 	suggJSON, _ := json.Marshal(result.SuggestedResources)
+	modelRuntime := provider
+	if modelRuntime == "" {
+		modelRuntime = "bedrock"
+	}
 	_, err = h.DB.Exec(
 		`INSERT INTO analysis_results
 		 (id, incident_id, diagnostic_run_id, model, model_runtime, status,
 		  likely_root_cause, confidence, payload, prompt, needs_more_info, suggested_resources, created_at)
-		 VALUES (?, ?, ?, ?, 'bedrock', 'completed', ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		 VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now'))`,
 		analysisID,
 		nullStr(req.IncidentID),
 		req.DiagnosticRunID,
 		result.Model,
+		modelRuntime,
 		result.LikelyRootCause,
 		result.Confidence,
 		string(resultPayload),

@@ -43,6 +43,21 @@ func (h *Analysis) Analyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce ownership for manual incidents.
+	if inc.Spec.Source == "manual" {
+		userID, _, role := UserFromCtx(r.Context())
+		if role != "admin" {
+			var ownerID string
+			err := h.DB.QueryRowContext(r.Context(),
+				`SELECT owner_id FROM manual_incident_owners WHERE incident_id = ?`, name,
+			).Scan(&ownerID)
+			if err != nil || ownerID != userID {
+				writeError(w, http.StatusForbidden, "incident not found")
+				return
+			}
+		}
+	}
+
 	now := metav1.Now()
 	dr := &v1alpha1.DiagnosticRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -67,11 +82,12 @@ func (h *Analysis) Analyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, _, _ := UserFromCtx(r.Context())
 	reqID := uuid.New().String()
 	_, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO analysis_requests(id, incident_id, diagnostic_run_id, requested_at, status)
-		 VALUES (?, ?, ?, ?, 'pending')`,
-		reqID, name, dr.Name, time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO analysis_requests(id, incident_id, diagnostic_run_id, requested_at, status, triggered_by)
+		 VALUES (?, ?, ?, ?, 'pending', ?)`,
+		reqID, name, dr.Name, time.Now().UTC().Format(time.RFC3339), userID,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("inserting analysis_request: %s", err))

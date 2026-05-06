@@ -1,6 +1,25 @@
 // API base URL — in dev Vite proxies /api → backend; in prod it's same origin.
 const BASE = ''
 
+const TOKEN_KEY = 'kubechan_token'
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token)
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+export interface CurrentUser {
+  userId: string
+  username: string
+  role: 'admin' | 'viewer'
+}
 export interface ResourceRef {
   namespace?: string
   kind: string
@@ -17,6 +36,7 @@ export interface Incident {
     relatedResources?: ResourceRef[]
   }
   status: { state: 'open' | 'resolved'; openedAt?: string; resolvedAt?: string; activeProblemCases?: number }
+  ownerUsername?: string
 }
 
 export interface ProblemCase {
@@ -29,6 +49,11 @@ export interface DiagnosticRun {
   metadata: { name: string; namespace: string }
   spec: { incidentRef?: string; requestedAt?: string }
   status: { state: string; evidenceRef?: string; collectionErrors?: string[] }
+}
+
+export interface DiagnosticRunDetail {
+  diagnosticRun: DiagnosticRun
+  triggeredBy?: { userId: string; username: string } | null
 }
 
 export interface DiagnosticRunSummary {
@@ -142,10 +167,17 @@ export interface AnalysisResult {
 }
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json', ...opts?.headers },
-    ...opts,
-  })
+  const token = getToken()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (opts?.headers) {
+    Object.assign(headers, opts.headers)
+  }
+  const res = await fetch(BASE + path, { ...opts, headers })
+  if (res.status === 401) {
+    clearToken()
+    throw new Error('Unauthorized')
+  }
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`${res.status} ${res.statusText}: ${body}`)
@@ -167,7 +199,7 @@ export const api = {
     apiFetch<ProblemCase[]>(`/api/v1/problemcases?namespace=${ns}`),
 
   getDiagnosticRun: (id: string) =>
-    apiFetch<DiagnosticRun>(`/api/v1/diagnosticruns/${id}`),
+    apiFetch<DiagnosticRunDetail>(`/api/v1/diagnosticruns/${id}`),
 
   listDiagnosticRuns: (incidentId?: string) =>
     apiFetch<DiagnosticRunSummary[]>(
@@ -230,4 +262,37 @@ export const api = {
 
   resolveIncident: (id: string) =>
     apiFetch<Incident>(`/api/v1/incidents/${encodeURIComponent(id)}/resolve`, { method: 'POST' }),
+
+  // ── Auth ────────────────────────────────────────────────────────────────────
+  login: (username: string, password: string) =>
+    apiFetch<{ token: string; role: string; username: string }>('/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+
+  me: () =>
+    apiFetch<CurrentUser>('/api/v1/auth/me'),
+
+  // ── User management (admin only) ────────────────────────────────────────────
+  listUsers: () =>
+    apiFetch<{ id: string; username: string; role: string; createdAt: string }[]>('/api/v1/users'),
+
+  createUser: (username: string, password: string, role: 'admin' | 'viewer') =>
+    apiFetch<{ id: string; username: string; role: string }>('/api/v1/users', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, role }),
+    }),
+
+  deleteUser: (id: string) =>
+    apiFetch<void>(`/api/v1/users/${id}`, { method: 'DELETE' }),
+
+  // ── Per-user LLM settings ────────────────────────────────────────────────────
+  getLLMSettings: () =>
+    apiFetch<{ provider: string; configured: boolean; credFields: Record<string, string> }>('/api/v1/me/llm-settings'),
+
+  saveLLMSettings: (provider: string, credentials: Record<string, string>) =>
+    apiFetch<{ status: string }>('/api/v1/me/llm-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ provider, credentials }),
+    }),
 }

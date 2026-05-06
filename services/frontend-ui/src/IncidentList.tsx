@@ -197,6 +197,9 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onRes
         {incident.spec.source === 'manual' && (
           <span className="manual-badge">Manual</span>
         )}
+        {incident.spec.source === 'manual' && incident.ownerUsername && (
+          <span className="owner-badge">by {incident.ownerUsername}</span>
+        )}
         <div className="incident-title-block">
           <strong className="incident-name">{title}</strong>
           {sub && <span className="incident-affected">{sub}</span>}

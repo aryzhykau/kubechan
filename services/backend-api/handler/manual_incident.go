@@ -154,14 +154,27 @@ func (h *ManualIncident) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Record analysis_request row so the UI can poll status.
 	reqID := uuid.New().String()
+	userID, _, _ := UserFromCtx(r.Context())
 	_, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO analysis_requests(id, incident_id, diagnostic_run_id, requested_at, status, source)
-		 VALUES (?, ?, ?, ?, 'pending', 'manual')`,
-		reqID, inc.Name, dr.Name, time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO analysis_requests(id, incident_id, diagnostic_run_id, requested_at, status, source, triggered_by)
+		 VALUES (?, ?, ?, ?, 'pending', 'manual', ?)`,
+		reqID, inc.Name, dr.Name, time.Now().UTC().Format(time.RFC3339), userID,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("inserting analysis request: %s", err))
 		return
+	}
+
+	// Record ownership of the manual incident.
+	if userID != "" {
+		_, err = h.DB.ExecContext(r.Context(),
+			`INSERT INTO manual_incident_owners(incident_id, namespace, owner_id) VALUES (?, ?, ?)`,
+			inc.Name, incNS, userID,
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("recording incident owner: %s", err))
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, manualIncidentResponse{

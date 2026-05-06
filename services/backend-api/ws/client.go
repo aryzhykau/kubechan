@@ -4,10 +4,13 @@
 package ws
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 )
 
@@ -46,6 +49,42 @@ func ServeWS(hub *Hub, logger *slog.Logger) http.HandlerFunc {
 		go c.writePump()
 		go c.readPump()
 	}
+}
+
+// ServeWSWithAuth is like ServeWS but requires a valid JWT in the ?token= query param.
+func ServeWSWithAuth(hub *Hub, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := r.URL.Query().Get("token")
+		if token == "" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		if err := validateWSToken(token); err != nil {
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			logger.Error("ws upgrade failed", "error", err)
+			return
+		}
+		c := &Client{hub: hub, conn: conn, send: make(chan []byte, sendBufSize)}
+		hub.register(c)
+		go c.writePump()
+		go c.readPump()
+	}
+}
+
+func validateWSToken(raw string) error {
+	secret := []byte(os.Getenv("JWT_SECRET"))
+	_, err := jwt.Parse(raw, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return secret, nil
+	}, jwt.WithExpirationRequired())
+	return err
 }
 
 // readPump drains incoming messages (we don't use client→server messages).

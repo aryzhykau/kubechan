@@ -47,6 +47,11 @@ func main() {
 		logger.Error("startup recovery failed", "error", err)
 		os.Exit(1)
 	}
+
+	if err := handler.ValidateJWTSecret(); err != nil {
+		logger.Error("JWT secret validation failed", "error", err)
+		os.Exit(1)
+	}
 	db.StartPruner(ctx, database, logger)
 
 	// ── Kubernetes client ─────────────────────────────────────────────────────
@@ -78,10 +83,15 @@ func main() {
 	}()
 	informerCache.WaitForCacheSync(ctx)
 
+	// ── Admin bootstrap ───────────────────────────────────────────────────────
+	defaultNS := envOr("DEFAULT_NAMESPACE", "kubechan")
+	if err := startup.EnsureAdminUser(ctx, database, k8s, defaultNS, logger); err != nil {
+		logger.Error("admin bootstrap failed", "error", err)
+		os.Exit(1)
+	}
+
 	// ── WebSocket hub ─────────────────────────────────────────────────────────
 	hub := ws.NewHub(logger)
-
-	defaultNS := envOr("DEFAULT_NAMESPACE", "kubechan")
 
 	// ── Mood syncer — singleton KubeChanState CRD ─────────────────────────────
 	moodSyncer := &k8sclient.MoodSyncer{
@@ -104,7 +114,7 @@ func main() {
 
 	// ── Handlers ──────────────────────────────────────────────────────────────
 
-	incidents := &handler.Incidents{K8s: k8s, DefaultNamespace: defaultNS}
+	incidents := &handler.Incidents{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	problemcases := &handler.ProblemCases{K8s: k8s, DefaultNamespace: defaultNS}
 	diagnosticruns := &handler.DiagnosticRuns{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	analysis := &handler.Analysis{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
@@ -122,6 +132,9 @@ func main() {
 		MoodSyncer:       moodSyncer,
 		Logger:           logger,
 	}
+	authHandler := &handler.Auth{DB: database, Logger: logger}
+	usersHandler := &handler.Users{DB: database}
+	llmSettings := &handler.LLMSettings{DB: database}
 
 	// ── Router ────────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -132,38 +145,58 @@ func main() {
 
 	r.Get("/healthz", healthz)
 	r.Get("/readyz", readyz(database, k8s))
-	r.Get("/ws", ws.ServeWS(hub, logger))
+	r.Get("/ws", ws.ServeWSWithAuth(hub, logger))
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/incidents", incidents.List)
-		r.Get("/incidents/{id}", incidents.Get)
-		r.Post("/incidents/manual", manualIncident.Create)
-		r.Post("/incidents/{id}/analyze", analysis.Analyze)
-		r.Post("/incidents/{id}/augment", augment.Augment)
-		r.Post("/incidents/{id}/resolve", incidents.Resolve)
-		r.Get("/incidents/{id}/evidence", analysis.GetEvidence)
+		// Public — no auth required.
+		r.Post("/auth/login", authHandler.Login)
 
-		r.Get("/problemcases", problemcases.List)
-		r.Get("/problemcases/{id}", problemcases.Get)
+		// All routes below require a valid JWT.
+		r.Group(func(r chi.Router) {
+			r.Use(handler.RequireAuth)
 
-		r.Get("/diagnosticruns", diagnosticruns.List)
-		r.Delete("/diagnosticruns", diagnosticruns.BulkDelete)
-		r.Get("/diagnosticruns/{id}", diagnosticruns.Get)
-		r.Delete("/diagnosticruns/{id}", diagnosticruns.Delete)
-		r.Get("/diagnosticruns/{id}/evidence", diagnosticruns.GetEvidence)
-		r.Get("/diagnosticruns/{id}/analysisresult", diagnosticruns.GetAnalysisResult)
-		r.Get("/analysisresults/{id}", analysis.GetAnalysisResult)
-		r.Post("/analysisresults/{id}/rate", analysis.RateAnalysisResult)
+			r.Get("/auth/me", authHandler.Me)
+			r.Get("/me/llm-settings", llmSettings.Get)
+			r.Put("/me/llm-settings", llmSettings.Put)
 
-		r.Get("/settings", settings.Get)
-		r.Put("/settings", settings.Update)
-		r.Get("/persona/idle-message", settings.IdleMessage)
+			r.Get("/incidents", incidents.List)
+			r.Get("/incidents/{id}", incidents.Get)
+			r.Post("/incidents/manual", manualIncident.Create)
+			r.Post("/incidents/{id}/analyze", analysis.Analyze)
+			r.Post("/incidents/{id}/augment", augment.Augment)
+			r.Post("/incidents/{id}/resolve", incidents.Resolve)
+			r.Get("/incidents/{id}/evidence", analysis.GetEvidence)
 
-		r.Get("/namespaces", resources.ListNamespaces)
-		r.Get("/namespaces/{ns}/resources", resources.ListResources)
+			r.Get("/problemcases", problemcases.List)
+			r.Get("/problemcases/{id}", problemcases.Get)
 
-		r.Get("/kubechan/state", kubechan.GetState)
-		r.Post("/kubechan/poke", kubechan.Poke)
+			r.Get("/diagnosticruns", diagnosticruns.List)
+			r.Delete("/diagnosticruns", diagnosticruns.BulkDelete)
+			r.Get("/diagnosticruns/{id}", diagnosticruns.Get)
+			r.Delete("/diagnosticruns/{id}", diagnosticruns.Delete)
+			r.Get("/diagnosticruns/{id}/evidence", diagnosticruns.GetEvidence)
+			r.Get("/diagnosticruns/{id}/analysisresult", diagnosticruns.GetAnalysisResult)
+			r.Get("/analysisresults/{id}", analysis.GetAnalysisResult)
+			r.Post("/analysisresults/{id}/rate", analysis.RateAnalysisResult)
+
+			r.Get("/persona/idle-message", settings.IdleMessage)
+
+			r.Get("/namespaces", resources.ListNamespaces)
+			r.Get("/namespaces/{ns}/resources", resources.ListResources)
+
+			r.Get("/kubechan/state", kubechan.GetState)
+			r.Post("/kubechan/poke", kubechan.Poke)
+
+			// Admin-only routes.
+			r.Group(func(r chi.Router) {
+				r.Use(handler.RequireAdmin)
+				r.Post("/users", usersHandler.Create)
+				r.Get("/users", usersHandler.List)
+				r.Delete("/users/{id}", usersHandler.Delete)
+				r.Get("/settings", settings.Get)
+				r.Put("/settings", settings.Update)
+			})
+		})
 	})
 
 	r.Route("/internal", func(r chi.Router) {

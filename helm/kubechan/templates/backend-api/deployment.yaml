@@ -45,6 +45,13 @@ spec:
               value: {{ .Values.backendApi.retention.evidenceDays | quote }}
             - name: ANALYSIS_RETENTION_DAYS
               value: {{ .Values.backendApi.retention.analysisResultsDays | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.jwtSecretName | default "kubechan-jwt-secret" | quote }}
+                  key: secret
+            - name: JWT_TTL_HOURS
+              value: {{ .Values.auth.jwtTtlHours | default 24 | quote }}
           ports:
             - name: http
               containerPort: {{ .Values.backendApi.service.port }}

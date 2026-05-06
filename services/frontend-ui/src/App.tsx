@@ -4,9 +4,12 @@ import { KubeChanSidebar, type KubeChanState } from './KubeChanSidebar'
 import { DiagnosticsPage } from './DiagnosticsPage'
 import { DiagnosticRunDetail } from './DiagnosticRunDetail'
 import { ManualIncidentModal } from './ManualIncidentModal'
+import { LoginPage } from './LoginPage'
+import { UsersPage } from './UsersPage'
+import { LLMSettingsPage } from './LLMSettingsPage'
 import { pickChatterLine, type ChatterEvent } from './chatter'
 import { useWebSocket, type WSEvent } from './useWebSocket'
-import { api } from './api'
+import { api, getToken, clearToken, type CurrentUser } from './api'
 import type { AnalysisResult } from './api'
 import './app.css'
 
@@ -14,8 +17,11 @@ type View =
   | { type: 'incidents' }
   | { type: 'diagnostics' }
   | { type: 'run-detail'; runId: string }
+  | { type: 'users' }
+  | { type: 'llm-settings' }
 
 function App() {
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null | undefined>(undefined)
   const [view, setView] = useState<View>({ type: 'incidents' })
   const [kubechan, setKubechan] = useState<KubeChanState>({ pose: 'idle' })
   const kubechanRef = useRef(kubechan)
@@ -27,32 +33,35 @@ function App() {
   const moodLevelRef = useRef(0)
   useEffect(() => { moodLevelRef.current = moodLevel }, [moodLevel])
 
-  // Each chatter message gets its own timer; we cancel the previous one so stale
-  // timers never wipe a newer message.
   const chatterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Poke escalation: count rapid pokes, reset after 8s of no poking.
   const pokeCountRef = useRef(0)
   const pokeResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Silence awareness: track last user interaction time.
   const lastInteractionRef = useRef(Date.now())
-  const silenceStageRef = useRef<0 | 1 | 2>(0) // 0=normal, 1=hint sent, 2=paranoid sent
+  const silenceStageRef = useRef<0 | 1 | 2>(0)
+
+  // Auth gate: check existing token on mount
+  useEffect(() => {
+    const token = getToken()
+    if (!token) {
+      setCurrentUser(null)
+      return
+    }
+    api.me().then(u => setCurrentUser(u)).catch(() => {
+      clearToken()
+      setCurrentUser(null)
+    })
+  }, [])
 
   const triggerChatter = useCallback((event: ChatterEvent) => {
     const pose = kubechanRef.current.pose
-    // Idle lines only fire when genuinely idle — they must never interrupt reactions.
     if (event === 'idle' || event === 'silence-hint' || event === 'silence-paranoid') {
       if (pose !== 'idle') return
     } else {
-      // Reaction lines: skip only if KubeChan is actively thinking/speaking.
       if (pose === 'thinking' || pose === 'speaking') return
-      // Any real interaction resets silence tracking.
       lastInteractionRef.current = Date.now()
       silenceStageRef.current = 0
     }
     const line = pickChatterLine(event, moodLevelRef.current)
-    // Cancel any in-flight dismiss timer before starting a new one.
     if (chatterTimerRef.current !== null) {
       clearTimeout(chatterTimerRef.current)
     }
@@ -64,7 +73,6 @@ function App() {
   }, [])
 
   const handlePoke = useCallback(() => {
-    // Escalate based on rapid consecutive pokes — local counter for snappy UX.
     pokeCountRef.current += 1
     const count = pokeCountRef.current
     const event: ChatterEvent =
@@ -72,16 +80,13 @@ function App() {
       count >= 3 ? 'poke-annoyed' :
       'poke'
     triggerChatter(event)
-    // Reset the poke counter after 8s of no poking.
     if (pokeResetTimerRef.current !== null) clearTimeout(pokeResetTimerRef.current)
     pokeResetTimerRef.current = setTimeout(() => {
       pokeCountRef.current = 0
     }, 8000)
-    // Persist poke to backend (fire-and-forget).
     api.poke().catch(() => {})
   }, [triggerChatter])
 
-  // idle chatter — fires every 60s when KubeChan is idle
   useEffect(() => {
     const id = setInterval(() => {
       if (kubechanRef.current.pose === 'idle') triggerChatter('idle')
@@ -89,7 +94,6 @@ function App() {
     return () => clearInterval(id)
   }, [triggerChatter])
 
-  // Silence awareness — check every 30s; escalate at 5min then 10min of inactivity.
   useEffect(() => {
     const id = setInterval(() => {
       if (kubechanRef.current.pose !== 'idle') return
@@ -105,7 +109,6 @@ function App() {
     return () => clearInterval(id)
   }, [triggerChatter])
 
-  // WS: react to new incidents at the app level; resolved is handled by onResolved in IncidentRow
   const handleWS = useCallback((event: WSEvent) => {
     if (event.type === 'Incident.Created') {
       triggerChatter('new-incident')
@@ -113,12 +116,9 @@ function App() {
       const e = event as { type: string; moodLevel?: number }
       if (typeof e.moodLevel === 'number') setMoodLevel(e.moodLevel)
     }
-    // KubeChanState.Updated — mood changed in cluster; no local action needed
-    // (the CRD is the source of truth; local poke counter drives UX reactions)
   }, [triggerChatter])
   useWebSocket(handleWS)
 
-  // Load KubeChanState from backend on mount.
   useEffect(() => {
     api.getKubeChanState().then(s => setMoodLevel(s.moodLevel)).catch(() => {})
   }, [])
@@ -186,19 +186,31 @@ function App() {
     } catch {
       // fire-and-forget; rating failure doesn't break UX
     }
-    // Pick reaction line based on rating + confidence + mood.
     const event: ChatterEvent = rating === 'up'
       ? (confidence >= 0.75 ? 'rating-up-flustered' : 'rating-up')
       : (confidence >= 0.75 ? 'rating-down-high-conf' : 'rating-down-low-conf')
     const line = pickChatterLine(event, moodLevelRef.current)
-
-    // Update result rating + inject reaction line — keep pose as 'speaking'.
     setKubechan(prev => {
       if (prev.pose !== 'speaking' || !prev.result || prev.result.id !== resultId) return prev
       return { ...prev, result: { ...prev.result, userRating: rating } }
     })
     showReaction(line)
   }, [moodLevelRef, showReaction])
+
+  // ── Conditional rendering (after all hooks) ──────────────────────────────
+
+  if (currentUser === undefined) {
+    return <div className="app-loading">Loading…</div>
+  }
+
+  if (currentUser === null) {
+    return <LoginPage onLogin={() => {
+      api.me().then(u => setCurrentUser(u)).catch(() => {
+        clearToken()
+        setCurrentUser(null)
+      })
+    }} />
+  }
 
   return (
     <div className="app">
@@ -231,8 +243,28 @@ function App() {
           >
             Diagnostics
           </button>
+          {currentUser.role === 'admin' && (
+            <button
+              className={`app-nav-btn${view.type === 'users' ? ' active' : ''}`}
+              onClick={() => setView({ type: 'users' })}
+            >
+              Users
+            </button>
+          )}
+          <button
+            className={`app-nav-btn${view.type === 'llm-settings' ? ' active' : ''}`}
+            onClick={() => setView({ type: 'llm-settings' })}
+          >
+            LLM Settings
+          </button>
         </nav>
         <span className="app-subtitle">Kubernetes Anime Problem Insluter</span>
+        <div className="app-user-info">
+          <span className="app-username">{currentUser.username}</span>
+          <button className="app-logout-btn" onClick={() => { clearToken(); setCurrentUser(null) }}>
+            Sign out
+          </button>
+        </div>
       </header>
       <div className="app-body">
         <main className="app-main">
@@ -258,6 +290,12 @@ function App() {
               onResultLoaded={handleRunResultLoaded}
               onAction={triggerChatter}
             />
+          )}
+          {view.type === 'users' && currentUser.role === 'admin' && (
+            <UsersPage />
+          )}
+          {view.type === 'llm-settings' && (
+            <LLMSettingsPage />
           )}
         </main>
         <KubeChanSidebar state={kubechan} onPoke={handlePoke} moodLevel={moodLevel} onRate={handleRate} />
