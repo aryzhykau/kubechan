@@ -1,5 +1,4 @@
 # ── Go ────────────────────────────────────────────────────────────────────────
-go.sum
 /services/cluster-watcher/cluster-watcher
 /services/diagnostics-worker/diagnostics-worker
 /services/backend-api/backend-api
