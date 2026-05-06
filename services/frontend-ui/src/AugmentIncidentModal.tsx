@@ -98,7 +98,7 @@ export interface AugmentIncidentModalProps {
   defaultNamespace?: string
   suggestions: SuggestedResource[]
   onClose: () => void
-  onAugmented: (diagnosticRunId: string) => void
+  onAugmented: (diagnosticRunId: string, addedResources: Array<{ kind: string; name: string; namespace: string }>) => void
 }
 
 let _rowId = 100
@@ -152,11 +152,9 @@ export function AugmentIncidentModal({
     setSubmitting(true)
     setSubmitError(null)
     try {
-      const res = await api.augmentIncident(
-        incidentId,
-        added.map(r => ({ kind: r.kind, name: r.name, namespace: r.namespace })),
-      )
-      onAugmented(res.diagnosticRunId)
+      const relatedResources = added.map(r => ({ kind: r.kind, name: r.name, namespace: r.namespace }))
+      const res = await api.augmentIncident(incidentId, relatedResources)
+      onAugmented(res.diagnosticRunId, relatedResources)
     } catch (e: unknown) {
       setSubmitError(String(e))
       setSubmitting(false)

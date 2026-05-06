@@ -111,26 +111,15 @@ llmGateway:
     type: ClusterIP
     port: 8000
 
-  bedrock:
-    # AWS region for Bedrock calls.
-    region: us-east-1
-    # Bedrock model ID. Supported: qwen3-32b, qwen3-235b.
-    modelId: qwen3-32b
-    # Extended thinking token budget. 0 = disabled (/no_think mode).
-    thinkingBudget: 0
-    # Max tokens of evidence to include in a single analysis prompt.
-    evidenceTokenBudget: 120000
-
+  # On EKS, set roleArn to attach an IAM role via IRSA instead of per-user credentials.
+  # Leave empty (or omit) on non-EKS clusters (Docker Desktop, GKE, etc.).
   irsa:
-    # EKS IRSA role ARN for Bedrock access. Required for EKS deployments.
-    # Example: arn:aws:iam::123456789012:role/kubechan-llm-gateway
     roleArn: ""
 
-  credentials:
-    # Kubernetes Secret name containing the Bedrock API key.
-    # Secret must have key: AWS_BEARER_TOKEN_BEDROCK
-    # Create: kubectl create secret generic <name> -n kubechan --from-literal=AWS_BEARER_TOKEN_BEDROCK=<key>
-    secretName: ""
+  # Server-side prompt truncation limit (tokens). Increase for very large clusters.
+  # Provider credentials (region, modelId, thinkingBudget, etc.) are configured
+  # per-user in the UI under Settings → LLM Provider.
+  evidenceTokenBudget: 120000
 
   resources:
     requests:

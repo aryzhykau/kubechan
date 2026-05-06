@@ -101,11 +101,12 @@ func (h *Augment) Augment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, _, _ := UserFromCtx(r.Context())
 	reqID := uuid.New().String()
 	_, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO analysis_requests(id, incident_id, diagnostic_run_id, requested_at, status)
-		 VALUES (?, ?, ?, ?, 'pending')`,
-		reqID, name, dr.Name, time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO analysis_requests(id, incident_id, diagnostic_run_id, requested_at, status, triggered_by)
+		 VALUES (?, ?, ?, ?, 'pending', ?)`,
+		reqID, name, dr.Name, time.Now().UTC().Format(time.RFC3339), userID,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("inserting analysis_request: %s", err))

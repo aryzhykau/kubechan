@@ -150,6 +150,7 @@ func main() {
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public — no auth required.
 		r.Post("/auth/login", authHandler.Login)
+		r.Get("/llm-models", handler.GetLLMModels)
 
 		// All routes below require a valid JWT.
 		r.Group(func(r chi.Router) {

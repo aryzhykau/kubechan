@@ -288,11 +288,14 @@ export const api = {
 
   // ── Per-user LLM settings ────────────────────────────────────────────────────
   getLLMSettings: () =>
-    apiFetch<{ provider: string; configured: boolean; credFields: Record<string, string> }>('/api/v1/me/llm-settings'),
+    apiFetch<{ provider: string; configured: boolean; credFields: Record<string, unknown> }>('/api/v1/me/llm-settings'),
 
   saveLLMSettings: (provider: string, credentials: Record<string, string>) =>
     apiFetch<{ status: string }>('/api/v1/me/llm-settings', {
       method: 'PUT',
       body: JSON.stringify({ provider, credentials }),
     }),
+
+  getLLMModels: () =>
+    apiFetch<{ providers: Record<string, { id: string; label: string }[]> }>('/api/v1/llm-models'),
 }

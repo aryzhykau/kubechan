@@ -7,9 +7,6 @@ backendApi:
     port: 8080
     nodePort: 30080
   storage:
-    # Mount a local host directory so DBeaver can open the SQLite file directly.
-    # The path must exist on the Docker Desktop VM (which shares /Users on macOS).
-    hostPath: /Users/andrejryzikov/kubechan/.data
     pvc:
       size: 1Gi
   resources:
@@ -44,25 +41,26 @@ diagnosticsWorker:
       memory: 128Mi
 
 llmGateway:
-  bedrock:
-    region: us-east-1
-    modelId: qwen3-32b
-    thinkingBudget: 0
-  credentials:
-    secretName: kubechan-bedrock-api-key
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 256Mi
     limits:
       cpu: 500m
-      memory: 256Mi
+      memory: 768Mi
 
 frontendUi:
   service:
-    type: NodePort
+    type: ClusterIP
     port: 8080
-    nodePort: 30081
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: kubechan.local
+        paths:
+          - path: /
+            pathType: Prefix
   resources:
     requests:
       cpu: 25m

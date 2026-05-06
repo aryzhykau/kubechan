@@ -85,3 +85,4 @@ k8s_yaml(helm(
 # Ensure CRDs exist before the Helm resources are applied
 for svc in ['kubechan-cluster-watcher', 'kubechan-diagnostics-worker', 'kubechan-backend-api', 'kubechan-llm-gateway', 'kubechan-frontend-ui']:
     k8s_resource(svc, resource_deps=['kubechan-crds', 'kubechan-namespace'])
+

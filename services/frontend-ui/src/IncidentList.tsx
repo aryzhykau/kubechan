@@ -129,12 +129,13 @@ function IncidentDetails({ incident, previousRun }: {
   )
 }
 
-function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onResolved }: {
+function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onResolved, onResourcesPatched }: {
   incident: Incident
   onAnalyzed: (name: string, runId: string) => void
   onAnalysisStart: (incidentName: string) => void
   previousRun?: DiagnosticRunSummary
   onResolved?: () => void
+  onResourcesPatched: (incidentName: string, resources: Array<{ kind: string; name: string; namespace: string }>) => void
 }) {
   const [analysis, setAnalysis] = useState<AnalysisState>({ status: 'idle' })
   const [showAugment, setShowAugment] = useState(false)
@@ -164,8 +165,9 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onRes
     }
   }
 
-  function handleAugmented(diagnosticRunId: string) {
+  function handleAugmented(diagnosticRunId: string, resources: Array<{ kind: string; name: string; namespace: string }>) {
     setShowAugment(false)
+    onResourcesPatched(id, resources)
     setAnalysis({ status: 'collecting', diagnosticRunId })
     onAnalyzed(id, diagnosticRunId)
   }
@@ -334,6 +336,18 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, on
 
   useEffect(() => { load() }, [load])
 
+  function patchIncidentResources(incidentName: string, resources: Array<{ kind: string; name: string; namespace: string }>) {
+    setIncidents(prev => prev.map(inc => {
+      if (inc.metadata.name !== incidentName) return inc
+      const existing = inc.spec.relatedResources ?? []
+      const extra = resources.filter(r =>
+        !existing.some(e => e.kind === r.kind && e.name === r.name && e.namespace === r.namespace)
+      )
+      if (extra.length === 0) return inc
+      return { ...inc, spec: { ...inc.spec, relatedResources: [...existing, ...extra] } }
+    }))
+  }
+
   const handleWS = useCallback((event: WSEvent) => {
     if (event.type === 'connection') {
       setWsConnected(true)
@@ -358,6 +372,8 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, on
                 confidence: result.confidence,
                 model: result.model,
                 analysisCreatedAt: result.createdAt,
+                needsMoreInfo: result.payload?.needsMoreInfo,
+                suggestedResources: result.payload?.suggestedResources,
               })
               return next
             })
@@ -405,6 +421,7 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, on
           onAnalysisStart={onAnalysisStart}
           previousRun={priorRuns.get(inc.metadata.name)}
           onResolved={onResolved}
+          onResourcesPatched={patchIncidentResources}
         />
       ))}
 
@@ -419,6 +436,7 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, on
               onAnalysisStart={onAnalysisStart}
               previousRun={priorRuns.get(inc.metadata.name)}
               onResolved={onResolved}
+              onResourcesPatched={patchIncidentResources}
             />
           ))}
         </details>

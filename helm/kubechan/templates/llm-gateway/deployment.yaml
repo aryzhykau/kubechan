@@ -34,23 +34,10 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
-            - name: BEDROCK_REGION
-              value: {{ .Values.llmGateway.bedrock.region | quote }}
-            - name: BEDROCK_MODEL_ID
-              value: {{ .Values.llmGateway.bedrock.modelId | quote }}
-            - name: THINKING_BUDGET
-              value: {{ .Values.llmGateway.bedrock.thinkingBudget | quote }}
             - name: EVIDENCE_TOKEN_BUDGET
-              value: {{ .Values.llmGateway.bedrock.evidenceTokenBudget | quote }}
+              value: {{ .Values.llmGateway.evidenceTokenBudget | default "120000" | quote }}
             - name: BACKEND_API_URL
               value: "http://{{ include "kubechan.fullname" . }}-backend-api:{{ .Values.backendApi.service.port }}"
-            {{- if .Values.llmGateway.credentials.secretName }}
-            - name: AWS_BEARER_TOKEN_BEDROCK
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.llmGateway.credentials.secretName | quote }}
-                  key: AWS_BEARER_TOKEN_BEDROCK
-            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.llmGateway.service.port }}
