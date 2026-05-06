@@ -857,22 +857,22 @@
           <article class="feature-card">
             <div class="feature-icon" style="background:rgba(79,142,247,0.12);" aria-hidden="true">🔍</div>
             <h3>Automated anomaly detection</h3>
-            <p>Five built-in detectors watch Pods, Deployments, Services, and Nodes. A debounce window prevents noise during rollouts.</p>
+            <p>Five built-in detectors watch Pods, Deployments, Services, and etc. Nothing can escape her watchful eyes.</p>
           </article>
           <article class="feature-card">
             <div class="feature-icon" style="background:rgba(168,85,247,0.12);" aria-hidden="true">🧪</div>
             <h3>Deep evidence collection</h3>
-            <p>Current &amp; previous crash logs, K8s events, ConfigMap contents, PVC phases, Ingress specs — structured into a prompt-ready payload.</p>
+            <p>Current &amp; previous crash logs, K8s events, ConfigMap contents, PVC phases, Ingress specs — everything is collected and prepared for analysis.</p>
           </article>
           <article class="feature-card">
             <div class="feature-icon" style="background:rgba(34,197,94,0.12);" aria-hidden="true">🤖</div>
             <h3>Multi-provider LLM analysis</h3>
-            <p>Supports AWS Bedrock (Qwen3-32B, Qwen3-235B) and GitHub Copilot. Credentials configured per-user in the UI — no shared secrets.</p>
+            <p>Supports AWS Bedrock and GitHub Copilot. Credentials configured per-user in the UI — no shared secrets.</p>
           </article>
           <article class="feature-card">
             <div class="feature-icon" style="background:rgba(245,158,11,0.12);" aria-hidden="true">⚡</div>
-            <h3>Real-time WebSocket updates</h3>
-            <p>Incident changes, analysis completions, and KubeChan mood updates are pushed instantly via WebSocket — no polling.</p>
+            <h3>Real-time updates</h3>
+            <p>Incident changes, analysis completions, and KubeChan mood updates in real time, every action can change her mood.</p>
           </article>
           <article class="feature-card">
             <div class="feature-icon" style="background:rgba(239,68,68,0.12);" aria-hidden="true">🔄</div>
@@ -896,7 +896,7 @@
         <h2 id="detectors-heading">Knows what's wrong before you do</h2>
         <p class="section-lead">
           cluster-watcher runs continuously against your workloads.
-          Each detector creates a ProblemCase CRD with severity, symptoms, and affected resources.
+          It detects problems in your cluster and lets you know before you do — with zero configuration required. Each detector has a severity level to help you prioritize what to fix first.
         </p>
         <div class="detector-table-wrap">
           <table>
@@ -946,7 +946,7 @@
         <div class="section-divider"></div>
         <h2 id="analysis-heading">Not just logs. Actual answers.</h2>
         <p class="section-lead">
-          KubeChan's analysis is structured into five sections — from scathing opening to actionable steps —
+          KubeChan's analysis is structured into five sections — from her personal opening comment to actionable steps —
           with a confidence score and an option to request more evidence when ambiguous.
         </p>
 
@@ -956,13 +956,9 @@
                  alt="KubeChan in thinking pose, analyzing evidence"
                  width="180" />
             <div class="speech-bubble">
-              <div class="bubble-tag">Opening rant</div>
               <div class="bubble-content">
                 "Your <code style="font-family:monospace;color:var(--amber)">OOMKilled</code> container is consuming unbounded memory because you didn't set a limit.
-                Did you think resources were free? Unbelievable."
-              </div>
-              <div class="bubble-tag" style="margin-top:12px;">Closing insult</div>
-              <div class="bubble-content">
+                Did you think resources were free? Unbelievable."<br/>
                 "Set <code style="font-family:monospace;color:var(--amber)">resources.limits.memory</code> and read the docs next time.
                 I won't always be here to save you."
               </div>
