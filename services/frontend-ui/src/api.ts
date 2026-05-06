@@ -9,7 +9,13 @@ export interface ResourceRef {
 
 export interface Incident {
   metadata: { name: string; namespace: string; creationTimestamp: string }
-  spec: { rootResource: ResourceRef; problemCases?: string[] }
+  spec: {
+    rootResource: ResourceRef
+    problemCases?: string[]
+    source?: 'auto' | 'manual'
+    userMessage?: string
+    relatedResources?: ResourceRef[]
+  }
   status: { state: 'open' | 'resolved'; openedAt?: string; resolvedAt?: string; activeProblemCases?: number }
 }
 
@@ -35,6 +41,8 @@ export interface DiagnosticRunSummary {
   confidence?: number
   model?: string
   analysisCreatedAt?: string
+  needsMoreInfo?: boolean
+  suggestedResources?: SuggestedResource[]
 }
 
 export interface K8sEvent {
@@ -93,6 +101,22 @@ export interface AnalyzeResponse {
   analysisRequestId: string
 }
 
+export interface ManualIncidentResponse {
+  incidentId: string
+  diagnosticRunId: string
+  analysisRequestId: string
+}
+
+export interface ResourceItem {
+  name: string
+  namespace: string
+}
+
+export interface SuggestedResource {
+  kind: string
+  reason: string
+}
+
 export interface AnalysisResult {
   id: string
   incidentId: string
@@ -111,6 +135,8 @@ export interface AnalysisResult {
     confidence?: number
     model?: string
     thinkingBudgetUsed?: number
+    needsMoreInfo?: boolean
+    suggestedResources?: SuggestedResource[]
   }
   createdAt: string
 }
@@ -177,4 +203,31 @@ export const api = {
 
   poke: () =>
     apiFetch<{ moodLevel: number; pokeCount: number }>('/api/v1/kubechan/poke', { method: 'POST' }),
+
+  listNamespaces: () =>
+    apiFetch<string[]>('/api/v1/namespaces'),
+
+  listResources: (ns: string, kind: string) =>
+    apiFetch<ResourceItem[]>(`/api/v1/namespaces/${encodeURIComponent(ns)}/resources?kind=${encodeURIComponent(kind)}`),
+
+  createManualIncident: (body: {
+    namespace: string
+    resourceKind: string
+    resourceName: string
+    userMessage: string
+    relatedResources: { kind: string; name: string; namespace: string }[]
+  }) =>
+    apiFetch<ManualIncidentResponse>('/api/v1/incidents/manual', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  augmentIncident: (incidentId: string, relatedResources: { kind: string; name: string; namespace: string }[]) =>
+    apiFetch<AnalyzeResponse>(`/api/v1/incidents/${encodeURIComponent(incidentId)}/augment`, {
+      method: 'POST',
+      body: JSON.stringify({ relatedResources }),
+    }),
+
+  resolveIncident: (id: string) =>
+    apiFetch<Incident>(`/api/v1/incidents/${encodeURIComponent(id)}/resolve`, { method: 'POST' }),
 }

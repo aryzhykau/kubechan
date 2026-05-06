@@ -12,7 +12,10 @@ import (
 	"net/http"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -35,7 +38,10 @@ import (
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments;replicasets;statefulsets;daemonsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=batch,resources=jobs;cronjobs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch
 type DiagnosticRunReconciler struct {
 	client.Client
 	Logger         *slog.Logger
@@ -191,7 +197,247 @@ func (r *DiagnosticRunReconciler) collect(
 	ev.WorkloadPodLogs = pods
 	ev.PVCInfos = pvcs
 
+	// Populate user-provided context for manual incidents.
+	ev.UserMessage = inc.Spec.UserMessage
+
+	// Build a deduplicated set of related resources to collect:
+	// start with user-tagged ones, then auto-discover Ingresses in the root namespace.
+	type rrKey struct{ kind, ns, name string }
+	seen := map[rrKey]bool{}
+
+	type rrEntry struct{ kind, ns, name string }
+	var toCollect []rrEntry
+
+	for _, rr := range inc.Spec.RelatedResources {
+		rrNS := rr.Namespace
+		if rrNS == "" {
+			rrNS = ns
+		}
+		k := rrKey{rr.Kind, rrNS, rr.Name}
+		if !seen[k] {
+			seen[k] = true
+			toCollect = append(toCollect, rrEntry{rr.Kind, rrNS, rr.Name})
+		}
+	}
+
+	// Auto-discover all Ingresses in the root resource namespace so the LLM
+	// can spot backend service name mismatches even when the user didn't tag them.
+	if rootNS != "" {
+		var ingressList networkingv1.IngressList
+		if err := r.List(ctx, &ingressList, client.InNamespace(rootNS)); err == nil {
+			for _, ing := range ingressList.Items {
+				k := rrKey{"Ingress", rootNS, ing.Name}
+				if !seen[k] {
+					seen[k] = true
+					toCollect = append(toCollect, rrEntry{"Ingress", rootNS, ing.Name})
+				}
+			}
+		} else {
+			errs = append(errs, fmt.Sprintf("auto-discover ingresses in %s: %s", rootNS, err))
+		}
+	}
+
+	// Collect events + spec for each related resource.
+	for _, rr := range toCollect {
+		rre := collector.RelatedResourceEvidence{
+			Resource: collector.ResourceRef{Kind: rr.kind, Name: rr.name},
+		}
+		events, err := r.collectEvents(ctx, rr.ns, rr.kind, rr.name)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("events for related %s/%s: %s", rr.kind, rr.name, err))
+		}
+		rre.Events = events
+		spec, err := r.collectResourceSpec(ctx, rr.ns, rr.kind, rr.name)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("spec for related %s/%s: %s", rr.kind, rr.name, err))
+		}
+		rre.Spec = spec
+		ev.RelatedResourceEvidence = append(ev.RelatedResourceEvidence, rre)
+	}
+
 	return ev, errs
+}
+
+// collectResourceSpec fetches a resource and returns kind-specific diagnostic fields.
+// The returned map is included verbatim in the evidence payload sent to the LLM.
+func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, kind, name string) (map[string]any, error) {
+	key := client.ObjectKey{Namespace: ns, Name: name}
+	switch kind {
+	case "Ingress":
+		obj := &networkingv1.Ingress{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		var rules []map[string]any
+		for _, rule := range obj.Spec.Rules {
+			var paths []map[string]any
+			if rule.HTTP != nil {
+				for _, p := range rule.HTTP.Paths {
+					path := map[string]any{
+						"path":        p.Path,
+						"pathType":    string(*p.PathType),
+						"backendService": p.Backend.Service.Name,
+						"backendPort": p.Backend.Service.Port.Number,
+					}
+					paths = append(paths, path)
+				}
+			}
+			rules = append(rules, map[string]any{"host": rule.Host, "paths": paths})
+		}
+		spec := map[string]any{
+			"ingressClassName": obj.Spec.IngressClassName,
+			"rules":            rules,
+			"annotations":      obj.Annotations,
+		}
+		if obj.Spec.IngressClassName == nil {
+			spec["ingressClassName"] = nil
+		}
+		return spec, nil
+
+	case "Service":
+		obj := &corev1.Service{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		var ports []map[string]any
+		for _, p := range obj.Spec.Ports {
+			ports = append(ports, map[string]any{
+				"name":       p.Name,
+				"port":       p.Port,
+				"targetPort": p.TargetPort.String(),
+				"protocol":   string(p.Protocol),
+			})
+		}
+		return map[string]any{
+			"type":        string(obj.Spec.Type),
+			"selector":    obj.Spec.Selector,
+			"ports":       ports,
+			"clusterIP":   obj.Spec.ClusterIP,
+			"annotations": obj.Annotations,
+		}, nil
+
+	case "ConfigMap":
+		obj := &corev1.ConfigMap{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		// Truncate individual values to 512 bytes so the LLM context stays manageable.
+		data := make(map[string]string, len(obj.Data))
+		for k, v := range obj.Data {
+			if len(v) > 512 {
+				data[k] = v[:512] + "…[truncated]"
+			} else {
+				data[k] = v
+			}
+		}
+		return map[string]any{"data": data, "annotations": obj.Annotations}, nil
+
+	case "Deployment":
+		obj := &appsv1.Deployment{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"replicas":          obj.Spec.Replicas,
+			"selector":          obj.Spec.Selector.MatchLabels,
+			"availableReplicas": obj.Status.AvailableReplicas,
+			"readyReplicas":     obj.Status.ReadyReplicas,
+			"conditions":        summariseDeploymentConditions(obj.Status.Conditions),
+		}, nil
+
+	case "StatefulSet":
+		obj := &appsv1.StatefulSet{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"replicas":        obj.Spec.Replicas,
+			"readyReplicas":   obj.Status.ReadyReplicas,
+			"currentReplicas": obj.Status.CurrentReplicas,
+		}, nil
+
+	case "DaemonSet":
+		obj := &appsv1.DaemonSet{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"desiredNumberScheduled":  obj.Status.DesiredNumberScheduled,
+			"numberReady":             obj.Status.NumberReady,
+			"numberUnavailable":       obj.Status.NumberUnavailable,
+		}, nil
+
+	case "CronJob":
+		obj := &batchv1.CronJob{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		var lastRun *string
+		if obj.Status.LastScheduleTime != nil {
+			s := obj.Status.LastScheduleTime.UTC().Format(time.RFC3339)
+			lastRun = &s
+		}
+		var lastSuccessful *string
+		if obj.Status.LastSuccessfulTime != nil {
+			s := obj.Status.LastSuccessfulTime.UTC().Format(time.RFC3339)
+			lastSuccessful = &s
+		}
+		return map[string]any{
+			"schedule":           obj.Spec.Schedule,
+			"suspend":            obj.Spec.Suspend,
+			"activeJobs":         len(obj.Status.Active),
+			"lastScheduleTime":   lastRun,
+			"lastSuccessfulTime": lastSuccessful,
+			"annotations":        obj.Annotations,
+		}, nil
+
+	case "Job":
+		obj := &batchv1.Job{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"completions":  obj.Spec.Completions,
+			"succeeded":    obj.Status.Succeeded,
+			"failed":       obj.Status.Failed,
+			"active":       obj.Status.Active,
+			"startTime":    obj.Status.StartTime,
+			"completionTime": obj.Status.CompletionTime,
+		}, nil
+
+	case "PersistentVolumeClaim":
+		obj := &corev1.PersistentVolumeClaim{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		capacity := ""
+		if q, ok := obj.Status.Capacity[corev1.ResourceStorage]; ok {
+			capacity = q.String()
+		}
+		return map[string]any{
+			"phase":        string(obj.Status.Phase),
+			"capacity":     capacity,
+			"accessModes":  obj.Spec.AccessModes,
+			"storageClass": obj.Spec.StorageClassName,
+		}, nil
+
+	default:
+		// Unknown kind — nothing useful to return.
+		return nil, nil
+	}
+}
+
+func summariseDeploymentConditions(conds []appsv1.DeploymentCondition) []map[string]any {
+	var out []map[string]any
+	for _, c := range conds {
+		out = append(out, map[string]any{
+			"type":    string(c.Type),
+			"status":  string(c.Status),
+			"reason":  c.Reason,
+			"message": c.Message,
+		})
+	}
+	return out
 }
 
 func (r *DiagnosticRunReconciler) collectEvents(ctx context.Context, ns, kind, name string) ([]collector.K8sEvent, error) {

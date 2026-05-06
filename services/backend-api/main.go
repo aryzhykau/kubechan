@@ -110,6 +110,9 @@ func main() {
 	analysis := &handler.Analysis{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	settings := &handler.Settings{DB: database}
 	kubechan := &handler.KubeChan{MoodSyncer: moodSyncer}
+	resources := &handler.Resources{K8s: k8s}
+	manualIncident := &handler.ManualIncident{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
+	augment := &handler.Augment{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	internal := &handler.Internal{
 		K8s:              k8s,
 		DB:               database,
@@ -134,7 +137,10 @@ func main() {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/incidents", incidents.List)
 		r.Get("/incidents/{id}", incidents.Get)
+		r.Post("/incidents/manual", manualIncident.Create)
 		r.Post("/incidents/{id}/analyze", analysis.Analyze)
+		r.Post("/incidents/{id}/augment", augment.Augment)
+		r.Post("/incidents/{id}/resolve", incidents.Resolve)
 		r.Get("/incidents/{id}/evidence", analysis.GetEvidence)
 
 		r.Get("/problemcases", problemcases.List)
@@ -152,6 +158,9 @@ func main() {
 		r.Get("/settings", settings.Get)
 		r.Put("/settings", settings.Update)
 		r.Get("/persona/idle-message", settings.IdleMessage)
+
+		r.Get("/namespaces", resources.ListNamespaces)
+		r.Get("/namespaces/{ns}/resources", resources.ListResources)
 
 		r.Get("/kubechan/state", kubechan.GetState)
 		r.Post("/kubechan/poke", kubechan.Poke)

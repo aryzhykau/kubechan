@@ -54,7 +54,12 @@ class AnalyzeRequest(BaseModel):
     reanalysisCount: int = 0
     moodLevel: int = 0
     priorDiagnoses: list[PriorDiagnosis] = []
+    userMessage: str = ""
     payload: dict[str, Any]
+
+class SuggestedResource(BaseModel):
+    kind: str
+    reason: str
 
 class AnalyzeResponse(BaseModel):
     evidenceId: str
@@ -65,17 +70,21 @@ class AnalyzeResponse(BaseModel):
     recommendation: str       # numbered steps
     closingInsult: str        # final humiliating remark
     confidence: float
+    needsMoreInfo: bool = False
+    suggestedResources: list[SuggestedResource] = []
     thinkingBudgetUsed: int = 0
     rawResponse: str | None = None
+    prompt: str | None = None
 
 # ── Prompt builder ────────────────────────────────────────────────────────────
 def _build_prompt(payload: dict[str, Any], reanalysis_count: int = 0, mood_level: int = 0,
-                  prior_diagnoses: list | None = None) -> str:
+                  prior_diagnoses: list | None = None, user_message: str = "") -> str:
     root = payload.get("rootResource", {})
     root_events = payload.get("rootResourceEvents", [])
     problem_cases = payload.get("problemCases", [])
     workload_logs = payload.get("workloadPodLogs", [])
     pvc_infos = payload.get("pvcInfos", [])
+    related_resources = payload.get("relatedResourceEvidence", [])
 
     def fmt_events(events: list[dict]) -> str:
         if not events:
@@ -162,6 +171,75 @@ def _build_prompt(payload: dict[str, Any], reanalysis_count: int = 0, mood_level
             {fmt_events(pvc.get('events', []))}
         """).rstrip())
 
+    related_sections = []
+    for rr in related_resources:
+        res = rr.get("resource", {})
+        spec = rr.get("spec") or {}
+        section = f"Related resource: {res.get('kind')}/{res.get('name')}"
+
+        if spec:
+            kind = res.get("kind", "")
+            if kind == "Ingress":
+                rules = spec.get("rules") or []
+                ic = spec.get("ingressClassName") or "(none)"
+                section += f"\n  ingressClassName: {ic}"
+                for rule in rules:
+                    section += f"\n  host: {rule.get('host', '*')}"
+                    for path in rule.get("paths") or []:
+                        section += (
+                            f"\n    path={path.get('path','/')}  "
+                            f"→ service={path.get('backendService','?')} "
+                            f"port={path.get('backendPort','?')}"
+                        )
+                annotations = spec.get("annotations") or {}
+                if annotations:
+                    section += "\n  annotations:"
+                    for k, v in annotations.items():
+                        section += f"\n    {k}: {v}"
+            elif kind == "Service":
+                section += f"\n  type:     {spec.get('type', '?')}"
+                section += f"\n  selector: {spec.get('selector', {})}"
+                section += f"\n  clusterIP: {spec.get('clusterIP', '?')}"
+                for p in spec.get("ports") or []:
+                    section += f"\n  port: {p.get('name','')} {p.get('port')}→{p.get('targetPort')}/{p.get('protocol','TCP')}"
+                annotations = spec.get("annotations") or {}
+                if annotations:
+                    section += "\n  annotations:"
+                    for k, v in annotations.items():
+                        section += f"\n    {k}: {v}"
+            elif kind == "ConfigMap":
+                data = spec.get("data") or {}
+                if data:
+                    section += "\n  data:"
+                    for k, v in data.items():
+                        section += f"\n    [{k}]: {v}"
+            elif kind in ("Deployment", "StatefulSet", "DaemonSet"):
+                section += f"\n  replicas/ready: {spec.get('readyReplicas','?')}/{spec.get('replicas','?')}"
+                if spec.get("conditions"):
+                    section += "\n  conditions:"
+                    for c in spec["conditions"]:
+                        section += f"\n    {c.get('type')}: {c.get('status')} — {c.get('message','')}"
+            elif kind == "CronJob":
+                section += f"\n  schedule:         {spec.get('schedule','?')}"
+                section += f"\n  suspend:          {spec.get('suspend')}"
+                section += f"\n  lastScheduleTime: {spec.get('lastScheduleTime','?')}"
+                section += f"\n  lastSuccessfulTime: {spec.get('lastSuccessfulTime','?')}"
+            elif kind in ("Job", "PersistentVolumeClaim"):
+                for k, v in spec.items():
+                    if v is not None:
+                        section += f"\n  {k}: {v}"
+
+        section += f"\n  events:\n{fmt_events(rr.get('events', []))}"
+        related_sections.append(section)
+
+    user_message_note = ""
+    if user_message:
+        user_message_note = textwrap.dedent(f"""
+        USER REPORTED: "{user_message}"
+        Treat this as your primary diagnostic framing. Interpret all evidence below in light of
+        what the user described. The user has direct knowledge of the symptom timeline and context.
+        """)
+
     prior_history_note = ""
     if prior_diagnoses:
         lines = []
@@ -246,6 +324,7 @@ def _build_prompt(payload: dict[str, Any], reanalysis_count: int = 0, mood_level
 
         ## Incident Evidence
 
+        {user_message_note}
         Root workload: {root.get('kind')}/{root.get('name')}
 
         ### Kubernetes events on root workload
@@ -259,6 +338,9 @@ def _build_prompt(payload: dict[str, Any], reanalysis_count: int = 0, mood_level
 
         ### PersistentVolumeClaims referenced by pods
         {''.join(pvc_sections) or '(none — no PVCs referenced)'}
+
+        ### Related resources tagged by user
+        {''.join(related_sections) or '(none)'}
 
         ## Analysis Instructions
 
@@ -310,13 +392,27 @@ def _build_prompt(payload: dict[str, Any], reanalysis_count: int = 0, mood_level
           If prior diagnoses were rejected, drop your confidence by at least 0.1 from where
           you would otherwise place it.
 
+        - "needsMoreInfo": true if your confidence is below 0.65 AND you believe that inspecting
+          additional Kubernetes resources (which were not provided) would materially improve the
+          diagnosis. Set to false when you have enough evidence to be reasonably confident, even
+          if confidence is below 0.65 for other reasons (e.g. genuinely ambiguous failure).
+
+        - "suggestedResources": array of objects with "kind" and "reason". Only populate when
+          needsMoreInfo is true. List the specific resource kinds (e.g. "Ingress", "ConfigMap",
+          "Service") that you would need to inspect to improve the diagnosis. For each, provide
+          a one-sentence reason explaining what you hope to find there.
+          Example: {{"kind": "Ingress", "reason": "Backend service name in the Ingress rules may not match the actual Service name, causing 503 errors."}}
+          Leave as empty array [] when needsMoreInfo is false.
+
         {{
           "openingRant": "<pure mockery, no technical content>",
           "likelyRootCause": "<exact technical cause, one sentence>",
           "evidenceChain": "<2-4 sentences citing specific evidence>",
           "recommendation": "<numbered steps with exact commands>",
           "closingInsult": "<one final humiliating remark>",
-          "confidence": <0.0-1.0>
+          "confidence": <0.0-1.0>,
+          "needsMoreInfo": <true|false>,
+          "suggestedResources": [{{"kind": "<Kind>", "reason": "<one sentence>"}}]
         }}
     """).strip()
 
@@ -404,7 +500,8 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     logger.info("analyzing evidence | evidenceId=%s incidentId=%s", req.evidenceId, req.incidentId)
 
     prompt = _build_prompt(req.payload, req.reanalysisCount, req.moodLevel,
-                           [p.model_dump() for p in req.priorDiagnoses])
+                           [p.model_dump() for p in req.priorDiagnoses],
+                           req.userMessage)
 
     logger.info("=== PROMPT TO MODEL ===\n%s\n=== END PROMPT ===", prompt)
 
@@ -427,6 +524,14 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
             return "\n".join(str(item) for item in val)
         return str(val) if val is not None else default
 
+    raw_suggested = parsed.get("suggestedResources") or []
+    suggested = []
+    for s in raw_suggested:
+        if isinstance(s, dict) and s.get("kind"):
+            suggested.append(SuggestedResource(kind=str(s["kind"]), reason=str(s.get("reason", ""))))
+
+    needs_more_info = bool(parsed.get("needsMoreInfo", False)) and len(suggested) > 0
+
     return AnalyzeResponse(
         evidenceId=req.evidenceId,
         model=_resolve_model_id(BEDROCK_MODEL_ID),
@@ -436,6 +541,9 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         recommendation=_str(parsed.get("recommendation")),
         closingInsult=_str(parsed.get("closingInsult"), "You're welcome."),
         confidence=min(max(float(parsed.get("confidence", 0.5)), 0.0), 1.0),
+        needsMoreInfo=needs_more_info,
+        suggestedResources=suggested,
         thinkingBudgetUsed=thinking_tokens,
         rawResponse=raw,
+        prompt=prompt,
     )

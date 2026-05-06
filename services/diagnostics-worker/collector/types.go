@@ -85,4 +85,18 @@ type Evidence struct {
 	ProblemCases       []ProblemCaseEvidence `json:"problemCases,omitempty"`
 	WorkloadPodLogs    []PodLogs             `json:"workloadPodLogs,omitempty"`
 	PVCInfos           []PVCInfo             `json:"pvcInfos,omitempty"`
+	// UserMessage is the plain-text description provided by the user for manual incidents.
+	UserMessage string `json:"userMessage,omitempty"`
+	// RelatedResourceEvidence holds events (and logs) for user-tagged related resources.
+	RelatedResourceEvidence []RelatedResourceEvidence `json:"relatedResourceEvidence,omitempty"`
+}
+
+// RelatedResourceEvidence holds collected events and spec data for a user-tagged resource.
+type RelatedResourceEvidence struct {
+	Resource ResourceRef    `json:"resource"`
+	Events   []K8sEvent     `json:"events,omitempty"`
+	Logs     string         `json:"logs,omitempty"`
+	// Spec holds kind-specific diagnostic fields extracted from the resource spec/status
+	// (e.g. Ingress backend service names, Service selector, ConfigMap data, etc.).
+	Spec     map[string]any `json:"spec,omitempty"`
 }

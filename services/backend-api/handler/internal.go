@@ -159,6 +159,7 @@ type llmAnalyzeRequest struct {
 	ReanalysisCount int                 `json:"reanalysisCount"`
 	MoodLevel       int                 `json:"moodLevel"`
 	PriorDiagnoses  []priorDiagnosis    `json:"priorDiagnoses,omitempty"`
+	UserMessage     string              `json:"userMessage,omitempty"`
 	Payload         map[string]any      `json:"payload"`
 }
 
@@ -169,17 +170,26 @@ type priorDiagnosis struct {
 	UserRating      string `json:"userRating"` // "up", "down", or ""
 }
 
+// suggestedResource mirrors the LLM gateway's SuggestedResource model.
+type suggestedResource struct {
+	Kind   string `json:"kind"`
+	Reason string `json:"reason"`
+}
+
 // llmAnalyzeResponse is the response from llm-gateway POST /analyze.
 type llmAnalyzeResponse struct {
-	EvidenceID      string  `json:"evidenceId"`
-	Model           string  `json:"model"`
-	OpeningRant     string  `json:"openingRant"`
-	LikelyRootCause string  `json:"likelyRootCause"`
-	EvidenceChain   string  `json:"evidenceChain"`
-	Recommendation  string  `json:"recommendation"`
-	ClosingInsult   string  `json:"closingInsult"`
-	Confidence      float64 `json:"confidence"`
-	ThinkingBudget  int     `json:"thinkingBudgetUsed"`
+	EvidenceID         string              `json:"evidenceId"`
+	Model              string              `json:"model"`
+	OpeningRant        string              `json:"openingRant"`
+	LikelyRootCause    string              `json:"likelyRootCause"`
+	EvidenceChain      string              `json:"evidenceChain"`
+	Recommendation     string              `json:"recommendation"`
+	ClosingInsult      string              `json:"closingInsult"`
+	Confidence         float64             `json:"confidence"`
+	NeedsMoreInfo      bool                `json:"needsMoreInfo"`
+	SuggestedResources []suggestedResource `json:"suggestedResources,omitempty"`
+	ThinkingBudget     int                 `json:"thinkingBudgetUsed"`
+	Prompt             string              `json:"prompt,omitempty"`
 }
 
 func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
@@ -233,6 +243,9 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		moodLevel = h.MoodSyncer.GetMoodLevel(context.Background())
 	}
 
+	// Extract userMessage from the payload (set for manual incidents).
+	userMessage, _ := payloadMap["userMessage"].(string)
+
 	body, err := json.Marshal(llmAnalyzeRequest{
 		EvidenceID:      evidenceID,
 		DiagnosticRunID: req.DiagnosticRunID,
@@ -240,6 +253,7 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		ReanalysisCount: priorCount,
 		MoodLevel:       moodLevel,
 		PriorDiagnoses:  priorDiagnoses,
+		UserMessage:     userMessage,
 		Payload:         payloadMap,
 	})
 	if err != nil {
@@ -269,11 +283,16 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	// Store in analysis_results.
 	analysisID := uuid.New().String()
 	resultPayload, _ := json.Marshal(result)
+	needsMoreInfoInt := 0
+	if result.NeedsMoreInfo {
+		needsMoreInfoInt = 1
+	}
+	suggJSON, _ := json.Marshal(result.SuggestedResources)
 	_, err = h.DB.Exec(
 		`INSERT INTO analysis_results
 		 (id, incident_id, diagnostic_run_id, model, model_runtime, status,
-		  likely_root_cause, confidence, payload, created_at)
-		 VALUES (?, ?, ?, ?, 'bedrock', 'completed', ?, ?, ?, datetime('now'))`,
+		  likely_root_cause, confidence, payload, prompt, needs_more_info, suggested_resources, created_at)
+		 VALUES (?, ?, ?, ?, 'bedrock', 'completed', ?, ?, ?, ?, ?, ?, datetime('now'))`,
 		analysisID,
 		nullStr(req.IncidentID),
 		req.DiagnosticRunID,
@@ -281,6 +300,9 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		result.LikelyRootCause,
 		result.Confidence,
 		string(resultPayload),
+		nullStr(result.Prompt),
+		needsMoreInfoInt,
+		nullBytes(suggJSON),
 	)
 	if err != nil {
 		logger.Error("dispatchAnalysis: insert analysis_result", "err", err)
@@ -292,11 +314,13 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	// Broadcast WS event so the frontend can update.
 	if h.Hub != nil {
 		msg, _ := json.Marshal(map[string]any{
-			"type":        "Analysis.Completed",
-			"analysisId":  analysisID,
-			"incidentId":  req.IncidentID,
-			"rootCause":   result.LikelyRootCause,
-			"confidence":  result.Confidence,
+			"type":               "Analysis.Completed",
+			"analysisId":         analysisID,
+			"incidentId":         req.IncidentID,
+			"rootCause":          result.LikelyRootCause,
+			"confidence":         result.Confidence,
+			"needsMoreInfo":      result.NeedsMoreInfo,
+			"suggestedResources": result.SuggestedResources,
 		})
 		h.Hub.Broadcast(msg)
 	}

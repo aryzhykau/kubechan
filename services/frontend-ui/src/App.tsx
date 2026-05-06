@@ -3,6 +3,7 @@ import { IncidentList } from './IncidentList'
 import { KubeChanSidebar, type KubeChanState } from './KubeChanSidebar'
 import { DiagnosticsPage } from './DiagnosticsPage'
 import { DiagnosticRunDetail } from './DiagnosticRunDetail'
+import { ManualIncidentModal } from './ManualIncidentModal'
 import { pickChatterLine, type ChatterEvent } from './chatter'
 import { useWebSocket, type WSEvent } from './useWebSocket'
 import { api } from './api'
@@ -19,6 +20,8 @@ function App() {
   const [kubechan, setKubechan] = useState<KubeChanState>({ pose: 'idle' })
   const kubechanRef = useRef(kubechan)
   useEffect(() => { kubechanRef.current = kubechan }, [kubechan])
+
+  const [showManualModal, setShowManualModal] = useState(false)
 
   const [moodLevel, setMoodLevel] = useState(0)
   const moodLevelRef = useRef(0)
@@ -102,12 +105,10 @@ function App() {
     return () => clearInterval(id)
   }, [triggerChatter])
 
-  // WS: react to new/resolved incidents at the app level
+  // WS: react to new incidents at the app level; resolved is handled by onResolved in IncidentRow
   const handleWS = useCallback((event: WSEvent) => {
     if (event.type === 'Incident.Created') {
       triggerChatter('new-incident')
-    } else if (event.type === 'Incident.Resolved') {
-      triggerChatter('incident-resolved')
     } else if (event.type === 'KubeChanState.Updated') {
       const e = event as { type: string; moodLevel?: number }
       if (typeof e.moodLevel === 'number') setMoodLevel(e.moodLevel)
@@ -138,6 +139,24 @@ function App() {
     }
   }, [])
 
+  const handleManualCreated = useCallback((incidentId: string, diagnosticRunId: string) => {
+    setShowManualModal(false)
+    setKubechan({ pose: 'thinking', incidentName: incidentId })
+    setView({ type: 'incidents' })
+    const poll = setInterval(async () => {
+      try {
+        const result = await api.getDiagnosticRunAnalysisResult(diagnosticRunId)
+        if (result && result.status === 'completed') {
+          clearInterval(poll)
+          handleAnalysisComplete(result, incidentId)
+        }
+      } catch {
+        // still pending — keep polling
+      }
+    }, 3000)
+    setTimeout(() => clearInterval(poll), 5 * 60_000)
+  }, [handleAnalysisComplete])
+
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const showReaction = useCallback((line: string) => {
@@ -147,6 +166,18 @@ function App() {
       reactionTimerRef.current = null
       setKubechan(prev => prev.reactionLine === line ? { ...prev, reactionLine: undefined } : prev)
     }, 4500)
+  }, [])
+
+  const handleIncidentResolved = useCallback(() => {
+    const line = pickChatterLine('incident-resolved', moodLevelRef.current)
+    if (chatterTimerRef.current !== null) clearTimeout(chatterTimerRef.current)
+    lastInteractionRef.current = Date.now()
+    silenceStageRef.current = 0
+    setKubechan({ pose: 'chatter', chatterLine: line })
+    chatterTimerRef.current = setTimeout(() => {
+      chatterTimerRef.current = null
+      setKubechan(prev => prev.pose === 'chatter' ? { pose: 'idle' } : prev)
+    }, 9000)
   }, [])
 
   const handleRate = useCallback(async (resultId: string, rating: 'up' | 'down', confidence: number) => {
@@ -210,6 +241,8 @@ function App() {
               onAnalysisStart={handleAnalysisStart}
               onAnalysisComplete={handleAnalysisComplete}
               onAction={triggerChatter}
+              onResolved={handleIncidentResolved}
+              onReportManual={() => setShowManualModal(true)}
             />
           )}
           {view.type === 'diagnostics' && (
@@ -229,6 +262,12 @@ function App() {
         </main>
         <KubeChanSidebar state={kubechan} onPoke={handlePoke} moodLevel={moodLevel} onRate={handleRate} />
       </div>
+      {showManualModal && (
+        <ManualIncidentModal
+          onClose={() => setShowManualModal(false)}
+          onCreated={handleManualCreated}
+        />
+      )}
     </div>
   )
 }

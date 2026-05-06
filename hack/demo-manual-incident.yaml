@@ -1,0 +1,66 @@
+# Demo: nginx with a broken Ingress pointing to the wrong service name
+#
+# Service is named "nginx-svc" but the Ingress backend references "nginx" (old name).
+# Apply: kubectl apply -f hack/demo-manual-incident.yaml
+# Delete: kubectl delete -f hack/demo-manual-incident.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:stable-alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-svc        # current name
+  namespace: demo
+  annotations:
+    kubechan.io/renamed-from: nginx   # was renamed from "nginx"
+spec:
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx
+  namespace: demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx          # BUG: old name, should be "nginx-svc"
+                port:
+                  number: 80

@@ -44,6 +44,18 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
     verbs: ["get", "list", "watch"]
+  # Services — selector/port inspection for related resource evidence
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  # Jobs + CronJobs — describe related batch resources
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  # Ingresses — backend routing inspection for related resource evidence
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -2,13 +2,19 @@ import { useState, useEffect, useCallback } from 'react'
 import { api, type Incident, type AnalysisResult, type DiagnosticRunSummary } from './api'
 import { useWebSocket, type WSEvent } from './useWebSocket'
 import { type ChatterEvent } from './chatter'
+import { AugmentIncidentModal } from './AugmentIncidentModal'
 
 function incidentLabel(incident: Incident): { title: string; sub: string } {
   const { rootResource } = incident.spec
   const ns = rootResource.namespace || incident.metadata.namespace || 'default'
   const affected = incident.status.activeProblemCases ?? 0
   const title = `${rootResource.kind} ${rootResource.name} in ${ns}`
-  const sub = affected > 0 ? `${affected} resource${affected !== 1 ? 's' : ''} also affected` : ''
+  // For manual incidents use the userMessage as the sub-label if no affected count.
+  const sub = affected > 0
+    ? `${affected} resource${affected !== 1 ? 's' : ''} also affected`
+    : (incident.spec.source === 'manual' && incident.spec.userMessage)
+      ? incident.spec.userMessage.slice(0, 80) + (incident.spec.userMessage.length > 80 ? '…' : '')
+      : ''
   return { title, sub }
 }
 
@@ -36,15 +42,107 @@ function ConfidenceBadge({ confidence }: { confidence?: number }) {
   return <span className={`confidence-badge ${cls}`}>{pct}%</span>
 }
 
-function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun }: {
+function ResourcePill({ kind, name, namespace }: { kind: string; name: string; namespace?: string }) {
+  return (
+    <span className="inc-detail-pill">
+      <span className="inc-detail-pill-kind">{kind}</span>
+      <span className="inc-detail-pill-name">{name}</span>
+      {namespace && <span className="inc-detail-pill-ns">{namespace}</span>}
+    </span>
+  )
+}
+
+function IncidentDetails({ incident, previousRun }: {
+  incident: Incident
+  previousRun?: DiagnosticRunSummary
+}) {
+  const isManual = incident.spec.source === 'manual'
+  const related = incident.spec.relatedResources ?? []
+  const pcs = incident.spec.problemCases ?? []
+  const suggestions = previousRun?.suggestedResources ?? []
+  const needsMoreInfo = !!previousRun?.needsMoreInfo && suggestions.length > 0
+
+  return (
+    <details className="incident-details">
+      <summary className="incident-details-toggle">Details</summary>
+      <div className="incident-details-body">
+
+        {/* Root resource — always */}
+        <div className="inc-detail-row">
+          <span className="inc-detail-label">Root resource</span>
+          <ResourcePill
+            kind={incident.spec.rootResource.kind}
+            name={incident.spec.rootResource.name}
+            namespace={incident.spec.rootResource.namespace}
+          />
+        </div>
+
+        {/* User prompt — manual only */}
+        {isManual && incident.spec.userMessage && (
+          <div className="inc-detail-row inc-detail-row--col">
+            <span className="inc-detail-label">User description</span>
+            <p className="inc-detail-message">{incident.spec.userMessage}</p>
+          </div>
+        )}
+
+        {/* Related resources — manual */}
+        {isManual && related.length > 0 && (
+          <div className="inc-detail-row inc-detail-row--wrap">
+            <span className="inc-detail-label">Related resources</span>
+            <div className="inc-detail-pills">
+              {related.map((r, i) => (
+                <ResourcePill key={i} kind={r.kind} name={r.name} namespace={r.namespace} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Problem cases — auto */}
+        {!isManual && pcs.length > 0 && (
+          <div className="inc-detail-row inc-detail-row--wrap">
+            <span className="inc-detail-label">Problem cases</span>
+            <div className="inc-detail-pills">
+              {pcs.map(pc => (
+                <span key={pc} className="inc-detail-pill inc-detail-pill--pc">{pc}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* KubeChan's suggestions */}
+        {needsMoreInfo && (
+          <div className="inc-detail-row inc-detail-row--col">
+            <span className="inc-detail-label inc-detail-label--warn">KubeChan suggested</span>
+            <div className="inc-detail-suggestions">
+              {suggestions.map((s, i) => (
+                <div key={i} className="inc-detail-suggestion">
+                  <span className="inc-detail-pill inc-detail-pill--suggest">{s.kind}</span>
+                  <span className="inc-detail-suggestion-reason">{s.reason}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+      </div>
+    </details>
+  )
+}
+
+function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onResolved }: {
   incident: Incident
   onAnalyzed: (name: string, runId: string) => void
   onAnalysisStart: (incidentName: string) => void
   previousRun?: DiagnosticRunSummary
+  onResolved?: () => void
 }) {
   const [analysis, setAnalysis] = useState<AnalysisState>({ status: 'idle' })
+  const [showAugment, setShowAugment] = useState(false)
+  const [resolveState, setResolveState] = useState<'idle' | 'confirm' | 'resolving' | 'error'>('idle')
+  const [resolveError, setResolveError] = useState('')
   const id = incident.metadata.name
   const isResolved = incident.status.state === 'resolved'
+  const isManual = incident.spec.source === 'manual'
   const { title, sub } = incidentLabel(incident)
 
   // If a fresh result arrives via WS, flip to done.
@@ -66,8 +164,29 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun }: {
     }
   }
 
+  function handleAugmented(diagnosticRunId: string) {
+    setShowAugment(false)
+    setAnalysis({ status: 'collecting', diagnosticRunId })
+    onAnalyzed(id, diagnosticRunId)
+  }
+
+  async function handleResolve() {
+    setResolveState('resolving')
+    onResolved?.()
+    try {
+      await api.resolveIncident(id)
+      setResolveState('idle')
+    } catch (e: unknown) {
+      setResolveError(String(e))
+      setResolveState('error')
+    }
+  }
+
   const isInFlight = analysis.status === 'pending' || analysis.status === 'collecting'
   const alreadyAnalyzed = !!previousRun?.analysisResultId
+  const needsMoreInfo = !isInFlight && alreadyAnalyzed && !!previousRun?.needsMoreInfo
+  const suggestions = previousRun?.suggestedResources ?? []
+  const rootNS = incident.spec.rootResource.namespace || incident.metadata.namespace || ''
 
   return (
     <div className={`incident-row ${isResolved ? 'resolved' : 'open'}`}>
@@ -75,6 +194,9 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun }: {
         <span className={`state-badge ${incident.status.state}`}>
           {incident.status.state.toUpperCase()}
         </span>
+        {incident.spec.source === 'manual' && (
+          <span className="manual-badge">Manual</span>
+        )}
         <div className="incident-title-block">
           <strong className="incident-name">{title}</strong>
           {sub && <span className="incident-affected">{sub}</span>}
@@ -84,13 +206,7 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun }: {
         </span>
       </div>
 
-      {(incident.spec.problemCases ?? []).length > 0 && (
-        <div className="problem-cases">
-          {incident.spec.problemCases!.map(pc => (
-            <span key={pc} className="pc-chip">{pc}</span>
-          ))}
-        </div>
-      )}
+      <IncidentDetails incident={incident} previousRun={previousRun} />
 
       <div className="incident-actions">
         {isInFlight && (
@@ -112,9 +228,56 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun }: {
                 {alreadyAnalyzed ? 'Ask KubeChan again' : 'Ask KubeChan to help'}
               </button>
             )}
+            {!isResolved && isManual && resolveState === 'idle' && (
+              <button className="btn-resolve" onClick={() => setResolveState('confirm')}>
+                Resolve
+              </button>
+            )}
+            {!isResolved && isManual && resolveState === 'confirm' && (
+              <span className="resolve-confirm">
+                <span className="resolve-confirm-text">Mark as resolved?</span>
+                <button className="btn-resolve-yes" onClick={handleResolve}>Yes</button>
+                <button className="btn-resolve-cancel" onClick={() => setResolveState('idle')}>Cancel</button>
+              </span>
+            )}
+            {!isResolved && isManual && resolveState === 'resolving' && (
+              <span className="status-text pending"><span className="spinner" /> Resolving…</span>
+            )}
+            {resolveState === 'error' && (
+              <span className="status-text error" title={resolveError}>✗ Resolve failed</span>
+            )}
           </div>
         )}
       </div>
+
+      {needsMoreInfo && suggestions.length > 0 && (
+        <div className="needs-more-info-banner">
+          <div className="nmi-body">
+            <span className="nmi-icon">🔍</span>
+            <div className="nmi-text">
+              <strong>KubeChan needs more evidence</strong>
+              <span className="nmi-suggestions">
+                {suggestions.map((s, i) => (
+                  <span key={i} className="nmi-chip" title={s.reason}>{s.kind}</span>
+                ))}
+              </span>
+            </div>
+          </div>
+          <button className="btn-augment" onClick={() => setShowAugment(true)}>
+            Add context &amp; Re-analyze
+          </button>
+        </div>
+      )}
+
+      {showAugment && (
+        <AugmentIncidentModal
+          incidentId={id}
+          defaultNamespace={rootNS}
+          suggestions={suggestions}
+          onClose={() => setShowAugment(false)}
+          onAugmented={handleAugmented}
+        />
+      )}
     </div>
   )
 }
@@ -123,9 +286,11 @@ export interface IncidentListProps {
   onAnalysisStart: (incidentName: string) => void
   onAnalysisComplete: (result: AnalysisResult, incidentName: string) => void
   onAction?: (event: ChatterEvent) => void
+  onResolved?: () => void
+  onReportManual?: () => void
 }
 
-export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction }: IncidentListProps) {
+export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, onResolved, onReportManual }: IncidentListProps) {
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -222,6 +387,9 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction }: 
         <div className="header-right">
           <span className={`ws-dot ${wsConnected ? 'connected' : 'disconnected'}`} title={wsConnected ? 'Live' : 'Connecting…'} />
           <button className="btn-refresh" onClick={load}>↺ Refresh</button>
+          {onReportManual && (
+            <button className="btn-report-manual" onClick={onReportManual}>+ Report an issue</button>
+          )}
         </div>
       </div>
 
@@ -233,6 +401,7 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction }: 
           onAnalyzed={() => load()}
           onAnalysisStart={onAnalysisStart}
           previousRun={priorRuns.get(inc.metadata.name)}
+          onResolved={onResolved}
         />
       ))}
 
@@ -246,6 +415,7 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction }: 
               onAnalyzed={() => load()}
               onAnalysisStart={onAnalysisStart}
               previousRun={priorRuns.get(inc.metadata.name)}
+              onResolved={onResolved}
             />
           ))}
         </details>

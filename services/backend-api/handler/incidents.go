@@ -5,9 +5,11 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/org/kubechan/api/v1alpha1"
@@ -57,6 +59,33 @@ func (h *Incidents) Get(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "incident not found")
 			return
 		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, inc)
+}
+
+// Resolve handles POST /api/v1/incidents/{id}/resolve
+// Marks the Incident CRD status as resolved. Only valid for open incidents.
+func (h *Incidents) Resolve(w http.ResponseWriter, r *http.Request) {
+	ns, name := namespacedName(chi.URLParam(r, "id"), h.DefaultNamespace)
+	inc := &v1alpha1.Incident{}
+	if err := h.K8s.Get(r.Context(), client.ObjectKey{Namespace: ns, Name: name}, inc); err != nil {
+		if apierrors.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "incident not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if inc.Status.State == v1alpha1.IncidentStateResolved {
+		writeJSON(w, http.StatusOK, inc) // idempotent
+		return
+	}
+	now := metav1.NewTime(time.Now().UTC())
+	inc.Status.State = v1alpha1.IncidentStateResolved
+	inc.Status.ResolvedAt = &now
+	if err := h.K8s.Status().Update(r.Context(), inc); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

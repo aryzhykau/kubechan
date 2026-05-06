@@ -18,6 +18,9 @@ spec:
     - jsonPath: .status.state
       name: State
       type: string
+    - jsonPath: .spec.source
+      name: Source
+      type: string
     - jsonPath: .spec.rootResource.name
       name: Root
       type: string
@@ -77,6 +80,36 @@ spec:
                 items:
                   type: string
                 type: array
+              relatedResources:
+                description: |-
+                  RelatedResources is a list of additional Kubernetes resources the user tagged as
+                  relevant. Cross-namespace is allowed. Only populated for manual incidents.
+                items:
+                  properties:
+                    kind:
+                      description: Kind is the Kubernetes resource kind (e.g., Pod, Deployment).
+                      type: string
+                    name:
+                      description: Name is the resource name.
+                      type: string
+                    namespace:
+                      description: Namespace of the resource. Empty for cluster-scoped resources.
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
+              source:
+                default: auto
+                description: Source indicates who created this incident.
+                enum:
+                - auto
+                - manual
+                type: string
+              userMessage:
+                description: UserMessage is the plain-text description provided by the user for manual incidents.
+                type: string
             required:
             - rootResource
             type: object

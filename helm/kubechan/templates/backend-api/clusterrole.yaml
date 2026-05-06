@@ -8,19 +8,28 @@ metadata:
 rules:
   # Read cluster workloads for context (used by informer cache)
   - apiGroups: [""]
-    resources: ["pods", "services", "nodes", "events"]
+    resources: ["namespaces", "pods", "services", "nodes", "events", "persistentvolumeclaims", "configmaps"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
     verbs: ["get", "list", "watch"]
   # ProblemCase — read only (cluster-watcher owns writes)
   - apiGroups: ["kubechan.io"]
     resources: ["problemcases"]
     verbs: ["get", "list", "watch"]
-  # Incident — read only (cluster-watcher owns writes)
+  # Incident — backend-api creates manual incidents and patches status
   - apiGroups: ["kubechan.io"]
     resources: ["incidents"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  - apiGroups: ["kubechan.io"]
+    resources: ["incidents/status"]
+    verbs: ["get", "update", "patch"]
   # DiagnosticRun — backend-api creates them (POST /analyze) and patches status
   - apiGroups: ["kubechan.io"]
     resources: ["diagnosticruns"]

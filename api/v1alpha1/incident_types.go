@@ -24,6 +24,21 @@ type IncidentSpec struct {
 	// into this incident.
 	// +optional
 	ProblemCases []string `json:"problemCases,omitempty"`
+
+	// Source indicates who created this incident.
+	// +kubebuilder:validation:Enum=auto;manual
+	// +kubebuilder:default=auto
+	// +optional
+	Source string `json:"source,omitempty"`
+
+	// UserMessage is the plain-text description provided by the user for manual incidents.
+	// +optional
+	UserMessage string `json:"userMessage,omitempty"`
+
+	// RelatedResources is a list of additional Kubernetes resources the user tagged as relevant.
+	// Cross-namespace is allowed. Only populated for manual incidents.
+	// +optional
+	RelatedResources []ResourceRef `json:"relatedResources,omitempty"`
 }
 
 // IncidentStatus defines the observed state of Incident.
@@ -48,6 +63,7 @@ type IncidentStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.state"
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=".spec.source"
 // +kubebuilder:printcolumn:name="Root",type=string,JSONPath=".spec.rootResource.name"
 // +kubebuilder:printcolumn:name="Active",type=integer,JSONPath=".status.activeProblemCases"
 // +kubebuilder:printcolumn:name="Opened",type=date,JSONPath=".status.openedAt"

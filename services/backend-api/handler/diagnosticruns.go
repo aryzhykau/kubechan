@@ -39,15 +39,17 @@ func (h *DiagnosticRuns) Get(w http.ResponseWriter, r *http.Request) {
 
 // runSummary is returned by List.
 type runSummary struct {
-	DiagnosticRunID   string   `json:"diagnosticRunId"`
-	IncidentID        string   `json:"incidentId"`
-	RequestedAt       string   `json:"requestedAt"`
-	Status            string   `json:"status"`
-	AnalysisResultID  *string  `json:"analysisResultId"`
-	LikelyRootCause   *string  `json:"likelyRootCause"`
-	Confidence        *float64 `json:"confidence"`
-	Model             *string  `json:"model"`
-	AnalysisCreatedAt *string  `json:"analysisCreatedAt"`
+	DiagnosticRunID    string              `json:"diagnosticRunId"`
+	IncidentID         string              `json:"incidentId"`
+	RequestedAt        string              `json:"requestedAt"`
+	Status             string              `json:"status"`
+	AnalysisResultID   *string             `json:"analysisResultId"`
+	LikelyRootCause    *string             `json:"likelyRootCause"`
+	Confidence         *float64            `json:"confidence"`
+	Model              *string             `json:"model"`
+	AnalysisCreatedAt  *string             `json:"analysisCreatedAt"`
+	NeedsMoreInfo      *bool               `json:"needsMoreInfo,omitempty"`
+	SuggestedResources json.RawMessage     `json:"suggestedResources,omitempty"`
 }
 
 // List handles GET /api/v1/diagnosticruns?incidentId=
@@ -56,7 +58,8 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 
 	const baseQuery = `
 		SELECT ar.diagnostic_run_id, ar.incident_id, ar.requested_at, ar.status,
-		       res.id, res.likely_root_cause, res.confidence, res.model, res.created_at
+		       res.id, res.likely_root_cause, res.confidence, res.model, res.created_at,
+		       res.needs_more_info, res.suggested_resources
 		FROM analysis_requests ar
 		LEFT JOIN analysis_results res ON res.id = (
 		    SELECT id FROM analysis_results WHERE diagnostic_run_id = ar.diagnostic_run_id
@@ -83,14 +86,17 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 	summaries := []runSummary{}
 	for rows.Next() {
 		var (
-			s                                                    runSummary
-			incidentNullStr, requestedAt, status                sql.NullString
-			analysisID, rootCause, model, analysisCreatedAt     sql.NullString
-			confidence                                           sql.NullFloat64
+			s                                                   runSummary
+			incidentNullStr, requestedAt, status               sql.NullString
+			analysisID, rootCause, model, analysisCreatedAt    sql.NullString
+			suggestedResources                                  sql.NullString
+			confidence                                          sql.NullFloat64
+			needsMoreInfoInt                                    sql.NullInt64
 		)
 		if err := rows.Scan(
 			&s.DiagnosticRunID, &incidentNullStr, &requestedAt, &status,
 			&analysisID, &rootCause, &confidence, &model, &analysisCreatedAt,
+			&needsMoreInfoInt, &suggestedResources,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -112,6 +118,13 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 		}
 		if analysisCreatedAt.Valid {
 			s.AnalysisCreatedAt = &analysisCreatedAt.String
+		}
+		if needsMoreInfoInt.Valid {
+			v := needsMoreInfoInt.Int64 != 0
+			s.NeedsMoreInfo = &v
+		}
+		if suggestedResources.Valid && suggestedResources.String != "" {
+			s.SuggestedResources = json.RawMessage(suggestedResources.String)
 		}
 		summaries = append(summaries, s)
 	}
