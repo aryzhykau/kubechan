@@ -1,0 +1,51 @@
+# ── Go ────────────────────────────────────────────────────────────────────────
+/services/cluster-watcher/cluster-watcher
+/services/diagnostics-worker/diagnostics-worker
+/services/backend-api/backend-api
+# controller-gen output (generated, committed)
+# api/v1alpha1/zz_generated.deepcopy.go — committed, not ignored
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+services/frontend-ui/dist/
+services/frontend-ui/.vite/
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+*.dockerignore
+
+# ── Helm ──────────────────────────────────────────────────────────────────────
+helm/kubechan/charts/
+*.tgz
+
+# ── Tilt ──────────────────────────────────────────────────────────────────────
+.tiltignore
+.tilt/
+
+# ── IDE / editor ──────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ── Local secrets / env ───────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── CI / OS artefacts ─────────────────────────────────────────────────────────
+*.log
+*.out
+coverage.txt
+coverage.html
+.data/
