@@ -42,6 +42,7 @@ spec:
               APIVersion defines the versioned schema of this representation of an object.
               Servers should convert recognized schemas to the latest internal value, and
               may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
             description: |-
@@ -49,30 +50,13 @@ spec:
               Servers may infer this from the endpoint the client submits requests to.
               Cannot be updated.
               In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
           spec:
             description: IncidentSpec defines the desired state of Incident.
             properties:
-              rootResource:
-                description: |-
-                  RootResource is the workload root (Deployment, StatefulSet, DaemonSet, etc.)
-                  that all member ProblemCases trace back to via owner references.
-                properties:
-                  kind:
-                    description: Kind is the Kubernetes resource kind (e.g., Pod, Deployment).
-                    type: string
-                  name:
-                    description: Name is the resource name.
-                    type: string
-                  namespace:
-                    description: Namespace of the resource. Empty for cluster-scoped resources.
-                    type: string
-                required:
-                - kind
-                - name
-                type: object
               problemCases:
                 description: |-
                   ProblemCases is the list of ProblemCase names (in the same namespace) grouped
@@ -82,24 +66,48 @@ spec:
                 type: array
               relatedResources:
                 description: |-
-                  RelatedResources is a list of additional Kubernetes resources the user tagged as
-                  relevant. Cross-namespace is allowed. Only populated for manual incidents.
+                  RelatedResources is a list of additional Kubernetes resources the user tagged as relevant.
+                  Cross-namespace is allowed. Only populated for manual incidents.
                 items:
+                  description: ResourceRef identifies a Kubernetes resource by namespace,
+                    kind, and name.
                   properties:
                     kind:
-                      description: Kind is the Kubernetes resource kind (e.g., Pod, Deployment).
+                      description: Kind is the Kubernetes resource kind (e.g., Pod,
+                        Deployment).
                       type: string
                     name:
                       description: Name is the resource name.
                       type: string
                     namespace:
-                      description: Namespace of the resource. Empty for cluster-scoped resources.
+                      description: Namespace of the resource. Empty for cluster-scoped
+                        resources.
                       type: string
                   required:
                   - kind
                   - name
                   type: object
                 type: array
+              rootResource:
+                description: |-
+                  RootResource is the workload root (Deployment, StatefulSet, DaemonSet, etc.)
+                  that all member ProblemCases trace back to via owner references.
+                properties:
+                  kind:
+                    description: Kind is the Kubernetes resource kind (e.g., Pod,
+                      Deployment).
+                    type: string
+                  name:
+                    description: Name is the resource name.
+                    type: string
+                  namespace:
+                    description: Namespace of the resource. Empty for cluster-scoped
+                      resources.
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
               source:
                 default: auto
                 description: Source indicates who created this incident.
@@ -108,7 +116,8 @@ spec:
                 - manual
                 type: string
               userMessage:
-                description: UserMessage is the plain-text description provided by the user for manual incidents.
+                description: UserMessage is the plain-text description provided by
+                  the user for manual incidents.
                 type: string
             required:
             - rootResource
@@ -117,7 +126,8 @@ spec:
             description: IncidentStatus defines the observed state of Incident.
             properties:
               activeProblemCases:
-                description: ActiveProblemCases is the count of non-resolved ProblemCases in this incident.
+                description: ActiveProblemCases is the count of non-resolved ProblemCases
+                  in this incident.
                 type: integer
               openedAt:
                 description: OpenedAt is when this incident was first opened.

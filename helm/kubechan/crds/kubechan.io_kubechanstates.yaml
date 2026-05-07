@@ -39,40 +39,47 @@ spec:
               APIVersion defines the versioned schema of this representation of an object.
               Servers should convert recognized schemas to the latest internal value, and
               may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
-              Cannot be updated. In CamelCase.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
           spec:
-            description: KubeChanStateSpec is intentionally empty.
+            description: |-
+              KubeChanStateSpec is intentionally empty — KubeChanState is a singleton
+              whose only meaningful content is its observed status (mood).
             type: object
           status:
-            description: KubeChanStateStatus reflects KubeChan's current mood.
+            description: KubeChanStateStatus reflects KubeChan's current mood and
+              the signals that drive it.
             properties:
               moodLevel:
-                description: "Computed mood: 0=calm, 1=irritated, 2=rage."
-                type: integer
-                minimum: 0
-                maximum: 2
                 default: 0
+                description: 'MoodLevel is the computed mood: 0=calm, 1=irritated,
+                  2=rage.'
+                format: int32
+                type: integer
               openIncidentCount:
-                description: Number of currently open incidents.
+                description: OpenIncidentCount is the number of currently open incidents.
                 type: integer
-                default: 0
               pokeCount:
-                description: Number of pokes in the current streak.
+                description: PokeCount is the number of pokes accumulated in the current
+                  streak.
                 type: integer
-                default: 0
               pokeExpiresAt:
-                description: When the current poke streak expires.
+                description: PokeExpiresAt is when the current poke streak expires
+                  and resets.
                 format: date-time
                 type: string
               updatedAt:
-                description: When mood was last recomputed.
+                description: UpdatedAt is when the mood was last recomputed.
                 format: date-time
                 type: string
             required:

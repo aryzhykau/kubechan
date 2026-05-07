@@ -55,12 +55,14 @@ spec:
             description: DiagnosticRunSpec defines the desired state of DiagnosticRun.
             properties:
               incidentRef:
-                description: IncidentRef is the name of the Incident this diagnostic
-                  run was triggered for.
+                description: |-
+                  IncidentRef is the name of the Incident this diagnostic run was triggered for.
+                  Either IncidentRef or ProblemCaseRef must be set.
                 type: string
               problemCaseRef:
-                description: ProblemCaseRef is the name of the ProblemCase this diagnostic
-                  run belongs to. Deprecated; prefer incidentRef.
+                description: |-
+                  ProblemCaseRef is the name of the ProblemCase this diagnostic run belongs to.
+                  Deprecated: prefer IncidentRef.
                 type: string
               requestedAt:
                 description: RequestedAt is when this diagnostic run was requested.
