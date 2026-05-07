@@ -23,7 +23,7 @@ func RecoverPendingRequests(ctx context.Context, db *sql.DB, logger *slog.Logger
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var ids []struct{ id, incidentID, diagnosticRunID string }
 	for rows.Next() {

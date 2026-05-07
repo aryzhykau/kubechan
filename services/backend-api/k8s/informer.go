@@ -42,7 +42,9 @@ func (w *Watcher) watchProblemCases(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	inf.AddEventHandler(newProblemCaseHandler(w.Hub, w.Logger))
+	if _, err := inf.AddEventHandler(newProblemCaseHandler(w.Hub, w.Logger)); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -51,7 +53,9 @@ func (w *Watcher) watchIncidents(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	inf.AddEventHandler(newIncidentHandler(w.Hub, w.MoodSyncer, w.Logger))
+	if _, err := inf.AddEventHandler(newIncidentHandler(w.Hub, w.MoodSyncer, w.Logger)); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -60,6 +64,8 @@ func (w *Watcher) watchDiagnosticRuns(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	inf.AddEventHandler(newDiagnosticRunHandler(w.Hub, w.Logger))
+	if _, err := inf.AddEventHandler(newDiagnosticRunHandler(w.Hub, w.Logger)); err != nil {
+		return err
+	}
 	return nil
 }

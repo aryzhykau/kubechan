@@ -277,7 +277,7 @@ func (h *Users) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var users []userResponse
 	for rows.Next() {

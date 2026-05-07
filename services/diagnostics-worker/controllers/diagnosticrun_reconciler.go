@@ -730,7 +730,7 @@ func (r *DiagnosticRunReconciler) postEvidence(ctx context.Context, dr *v1alpha1
 	if err != nil {
 		return fmt.Errorf("POST %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if postCtx.Err() != nil {
 		return postCtx.Err()

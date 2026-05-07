@@ -28,12 +28,12 @@ func Open(path string, logger *slog.Logger) (*sql.DB, error) {
 
 	// SQLite single-writer; WAL mode for better read concurrency.
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("setting pragmas: %w", err)
 	}
 
 	if err := runMigrations(db, logger); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
@@ -119,7 +119,7 @@ func SettingsAll(db *sql.DB) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]string)
 	for rows.Next() {

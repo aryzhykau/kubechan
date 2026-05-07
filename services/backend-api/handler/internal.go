@@ -290,7 +290,7 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		logger.Error("dispatchAnalysis: llm-gateway call failed", "err", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Error("dispatchAnalysis: llm-gateway non-200", "status", resp.StatusCode)
