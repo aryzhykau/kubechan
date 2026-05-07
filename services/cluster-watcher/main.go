@@ -158,6 +158,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controllers.ExclusionRuleReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		ControlNamespace: controlNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to set up ExclusionRuleReconciler")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting manager",
 		"debounceWindow", wcfg.DebounceWindow(),
 		"pendingThreshold", wcfg.PendingThreshold(),

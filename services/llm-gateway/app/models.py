@@ -16,6 +16,7 @@ class AnalyzeRequest(BaseModel):
     evidenceId: str
     diagnosticRunId: str
     incidentId: str | None = None
+    incidentSource: str = "auto"  # "auto" or "manual"
     reanalysisCount: int = 0
     moodLevel: int = 0
     priorDiagnoses: list[PriorDiagnosis] = []
@@ -27,7 +28,15 @@ class AnalyzeRequest(BaseModel):
 
 class SuggestedResource(BaseModel):
     kind: str
+    apiGroup: str = ""
     reason: str
+
+
+class ExclusionRuleProposal(BaseModel):
+    reason: str
+    detectors: list[str]
+    targetResources: list[dict]  # [{namespace, kind, name, apiGroup?}]
+    timeWindow: dict | None = None  # {timezone, periods:[{start,end,days}]}
 
 
 class AnalyzeResponse(BaseModel):
@@ -41,6 +50,10 @@ class AnalyzeResponse(BaseModel):
     confidence: float
     needsMoreInfo: bool = False
     suggestedResources: list[SuggestedResource] = []
+    suggestFalsePositive: bool = False
+    suggestExclusionRule: ExclusionRuleProposal | None = None
+    suggestedResources: list[SuggestedResource] = []
+    suggestExclusionRule: ExclusionRuleProposal | None = None
     thinkingBudgetUsed: int = 0
     rawResponse: str | None = None
     prompt: str | None = None

@@ -20,6 +20,7 @@ import (
 	v1alpha1 "github.com/org/kubechan/api/v1alpha1"
 	"github.com/org/kubechan/services/cluster-watcher/debounce"
 	"github.com/org/kubechan/services/cluster-watcher/detector"
+	"github.com/org/kubechan/services/cluster-watcher/exclusion"
 	"github.com/org/kubechan/services/cluster-watcher/problemcase"
 )
 
@@ -103,9 +104,21 @@ func (r *DeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		capturedDetector := d.Name()
 		capturedSeverity := highestSeverity(symptoms)
 		capturedSymptoms := symptoms
+		capturedDeploy := deploy
 
 		r.Debouncer.Debounce(key, func() {
 			dctx := context.Background()
+			excluded, ruleName, err := exclusion.IsExcluded(dctx, r.Client, r.ControlNamespace, capturedDeploy, capturedDetector)
+			if err != nil {
+				logger.Error(err, "exclusion check failed", "deployment", req.NamespacedName, "detector", capturedDetector)
+			}
+			if excluded {
+				logger.Info("exclusion rule matched, skipping ProblemCase", "rule", ruleName, "deployment", req.NamespacedName, "detector", capturedDetector)
+				if rule, err := exclusion.GetRule(dctx, r.Client, r.ControlNamespace, ruleName); err == nil && rule != nil {
+					_ = exclusion.PatchMatchedStatus(dctx, r.Client, rule)
+				}
+				return
+			}
 			if err := problemcase.CreateOrUpdate(dctx, r.Client, r.ControlNamespace, ref, capturedSeverity, capturedDetector, capturedSymptoms); err != nil {
 				logger.Error(err, "failed to create/update ProblemCase", "deployment", req.NamespacedName, "detector", capturedDetector)
 			}

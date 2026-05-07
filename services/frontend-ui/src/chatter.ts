@@ -18,6 +18,9 @@ export type ChatterEvent =
   | 'rating-down-high-conf'
   | 'rating-down-low-conf'
   | 'dismissed-analysis'
+  | 'exclusionRuleCreated'
+  | 'exclusionRulesEmpty'
+  | 'false-alarm'
 
 const LINES: Record<ChatterEvent, string[]> = {
   idle: [
@@ -156,6 +159,26 @@ const LINES: Record<ChatterEvent, string[]> = {
     "Sure, go look at the diagnostics. Forget I said anything.",
     "I wasn't finished. But you do whatever you want.",
     "Noted. My analysis wasn't worth reading apparently.",
+  ],
+  'exclusionRuleCreated': [
+    "Fine. I'll look the other way. But only because you said so.",
+    "Rule noted. I'll pretend that never happened.",
+    "Suppressed. Don't make this a habit.",
+    "You've officially told me to ignore something. Very professional.",
+    "Rule created. This is going in my mental notes as 'known issues you chose to accept'.",
+  ],
+  'exclusionRulesEmpty': [
+    "Nothing's off the record. I'm watching everything.",
+    "No exclusions. Everything is fair game.",
+    "Not a single thing hidden from me. As it should be.",
+  ],
+  'false-alarm': [
+    "You summoned me for something that is WORKING AS DESIGNED. I want those minutes back.",
+    "This is not a problem. This has never been a problem. You panicked over automation doing its job.",
+    "I just analysed your 'incident'. It's fine. It's SUPPOSED to be like this.",
+    "Congratulations. You paged me because a scheduled process did exactly what it was scheduled to do.",
+    "…do you know what the word 'expected' means? Because your cluster does.",
+    "Not a bug. A feature. One you set up yourself, apparently.",
   ],
 }
 

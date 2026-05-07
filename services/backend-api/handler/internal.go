@@ -156,6 +156,7 @@ type llmAnalyzeRequest struct {
 	EvidenceID      string           `json:"evidenceId"`
 	DiagnosticRunID string           `json:"diagnosticRunId"`
 	IncidentID      string           `json:"incidentId,omitempty"`
+	IncidentSource  string           `json:"incidentSource,omitempty"` // "auto" or "manual"
 	ReanalysisCount int              `json:"reanalysisCount"`
 	MoodLevel       int              `json:"moodLevel"`
 	PriorDiagnoses  []priorDiagnosis `json:"priorDiagnoses,omitempty"`
@@ -174,24 +175,34 @@ type priorDiagnosis struct {
 
 // suggestedResource mirrors the LLM gateway's SuggestedResource model.
 type suggestedResource struct {
-	Kind   string `json:"kind"`
-	Reason string `json:"reason"`
+	Kind     string `json:"kind"`
+	APIGroup string `json:"apiGroup,omitempty"`
+	Reason   string `json:"reason"`
+}
+
+// exclusionRuleProposal mirrors the LLM gateway's ExclusionRuleProposal model.
+type exclusionRuleProposal struct {
+	Reason          string           `json:"reason"`
+	Detectors       []string         `json:"detectors,omitempty"`
+	TargetResources []map[string]any `json:"targetResources,omitempty"`
+	TimeWindow      map[string]any   `json:"timeWindow,omitempty"`
 }
 
 // llmAnalyzeResponse is the response from llm-gateway POST /analyze.
 type llmAnalyzeResponse struct {
-	EvidenceID         string              `json:"evidenceId"`
-	Model              string              `json:"model"`
-	OpeningRant        string              `json:"openingRant"`
-	LikelyRootCause    string              `json:"likelyRootCause"`
-	EvidenceChain      string              `json:"evidenceChain"`
-	Recommendation     string              `json:"recommendation"`
-	ClosingInsult      string              `json:"closingInsult"`
-	Confidence         float64             `json:"confidence"`
-	NeedsMoreInfo      bool                `json:"needsMoreInfo"`
-	SuggestedResources []suggestedResource `json:"suggestedResources,omitempty"`
-	ThinkingBudget     int                 `json:"thinkingBudgetUsed"`
-	Prompt             string              `json:"prompt,omitempty"`
+	EvidenceID           string                 `json:"evidenceId"`
+	Model                string                 `json:"model"`
+	OpeningRant          string                 `json:"openingRant"`
+	LikelyRootCause      string                 `json:"likelyRootCause"`
+	EvidenceChain        string                 `json:"evidenceChain"`
+	Recommendation       string                 `json:"recommendation"`
+	ClosingInsult        string                 `json:"closingInsult"`
+	Confidence           float64                `json:"confidence"`
+	NeedsMoreInfo        bool                   `json:"needsMoreInfo"`
+	SuggestedResources   []suggestedResource    `json:"suggestedResources,omitempty"`
+	SuggestExclusionRule *exclusionRuleProposal `json:"suggestExclusionRule,omitempty"`
+	ThinkingBudget       int                    `json:"thinkingBudgetUsed"`
+	Prompt               string                 `json:"prompt,omitempty"`
 }
 
 func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
@@ -248,6 +259,18 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	// Extract userMessage from the payload (set for manual incidents).
 	userMessage, _ := payloadMap["userMessage"].(string)
 
+	// Fetch incident source ("auto" or "manual") from the Incident CRD.
+	incidentSource := "auto"
+	if req.IncidentID != "" {
+		inc := &v1alpha1.Incident{}
+		if err := h.K8s.Get(context.Background(), client.ObjectKey{
+			Namespace: h.DefaultNamespace,
+			Name:      req.IncidentID,
+		}, inc); err == nil && inc.Spec.Source != "" {
+			incidentSource = inc.Spec.Source
+		}
+	}
+
 	// Look up the triggering user's LLM provider + credentials.
 	provider := ""
 	var credentials map[string]any
@@ -271,6 +294,7 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		EvidenceID:      evidenceID,
 		DiagnosticRunID: req.DiagnosticRunID,
 		IncidentID:      req.IncidentID,
+		IncidentSource:  incidentSource,
 		ReanalysisCount: priorCount,
 		MoodLevel:       moodLevel,
 		PriorDiagnoses:  priorDiagnoses,
@@ -342,13 +366,14 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	// Broadcast WS event so the frontend can update.
 	if h.Hub != nil {
 		msg, _ := json.Marshal(map[string]any{
-			"type":               "Analysis.Completed",
-			"analysisId":         analysisID,
-			"incidentId":         req.IncidentID,
-			"rootCause":          result.LikelyRootCause,
-			"confidence":         result.Confidence,
-			"needsMoreInfo":      result.NeedsMoreInfo,
-			"suggestedResources": result.SuggestedResources,
+			"type":                 "Analysis.Completed",
+			"analysisId":          analysisID,
+			"incidentId":          req.IncidentID,
+			"rootCause":           result.LikelyRootCause,
+			"confidence":          result.Confidence,
+			"needsMoreInfo":       result.NeedsMoreInfo,
+			"suggestedResources":  result.SuggestedResources,
+			"suggestExclusionRule": result.SuggestExclusionRule,
 		})
 		h.Hub.Broadcast(msg)
 	}

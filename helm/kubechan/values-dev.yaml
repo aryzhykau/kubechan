@@ -2,6 +2,10 @@
 ## Usage: helm install kubechan ./helm/kubechan -f helm/kubechan/values-dev.yaml
 
 backendApi:
+  image:
+    repository: kubechan/backend-api
+    tag: latest
+    pullPolicy: Never
   service:
     type: NodePort
     port: 8080
@@ -18,10 +22,13 @@ backendApi:
       memory: 256Mi
 
 clusterWatcher:
+  image:
+    repository: kubechan/cluster-watcher
+    tag: latest
+    pullPolicy: Never
   debounceWindowSecs: 5
   pendingTooLongThresholdSecs: 60
   unavailableThresholdSecs: 60
-  # URL of the backend-api service inside the cluster for live threshold polling.
   backendApiUrl: "http://kubechan-backend-api:8080"
   resources:
     requests:
@@ -32,6 +39,10 @@ clusterWatcher:
       memory: 128Mi
 
 diagnosticsWorker:
+  image:
+    repository: kubechan/diagnostics-worker
+    tag: latest
+    pullPolicy: Never
   logTailLines: 100
   prevLogTailLines: 50
   resources:
@@ -43,6 +54,10 @@ diagnosticsWorker:
       memory: 128Mi
 
 llmGateway:
+  image:
+    repository: kubechan/llm-gateway
+    tag: latest
+    pullPolicy: Never
   resources:
     requests:
       cpu: 50m
@@ -52,11 +67,18 @@ llmGateway:
       memory: 768Mi
 
 frontendUi:
+  image:
+    repository: kubechan/frontend-ui
+    tag: latest
+    pullPolicy: Never
   service:
     type: ClusterIP
     port: 8080
   ingress:
     enabled: true
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/whitelist-source-range: "0.0.0.0/0"
     className: nginx
     hosts:
       - host: kubechan.local

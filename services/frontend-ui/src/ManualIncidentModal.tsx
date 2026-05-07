@@ -19,7 +19,6 @@ import {
   CircularProgress,
   Alert,
   Chip,
-  Paper,
   Divider,
   Tooltip,
   Fade,
@@ -32,9 +31,9 @@ import AddIcon from '@mui/icons-material/Add'
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import { api, type ResourceItem } from './api'
+import { ResourcePicker, type ResourceEntry } from './ResourcePicker'
 
 const ROOT_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet', 'Pod', 'Job'] as const
-const RELATED_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet', 'Pod', 'Job', 'Service', 'Ingress', 'PersistentVolumeClaim', 'ConfigMap'] as const
 
 // ── MUI dark theme matching the app palette ───────────────────────────────────
 const modalTheme = createTheme({
@@ -132,7 +131,7 @@ function SectionLabel({ num, children, optional }: { num: number; children: stri
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-interface RelatedEntry { id: number; namespace: string; kind: string; name: string }
+interface RelatedEntry { id: number; namespace: string; kind: string; apiGroup: string; name: string; evidenceSlices: string[] }
 
 export interface ManualIncidentModalProps {
   onClose: () => void
@@ -156,11 +155,7 @@ export function ManualIncidentModal({ onClose, onCreated }: ManualIncidentModalP
   const [related, setRelated] = useState<RelatedEntry[]>([])
 
   // Pending related row (the "add" form)
-  const [pendingNS, setPendingNS] = useState('')
-  const [pendingKind, setPendingKind] = useState('')
-  const [pendingName, setPendingName] = useState('')
-  const [pendingNameOptions, setPendingNameOptions] = useState<ResourceItem[]>([])
-  const [loadingPendingNames, setLoadingPendingNames] = useState(false)
+  const [pendingEntry, setPendingEntry] = useState<ResourceEntry | null>(null)
 
   // Description
   const [userMessage, setUserMessage] = useState('')
@@ -172,7 +167,7 @@ export function ManualIncidentModal({ onClose, onCreated }: ManualIncidentModalP
   // Load namespaces
   useEffect(() => {
     api.listNamespaces()
-      .then(ns => { setNamespaces(ns); if (ns.length) { setRootNS(ns[0]); setPendingNS(ns[0]) } })
+      .then(ns => { setNamespaces(ns); if (ns.length) { setRootNS(ns[0]) } })
       .catch(() => {})
       .finally(() => setLoadingNS(false))
   }, [])
@@ -186,19 +181,10 @@ export function ManualIncidentModal({ onClose, onCreated }: ManualIncidentModalP
       .finally(() => setLoadingRootNames(false))
   }, [rootNS, rootKind])
 
-  // Load pending names when pendingNS+pendingKind change
-  useEffect(() => {
-    if (!pendingNS || !pendingKind) { setPendingNameOptions([]); setPendingName(''); return }
-    setLoadingPendingNames(true); setPendingName('')
-    api.listResources(pendingNS, pendingKind)
-      .then(setPendingNameOptions).catch(() => setPendingNameOptions([]))
-      .finally(() => setLoadingPendingNames(false))
-  }, [pendingNS, pendingKind])
-
   function commitRelated() {
-    if (!pendingKind || !pendingName || related.length >= 5) return
-    setRelated(prev => [...prev, { id: ++_rowId, namespace: pendingNS, kind: pendingKind, name: pendingName }])
-    setPendingKind(''); setPendingName(''); setPendingNameOptions([])
+    if (!pendingEntry || related.length >= 5) return
+    setRelated(prev => [...prev, { id: ++_rowId, ...pendingEntry }])
+    setPendingEntry(null)
   }
 
   async function handleSubmit() {
@@ -210,7 +196,11 @@ export function ManualIncidentModal({ onClose, onCreated }: ManualIncidentModalP
       const res = await api.createManualIncident({
         namespace: rootNS, resourceKind: rootKind, resourceName: rootName,
         userMessage: msg,
-        relatedResources: related.map(r => ({ kind: r.kind, name: r.name, namespace: r.namespace || rootNS })),
+        relatedResources: related.map(r => ({
+          kind: r.kind, name: r.name, namespace: r.namespace || rootNS,
+          apiGroup: r.apiGroup || undefined,
+          evidenceSlices: r.evidenceSlices,
+        })),
       })
       onCreated(res.incidentId, res.diagnosticRunId)
     } catch (e: unknown) {
@@ -220,7 +210,7 @@ export function ManualIncidentModal({ onClose, onCreated }: ManualIncidentModalP
 
   const msgLen = userMessage.trim().length
   const canSubmit = !!rootKind && !!rootName && msgLen >= 10 && !submitting
-  const canAddRelated = !!pendingKind && !!pendingName && related.length < 5
+  const canAddRelated = !!pendingEntry && related.length < 5
 
   return (
     <ThemeProvider theme={modalTheme}>
@@ -339,7 +329,7 @@ export function ManualIncidentModal({ onClose, onCreated }: ManualIncidentModalP
                 {related.map(r => (
                   <Chip
                     key={r.id}
-                    label={`${r.kind}/${r.name}`}
+                    label={`${r.apiGroup ? r.apiGroup + '/' : ''}${r.kind}/${r.name}`}
                     size="small"
                     onDelete={() => setRelated(prev => prev.filter(x => x.id !== r.id))}
                     sx={{
@@ -358,52 +348,14 @@ export function ManualIncidentModal({ onClose, onCreated }: ManualIncidentModalP
 
             {/* Add row */}
             {related.length < 5 && (
-              <Paper variant="outlined" sx={{
-                p: 1.5, borderColor: 'divider',
-                background: alpha('#fff', 0.015),
-                borderRadius: 2,
-              }}>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-end' }}>
-                  <FormControl size="small" sx={{ minWidth: 110 }}>
-                    <InputLabel>Namespace</InputLabel>
-                    <Select value={pendingNS} label="Namespace" onChange={e => setPendingNS(e.target.value)}>
-                      {namespaces.map(ns => <MenuItem key={ns} value={ns}>{ns}</MenuItem>)}
-                    </Select>
-                  </FormControl>
-
-                  <FormControl size="small" sx={{ minWidth: 140 }}>
-                    <InputLabel>Kind</InputLabel>
-                    <Select value={pendingKind} label="Kind" onChange={e => setPendingKind(e.target.value)}>
-                      <MenuItem value=""><em style={{ color: '#7c8498' }}>select…</em></MenuItem>
-                      {RELATED_KINDS.map(k => <MenuItem key={k} value={k}>{k}</MenuItem>)}
-                    </Select>
-                  </FormControl>
-
-                  <FormControl size="small" sx={{ flex: 1 }}>
-                    {pendingKind && pendingNameOptions.length > 0 ? (
-                      <>
-                        <InputLabel>Name</InputLabel>
-                        <Select
-                          value={pendingName} label="Name"
-                          onChange={e => setPendingName(e.target.value)}
-                          disabled={loadingPendingNames}
-                          endAdornment={loadingPendingNames ? <CircularProgress size={13} sx={{ mr: 1.5, color: 'text.disabled' }} /> : null}
-                        >
-                          <MenuItem value=""><em style={{ color: '#7c8498' }}>select…</em></MenuItem>
-                          {pendingNameOptions.map(r => <MenuItem key={r.name} value={r.name}>{r.name}</MenuItem>)}
-                        </Select>
-                      </>
-                    ) : (
-                      <TextField
-                        size="small" label="Name" placeholder="resource name"
-                        value={pendingName}
-                        onChange={e => setPendingName(e.target.value)}
-                        disabled={!pendingKind}
-                        slotProps={loadingPendingNames ? { input: { endAdornment: <CircularProgress size={13} color="inherit" /> } } : undefined}
-                      />
-                    )}
-                  </FormControl>
-
+              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.5, background: alpha('#fff', 0.015) }}>
+                <ResourcePicker
+                  value={pendingEntry}
+                  onChange={setPendingEntry}
+                  namespaces={namespaces}
+                  defaultNamespace={rootNS}
+                />
+                <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'flex-end' }}>
                   <Tooltip title={canAddRelated ? 'Add resource' : 'Select kind and name first'} placement="top">
                     <span>
                       <IconButton
@@ -413,7 +365,6 @@ export function ManualIncidentModal({ onClose, onCreated }: ManualIncidentModalP
                         sx={{
                           border: '1px solid',
                           borderRadius: 1.5,
-                          mb: '1px',
                           borderColor: canAddRelated ? 'primary.main' : 'divider',
                           color: canAddRelated ? 'primary.light' : 'text.disabled',
                           background: canAddRelated ? alpha('#6366f1', 0.12) : 'transparent',
@@ -425,8 +376,8 @@ export function ManualIncidentModal({ onClose, onCreated }: ManualIncidentModalP
                       </IconButton>
                     </span>
                   </Tooltip>
-                </Stack>
-              </Paper>
+                </Box>
+              </Box>
             )}
           </Box>
 

@@ -24,6 +24,7 @@ export interface ResourceRef {
   namespace?: string
   kind: string
   name: string
+  apiGroup?: string
 }
 
 export interface Incident {
@@ -68,6 +69,8 @@ export interface DiagnosticRunSummary {
   analysisCreatedAt?: string
   needsMoreInfo?: boolean
   suggestedResources?: SuggestedResource[]
+  suggestFalsePositive?: boolean
+  suggestExclusionRule?: ExclusionRuleProposal | null
 }
 
 export interface K8sEvent {
@@ -137,9 +140,44 @@ export interface ResourceItem {
   namespace: string
 }
 
+export interface KindItem {
+  kind: string
+  apiGroup: string
+}
+
+export interface ExclusionRule {
+  name: string
+  spec: {
+    description: string
+    enabled: boolean
+    detectors?: string[]
+    targetResources?: Array<{ kind: string; name: string; namespace: string; apiGroup?: string }>
+    selector?: { namespace?: string; kinds?: string[]; matchLabels?: Record<string, string> }
+    timeWindow?: {
+      timezone: string
+      periods: Array<{ start: string; end: string; days: string[] }>
+    }
+  }
+  status: {
+    suppressedCount?: number
+    lastMatchedAt?: string
+  }
+}
+
 export interface SuggestedResource {
   kind: string
+  apiGroup?: string
   reason: string
+}
+
+export interface ExclusionRuleProposal {
+  reason: string
+  detectors: string[]
+  targetResources: Array<{ namespace: string; kind: string; name: string; apiGroup?: string }>
+  timeWindow?: {
+    timezone: string
+    periods: Array<{ start: string; end: string; days: string[] }>
+  } | null
 }
 
 export interface AnalysisResult {
@@ -162,6 +200,8 @@ export interface AnalysisResult {
     thinkingBudgetUsed?: number
     needsMoreInfo?: boolean
     suggestedResources?: SuggestedResource[]
+    suggestFalsePositive?: boolean
+    suggestExclusionRule?: ExclusionRuleProposal | null
   }
   createdAt: string
 }
@@ -239,22 +279,29 @@ export const api = {
   listNamespaces: () =>
     apiFetch<string[]>('/api/v1/namespaces'),
 
-  listResources: (ns: string, kind: string) =>
-    apiFetch<ResourceItem[]>(`/api/v1/namespaces/${encodeURIComponent(ns)}/resources?kind=${encodeURIComponent(kind)}`),
+  listResources: (ns: string, kind: string, apiGroup?: string) =>
+    apiFetch<ResourceItem[]>(
+      `/api/v1/namespaces/${encodeURIComponent(ns)}/resources?kind=${encodeURIComponent(kind)}${apiGroup ? `&apiGroup=${encodeURIComponent(apiGroup)}` : ''}`
+    ),
+
+  listKinds: (ns: string, q?: string) =>
+    apiFetch<KindItem[]>(
+      `/api/v1/namespaces/${encodeURIComponent(ns)}/kinds${q ? `?q=${encodeURIComponent(q)}` : ''}`
+    ),
 
   createManualIncident: (body: {
     namespace: string
     resourceKind: string
     resourceName: string
     userMessage: string
-    relatedResources: { kind: string; name: string; namespace: string }[]
+    relatedResources: { kind: string; name: string; namespace: string; apiGroup?: string; evidenceSlices?: string[] }[]
   }) =>
     apiFetch<ManualIncidentResponse>('/api/v1/incidents/manual', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
 
-  augmentIncident: (incidentId: string, relatedResources: { kind: string; name: string; namespace: string }[]) =>
+  augmentIncident: (incidentId: string, relatedResources: { kind: string; name: string; namespace: string; apiGroup?: string; evidenceSlices?: string[] }[]) =>
     apiFetch<AnalyzeResponse>(`/api/v1/incidents/${encodeURIComponent(incidentId)}/augment`, {
       method: 'POST',
       body: JSON.stringify({ relatedResources }),
@@ -262,6 +309,9 @@ export const api = {
 
   resolveIncident: (id: string) =>
     apiFetch<Incident>(`/api/v1/incidents/${encodeURIComponent(id)}/resolve`, { method: 'POST' }),
+
+  markFalsePositive: (id: string) =>
+    apiFetch<Incident>(`/api/v1/incidents/${encodeURIComponent(id)}/false-positive`, { method: 'POST' }),
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   login: (username: string, password: string) =>
@@ -308,4 +358,23 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(patch),
     }),
+
+  // ── Exclusion Rules ───────────────────────────────────────────────────────
+  listExclusionRules: () =>
+    apiFetch<ExclusionRule[]>('/api/v1/exclusion-rules'),
+
+  createExclusionRule: (name: string, spec: ExclusionRule['spec']) =>
+    apiFetch<ExclusionRule>('/api/v1/exclusion-rules', {
+      method: 'POST',
+      body: JSON.stringify({ name, spec }),
+    }),
+
+  setExclusionRuleEnabled: (name: string, enabled: boolean) =>
+    apiFetch<ExclusionRule>(`/api/v1/exclusion-rules/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+
+  deleteExclusionRule: (name: string) =>
+    apiFetch<void>(`/api/v1/exclusion-rules/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 }

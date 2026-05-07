@@ -14,6 +14,8 @@ k8s_resource(
         'problemcases.kubechan.io:CustomResourceDefinition:kubechan',
         'diagnosticruns.kubechan.io:CustomResourceDefinition:kubechan',
         'incidents.kubechan.io:CustomResourceDefinition:kubechan',
+        'kubechanstates.kubechan.io:CustomResourceDefinition:kubechan',
+        'kubechanexclusionrules.kubechan.io:CustomResourceDefinition:kubechan',
     ],
     new_name='kubechan-crds',
     resource_deps=['kubechan-namespace'],

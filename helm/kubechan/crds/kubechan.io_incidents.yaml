@@ -115,6 +115,13 @@ spec:
                 - auto
                 - manual
                 type: string
+              falsePositive:
+                description: |-
+                  FalsePositive marks this incident as a false positive — the behaviour was intentional
+                  and expected. Set by the user after reviewing an LLM suggestion. Once true, the
+                  incident will be auto-resolved. Only meaningful for manual incidents (source=manual).
+                  Auto incidents use ExclusionRules instead.
+                type: boolean
               userMessage:
                 description: UserMessage is the plain-text description provided by
                   the user for manual incidents.

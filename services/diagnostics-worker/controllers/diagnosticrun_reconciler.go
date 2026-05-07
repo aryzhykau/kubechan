@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -18,6 +19,9 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -205,7 +209,7 @@ func (r *DiagnosticRunReconciler) collect(
 	type rrKey struct{ kind, ns, name string }
 	seen := map[rrKey]bool{}
 
-	type rrEntry struct{ kind, ns, name string }
+	type rrEntry struct{ kind, ns, name, apiGroup string }
 	var toCollect []rrEntry
 
 	for _, rr := range inc.Spec.RelatedResources {
@@ -216,7 +220,7 @@ func (r *DiagnosticRunReconciler) collect(
 		k := rrKey{rr.Kind, rrNS, rr.Name}
 		if !seen[k] {
 			seen[k] = true
-			toCollect = append(toCollect, rrEntry{rr.Kind, rrNS, rr.Name})
+			toCollect = append(toCollect, rrEntry{rr.Kind, rrNS, rr.Name, rr.APIGroup})
 		}
 	}
 
@@ -229,7 +233,7 @@ func (r *DiagnosticRunReconciler) collect(
 				k := rrKey{"Ingress", rootNS, ing.Name}
 				if !seen[k] {
 					seen[k] = true
-					toCollect = append(toCollect, rrEntry{"Ingress", rootNS, ing.Name})
+					toCollect = append(toCollect, rrEntry{"Ingress", rootNS, ing.Name, ""})
 				}
 			}
 		} else {
@@ -240,14 +244,14 @@ func (r *DiagnosticRunReconciler) collect(
 	// Collect events + spec for each related resource.
 	for _, rr := range toCollect {
 		rre := collector.RelatedResourceEvidence{
-			Resource: collector.ResourceRef{Kind: rr.kind, Name: rr.name},
+			Resource: collector.ResourceRef{Kind: rr.kind, Name: rr.name, APIGroup: rr.apiGroup},
 		}
 		events, err := r.collectEvents(ctx, rr.ns, rr.kind, rr.name)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("events for related %s/%s: %s", rr.kind, rr.name, err))
 		}
 		rre.Events = events
-		spec, err := r.collectResourceSpec(ctx, rr.ns, rr.kind, rr.name)
+		spec, err := r.collectResourceSpec(ctx, rr.ns, rr.kind, rr.name, rr.apiGroup)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("spec for related %s/%s: %s", rr.kind, rr.name, err))
 		}
@@ -260,7 +264,7 @@ func (r *DiagnosticRunReconciler) collect(
 
 // collectResourceSpec fetches a resource and returns kind-specific diagnostic fields.
 // The returned map is included verbatim in the evidence payload sent to the LLM.
-func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, kind, name string) (map[string]any, error) {
+func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, kind, name, apiGroup string) (map[string]any, error) {
 	key := client.ObjectKey{Namespace: ns, Name: name}
 	switch kind {
 	case "Ingress":
@@ -422,9 +426,71 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 		}, nil
 
 	default:
-		// Unknown kind — nothing useful to return.
+		// Unknown kind — try the dynamic client to return spec+status as-is.
+		if apiGroup != "" {
+			return r.collectDynamicSpec(ctx, ns, kind, name, apiGroup)
+		}
 		return nil, nil
 	}
+}
+
+// collectDynamicSpec fetches an arbitrary CRD via the dynamic client and returns
+// its .spec and .status as a flat map, giving the LLM visibility into non-core resources.
+func (r *DiagnosticRunReconciler) collectDynamicSpec(ctx context.Context, ns, kind, name, apiGroup string) (map[string]any, error) {
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return nil, fmt.Errorf("get rest config: %w", err)
+	}
+
+	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("discovery client: %w", err)
+	}
+
+	lists, _ := dc.ServerPreferredNamespacedResources()
+	var gvr schema.GroupVersionResource
+	found := false
+	for _, list := range lists {
+		gv, err := schema.ParseGroupVersion(list.GroupVersion)
+		if err != nil || gv.Group != apiGroup {
+			continue
+		}
+		for _, res := range list.APIResources {
+			if strings.EqualFold(res.Kind, kind) {
+				gvr = schema.GroupVersionResource{Group: gv.Group, Version: gv.Version, Resource: res.Name}
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("kind %q apiGroup %q not found in cluster", kind, apiGroup)
+	}
+
+	dynClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("dynamic client: %w", err)
+	}
+
+	obj, err := dynClient.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	out := map[string]any{}
+	if spec, ok := obj.Object["spec"]; ok {
+		out["spec"] = spec
+	}
+	if status, ok := obj.Object["status"]; ok {
+		out["status"] = status
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 func summariseDeploymentConditions(conds []appsv1.DeploymentCondition) []map[string]any {

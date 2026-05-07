@@ -1,0 +1,93 @@
+---
+# Demo: nginx deployment that KEDA scales to 0 outside business hours (08:00–18:00 CEST)
+# Current time 22:40 CEST → should go to 0 replicas immediately after apply.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-demo
+  namespace: demo
+  labels:
+    app: nginx-demo
+spec:
+  replicas: 1          # KEDA will override this immediately (off-hours right now)
+  selector:
+    matchLabels:
+      app: nginx-demo
+  template:
+    metadata:
+      labels:
+        app: nginx-demo
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:stable-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-demo
+  namespace: demo
+spec:
+  selector:
+    app: nginx-demo
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-demo
+  namespace: demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: nginx-demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx-demo
+                port:
+                  number: 80
+---
+# ScaledObject: active (replicas=1) Mon–Fri 08:00–18:00 Europe/Berlin.
+# Outside that window minReplicaCount=0 → KEDA scales to zero.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: nginx-demo-off-hours
+  namespace: demo
+spec:
+  scaleTargetRef:
+    name: nginx-demo
+  minReplicaCount: 0
+  maxReplicaCount: 2
+  cooldownPeriod: 60
+  triggers:
+    - type: cron
+      metadata:
+        timezone: Europe/Berlin
+        start: "0 8 * * 1-5"    # 08:00 Mon–Fri → scale up
+        end:   "0 18 * * 1-5"   # 18:00 Mon–Fri → scale down
+        desiredReplicas: "1"
