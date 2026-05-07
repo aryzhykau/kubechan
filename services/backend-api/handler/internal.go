@@ -223,7 +223,7 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 			req.IncidentID,
 		)
 		if err == nil {
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 			attempt := 1
 			for rows.Next() {
 				var rootCause, rating string

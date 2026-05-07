@@ -106,7 +106,7 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	summaries := []runSummary{}
 	for rows.Next() {

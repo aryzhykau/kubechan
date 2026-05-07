@@ -67,7 +67,7 @@ func (h *Incidents) List(w http.ResponseWriter, r *http.Request) {
 			 JOIN users u ON u.id = mio.owner_id`,
 		)
 		if err == nil {
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 			for rows.Next() {
 				var incID, username, ownerID string
 				if rows.Scan(&incID, &username, &ownerID) == nil {
