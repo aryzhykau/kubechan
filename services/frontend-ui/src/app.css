@@ -1307,10 +1307,28 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 /* ── Login Page ────────────────────────────────────────────────────────────── */
 .login-page {
   min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--bg);
+}
+.login-left {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
+  padding: 2rem;
+}
+.login-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.login-right-img {
+  width: 90%;
+  max-width: 520px;
+  height: auto;
+  object-fit: contain;
+  display: block;
 }
 .login-card {
   background: var(--surface);
