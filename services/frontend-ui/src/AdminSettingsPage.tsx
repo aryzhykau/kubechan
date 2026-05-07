@@ -91,10 +91,10 @@ export function AdminSettingsPage() {
   return (
     <ThemeProvider theme={pageTheme}>
       <Box sx={{ p: 3, maxWidth: 680, mx: 'auto' }}>
-        <Typography variant="h5" fontWeight={700} mb={0.5}>
+        <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
           System Settings
         </Typography>
-        <Typography variant="body2" color="text.secondary" mb={3}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           Admin-only configuration applied across all users and cluster-watchers.
         </Typography>
 
@@ -108,10 +108,10 @@ export function AdminSettingsPage() {
             {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
             <Paper elevation={2} sx={{ p: 3, mb: 3, bgcolor: 'background.paper' }}>
-              <Typography variant="subtitle1" fontWeight={600} mb={0.5}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
                 Detector Thresholds
               </Typography>
-              <Typography variant="body2" color="text.secondary" mb={2}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 How long a problem must persist before it triggers an incident.
                 The cluster-watcher polls these values every 60 s — no restart needed.
               </Typography>
@@ -122,7 +122,7 @@ export function AdminSettingsPage() {
                   label="Pending Pod threshold (seconds)"
                   helperText="A Pod must be stuck in Pending for at least this long before an incident is raised. Default: 300"
                   type="number"
-                  inputProps={{ min: 1 }}
+                  slotProps={{ htmlInput: { min: 1 } }}
                   value={fields.pending}
                   onChange={set('pending')}
                   fullWidth
@@ -132,7 +132,7 @@ export function AdminSettingsPage() {
                   label="Deployment unavailable threshold (seconds)"
                   helperText="A Deployment must have unavailable replicas for at least this long before an incident is raised. Default: 300"
                   type="number"
-                  inputProps={{ min: 1 }}
+                  slotProps={{ htmlInput: { min: 1 } }}
                   value={fields.unavailable}
                   onChange={set('unavailable')}
                   fullWidth
@@ -142,7 +142,7 @@ export function AdminSettingsPage() {
                   label="Debounce window (seconds)"
                   helperText="Quiet period after a symptom is detected before the ProblemCase is actually created. Reduces noise from transient flaps. Default: 30"
                   type="number"
-                  inputProps={{ min: 1 }}
+                  slotProps={{ htmlInput: { min: 1 } }}
                   value={fields.debounce}
                   onChange={set('debounce')}
                   fullWidth
