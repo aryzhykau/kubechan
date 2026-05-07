@@ -265,13 +265,14 @@
       </div>
     </div>
 
-    <h3>2. Clone and install</h3>
+    <h3>2. Add Helm repo and install</h3>
     <div class="terminal">
       <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span><button class="copy-btn" aria-label="Copy to clipboard">Copy</button></div>
       <div class="tc">
-        <div><span class="pr">$</span> <span class="cd">git clone https://github.com/aryzhykau/kubechan.git &amp;&amp; cd kubechan</span></div>
+        <div><span class="pr">$</span> <span class="cd">helm repo add kubechan https://aryzhykau.github.io/kubechan</span></div>
+        <div><span class="pr">$</span> <span class="cd">helm repo update</span></div>
         <br/>
-        <div><span class="pr">$</span> <span class="cd">helm install kubechan ./helm/kubechan \</span></div>
+        <div><span class="pr">$</span> <span class="cd">helm install kubechan kubechan/kubechan \</span></div>
         <div><span class="cd">&nbsp;&nbsp;--namespace kubechan</span></div>
         <br/>
         <div><span class="cm"># Verify all pods are running</span></div>
@@ -317,7 +318,7 @@
     <div class="terminal">
       <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span><button class="copy-btn" aria-label="Copy to clipboard">Copy</button></div>
       <div class="tc">
-        <div><span class="pr">$</span> <span class="cd">helm upgrade --install kubechan ./helm/kubechan \</span></div>
+        <div><span class="pr">$</span> <span class="cd">helm upgrade --install kubechan kubechan/kubechan \</span></div>
         <div><span class="cd">&nbsp;&nbsp;--namespace kubechan -f my-values.yaml</span></div>
       </div>
     </div>
