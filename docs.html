@@ -64,8 +64,11 @@
     .dot { width: 11px; height: 11px; border-radius: 50%; }
     .dot.r { background: #ff5f56; } .dot.y { background: #ffbd2e; } .dot.g { background: #27c93f; }
     .tl { font-size: .76rem; color: var(--muted); margin-left: auto; }
-    .tc { padding: 18px 22px; font-size: .84rem; line-height: 1.85; }
+    .tc { padding: 18px 22px; font-size: .84rem; line-height: 1.85; overflow-x: auto; white-space: nowrap; }
     .cm { color: #6e7681; } .pr { color: var(--green); } .cd { color: var(--text); } .ou { color: var(--muted); }
+    .copy-btn { background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 5px; padding: 2px 10px; font-size: .72rem; cursor: pointer; font-family: inherit; transition: color .15s, border-color .15s; line-height: 1.6; }
+    .copy-btn:hover { color: var(--text); border-color: var(--blue); }
+    .copy-btn.copied { color: var(--green); border-color: var(--green); }
     /* CALLOUT */
     .callout { border-radius: 10px; padding: 14px 18px; margin: 16px 0; display: flex; gap: 12px; align-items: flex-start; font-size: .88rem; border: 1px solid; }
     .callout.warn { background: rgba(245,158,11,.07); border-color: rgba(245,158,11,.25); }
@@ -249,7 +252,7 @@
     <h3>1. Create namespace and apply CRDs</h3>
     <p>CRDs must be applied before the Helm release so the controllers can start cleanly.</p>
     <div class="terminal">
-      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span></div>
+      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span><button class="copy-btn" aria-label="Copy to clipboard">Copy</button></div>
       <div class="tc">
         <div><span class="pr">$</span> <span class="cd">kubectl create namespace kubechan</span></div>
         <br/>
@@ -264,7 +267,7 @@
 
     <h3>2. Clone and install</h3>
     <div class="terminal">
-      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span></div>
+      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span><button class="copy-btn" aria-label="Copy to clipboard">Copy</button></div>
       <div class="tc">
         <div><span class="pr">$</span> <span class="cd">git clone https://github.com/aryzhykau/kubechan.git &amp;&amp; cd kubechan</span></div>
         <br/>
@@ -287,7 +290,7 @@
 
     <h3>Common value overrides</h3>
     <div class="terminal">
-      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">my-values.yaml</span></div>
+      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">my-values.yaml</span><button class="copy-btn" aria-label="Copy to clipboard">Copy</button></div>
       <div class="tc">
         <div><span class="cm"># Detect problems faster (default debounce: 30s)</span></div>
         <div><span class="cd">clusterWatcher:</span></div>
@@ -312,7 +315,7 @@
       </div>
     </div>
     <div class="terminal">
-      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span></div>
+      <div class="tb"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tl">bash</span><button class="copy-btn" aria-label="Copy to clipboard">Copy</button></div>
       <div class="tc">
         <div><span class="pr">$</span> <span class="cd">helm upgrade --install kubechan ./helm/kubechan \</span></div>
         <div><span class="cd">&nbsp;&nbsp;--namespace kubechan -f my-values.yaml</span></div>
@@ -344,5 +347,19 @@
   </div>
 </footer>
 
+<script>
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('.copy-btn');
+  if (!btn) return;
+  var body = btn.closest('.terminal').querySelector('.tc, .terminal-body');
+  if (!body) return;
+  var text = (body.innerText || body.textContent).replace(/\u00a0/g, ' ').trim();
+  navigator.clipboard.writeText(text).then(function() {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+  }).catch(function() {});
+});
+</script>
 </body>
 </html>

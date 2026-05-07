@@ -583,7 +583,10 @@
     .dot.y { background: #ffbd2e; }
     .dot.g { background: #27c93f; }
     .terminal-label { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
-    .terminal-body { padding: 20px 24px; font-size: 0.85rem; line-height: 1.8; }
+    .terminal-body { padding: 20px 24px; font-size: 0.85rem; line-height: 1.8; overflow-x: auto; white-space: nowrap; }
+    .copy-btn { background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 5px; padding: 2px 10px; font-size: 0.72rem; cursor: pointer; font-family: inherit; transition: color .15s, border-color .15s; line-height: 1.6; }
+    .copy-btn:hover { color: var(--text); border-color: var(--blue); }
+    .copy-btn.copied { color: var(--green); border-color: var(--green); }
     .term-comment { color: #6e7681; }
     .term-prompt { color: var(--green); }
     .term-cmd { color: var(--text); }
@@ -1089,6 +1092,7 @@
               <span class="dot y" aria-hidden="true"></span>
               <span class="dot g" aria-hidden="true"></span>
               <span class="terminal-label">bash</span>
+              <button class="copy-btn" aria-label="Copy to clipboard">Copy</button>
             </div>
             <div class="terminal-body">
               <div><span class="term-comment"># Create namespace</span></div>
@@ -1129,6 +1133,21 @@
         </p>
       </div>
     </section>
+
+  <script>
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    var body = btn.closest('.terminal').querySelector('.tc, .terminal-body');
+    if (!body) return;
+    var text = (body.innerText || body.textContent).replace(/\u00a0/g, ' ').trim();
+    navigator.clipboard.writeText(text).then(function() {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+    }).catch(function() {});
+  });
+  </script>
 
   </main>
 
