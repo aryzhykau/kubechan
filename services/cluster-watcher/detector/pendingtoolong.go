@@ -16,9 +16,9 @@ const defaultPendingThreshold = 5 * time.Minute
 
 // PendingTooLongDetector fires when a Pod has been in Pending phase longer than Threshold.
 type PendingTooLongDetector struct {
-	// Threshold is the maximum time a Pod may remain Pending before a symptom is raised.
-	// Defaults to 5 minutes if zero.
-	Threshold time.Duration
+	// Threshold returns the maximum time a Pod may remain Pending before a symptom is raised.
+	// If nil, defaults to 5 minutes.
+	Threshold func() time.Duration
 }
 
 func (d *PendingTooLongDetector) Name() string { return "PendingTooLong" }
@@ -32,9 +32,9 @@ func (d *PendingTooLongDetector) Evaluate(_ context.Context, obj client.Object, 
 		return nil, nil
 	}
 
-	threshold := d.Threshold
-	if threshold == 0 {
-		threshold = defaultPendingThreshold
+	threshold := defaultPendingThreshold
+	if d.Threshold != nil {
+		threshold = d.Threshold()
 	}
 
 	age := time.Since(pod.CreationTimestamp.Time)

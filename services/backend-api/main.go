@@ -202,6 +202,7 @@ func main() {
 
 	r.Route("/internal", func(r chi.Router) {
 		r.Post("/evidence", internal.ReceiveEvidence)
+		r.Get("/settings", settings.GetDetectorConfig)
 	})
 
 	// ── HTTP server ───────────────────────────────────────────────────────────

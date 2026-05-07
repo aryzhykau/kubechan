@@ -7,6 +7,7 @@ import { ManualIncidentModal } from './ManualIncidentModal'
 import { LoginPage } from './LoginPage'
 import { UsersPage } from './UsersPage'
 import { LLMSettingsPage } from './LLMSettingsPage'
+import { AdminSettingsPage } from './AdminSettingsPage'
 import { pickChatterLine, type ChatterEvent } from './chatter'
 import { useWebSocket, type WSEvent } from './useWebSocket'
 import { api, getToken, clearToken, type CurrentUser } from './api'
@@ -19,6 +20,7 @@ type View =
   | { type: 'run-detail'; runId: string }
   | { type: 'users' }
   | { type: 'llm-settings' }
+  | { type: 'admin-settings' }
 
 function App() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null | undefined>(undefined)
@@ -215,7 +217,11 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <span className="app-logo">⎈</span>
+        <img
+          src="/logo.png"
+          alt="KubeChan"
+          className={"app-logo"}
+        />
         <h1>KubeChan</h1>
         <nav className="app-nav">
           <button
@@ -251,6 +257,14 @@ function App() {
               Users
             </button>
           )}
+          {currentUser.role === 'admin' && (
+            <button
+              className={`app-nav-btn${view.type === 'admin-settings' ? ' active' : ''}`}
+              onClick={() => setView({ type: 'admin-settings' })}
+            >
+              Settings
+            </button>
+          )}
           <button
             className={`app-nav-btn${view.type === 'llm-settings' ? ' active' : ''}`}
             onClick={() => setView({ type: 'llm-settings' })}
@@ -258,7 +272,6 @@ function App() {
             LLM Settings
           </button>
         </nav>
-        <span className="app-subtitle">Kubernetes Anime Problem Insluter</span>
         <div className="app-user-info">
           <span className="app-username">{currentUser.username}</span>
           <button className="app-logout-btn" onClick={() => { clearToken(); setCurrentUser(null) }}>
@@ -293,6 +306,9 @@ function App() {
           )}
           {view.type === 'users' && currentUser.role === 'admin' && (
             <UsersPage />
+          )}
+          {view.type === 'admin-settings' && currentUser.role === 'admin' && (
+            <AdminSettingsPage />
           )}
           {view.type === 'llm-settings' && (
             <LLMSettingsPage />

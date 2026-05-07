@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/org/kubechan/services/cluster-watcher/controllers"
 	"github.com/org/kubechan/services/cluster-watcher/debounce"
 	"github.com/org/kubechan/services/cluster-watcher/detector"
+	"github.com/org/kubechan/services/cluster-watcher/watcherconfig"
 )
 
 var scheme = runtime.NewScheme()
@@ -34,9 +36,20 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(envBool("DEV_MODE"))))
 	setupLog := ctrl.Log.WithName("setup")
 
-	debounceWindow := envDuration("DEBOUNCE_WINDOW_SECS", 30) * time.Second
-	pendingThreshold := envDuration("PENDING_THRESHOLD_SECS", 300) * time.Second
-	unavailableThreshold := envDuration("UNAVAILABLE_THRESHOLD_SECS", 300) * time.Second
+	// Seed initial thresholds from env vars (fallback if backend-api is not yet reachable).
+	initDebounce := envDuration("DEBOUNCE_WINDOW_SECS", 30) * time.Second
+	initPending := envDuration("PENDING_THRESHOLD_SECS", 300) * time.Second
+	initUnavailable := envDuration("UNAVAILABLE_THRESHOLD_SECS", 300) * time.Second
+
+	// Live-reloadable config — overridden by backend-api settings when available.
+	wcfg := watcherconfig.New(initDebounce, initPending, initUnavailable)
+	backendURL := os.Getenv("BACKEND_API_URL")
+	if backendURL != "" {
+		logFn := func(msg string, args ...any) { setupLog.Info(msg, args...) }
+		wcfg.StartPolling(context.Background(), backendURL, 60*time.Second, logFn)
+	} else {
+		setupLog.Info("BACKEND_API_URL not set; using env-var thresholds only")
+	}
 
 	controlNamespace := os.Getenv("CONTROL_NAMESPACE")
 	if controlNamespace == "" {
@@ -62,16 +75,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	debouncerInst := debounce.New(debounceWindow)
+	debouncerInst := debounce.New(wcfg.DebounceWindow)
 
 	// All detectors — referenced by multiple reconcilers.
 	podDetectors := []detector.Detector{
 		&detector.CrashLoopBackOffDetector{},
 		&detector.ImagePullBackOffDetector{},
-		&detector.PendingTooLongDetector{Threshold: pendingThreshold},
+		&detector.PendingTooLongDetector{Threshold: wcfg.PendingThreshold},
 	}
 	deployDetectors := []detector.Detector{
-		&detector.DeploymentUnavailableDetector{Threshold: unavailableThreshold},
+		&detector.DeploymentUnavailableDetector{Threshold: wcfg.UnavailableThreshold},
 	}
 	svcDetectors := []detector.Detector{
 		&detector.ServiceNoEndpointsDetector{},
@@ -145,7 +158,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager", "debounceWindow", debounceWindow, "pendingThreshold", pendingThreshold, "controlNamespace", controlNamespace)
+	setupLog.Info("starting manager",
+		"debounceWindow", wcfg.DebounceWindow(),
+		"pendingThreshold", wcfg.PendingThreshold(),
+		"unavailableThreshold", wcfg.UnavailableThreshold(),
+		"controlNamespace", controlNamespace,
+	)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

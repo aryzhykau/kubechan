@@ -16,14 +16,16 @@ import (
 type Debouncer struct {
 	mu     sync.Mutex
 	timers map[string]*time.Timer
-	window time.Duration
+	window func() time.Duration
 }
 
-// New creates a Debouncer with the given quiet window.
-func New(window time.Duration) *Debouncer {
+// New creates a Debouncer whose quiet window is returned by windowFn on each
+// Debounce call.  This allows the window to be adjusted at runtime without
+// restarting the process.
+func New(windowFn func() time.Duration) *Debouncer {
 	return &Debouncer{
 		timers: make(map[string]*time.Timer),
-		window: window,
+		window: windowFn,
 	}
 }
 
@@ -31,13 +33,14 @@ func New(window time.Duration) *Debouncer {
 // If called again for the same key before the window expires, the timer is reset.
 // fn runs in a new goroutine.
 func (d *Debouncer) Debounce(key string, fn func()) {
+	w := d.window()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if t, ok := d.timers[key]; ok {
 		t.Stop()
 	}
-	d.timers[key] = time.AfterFunc(d.window, func() {
+	d.timers[key] = time.AfterFunc(w, func() {
 		d.mu.Lock()
 		delete(d.timers, key)
 		d.mu.Unlock()

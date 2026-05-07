@@ -19,7 +19,7 @@ func TestPendingTooLongDetector(t *testing.T) {
 	ctx := context.Background()
 	reader := fake.NewClientBuilder().Build()
 	threshold := 5 * time.Minute
-	d := &detector.PendingTooLongDetector{Threshold: threshold}
+	d := &detector.PendingTooLongDetector{Threshold: func() time.Duration { return threshold }}
 
 	t.Run("fires when pending beyond threshold", func(t *testing.T) {
 		pod := &corev1.Pod{
@@ -78,8 +78,8 @@ func TestPendingTooLongDetector(t *testing.T) {
 		}
 	})
 
-	t.Run("uses default threshold when Threshold is zero", func(t *testing.T) {
-		dDefault := &detector.PendingTooLongDetector{} // zero threshold → default 5m
+	t.Run("uses default threshold when Threshold is nil", func(t *testing.T) {
+		dDefault := &detector.PendingTooLongDetector{} // nil threshold → default 5m
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "slow-pod",

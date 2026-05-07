@@ -21,6 +21,8 @@ clusterWatcher:
   debounceWindowSecs: 5
   pendingTooLongThresholdSecs: 60
   unavailableThresholdSecs: 60
+  # URL of the backend-api service inside the cluster for live threshold polling.
+  backendApiUrl: "http://kubechan-backend-api:8080"
   resources:
     requests:
       cpu: 50m

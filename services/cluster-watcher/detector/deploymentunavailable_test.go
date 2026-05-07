@@ -18,7 +18,7 @@ import (
 
 func TestDeploymentUnavailableDetector(t *testing.T) {
 	threshold := 5 * time.Minute
-	d := &detector.DeploymentUnavailableDetector{Threshold: threshold}
+	d := &detector.DeploymentUnavailableDetector{Threshold: func() time.Duration { return threshold }}
 	ctx := context.Background()
 	reader := fake.NewClientBuilder().Build()
 

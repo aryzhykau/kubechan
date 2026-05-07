@@ -41,6 +41,8 @@ spec:
               value: {{ .Values.clusterWatcher.unavailableThresholdSecs | quote }}
             - name: CONTROL_NAMESPACE
               value: {{ .Values.clusterWatcher.controlNamespace | default .Release.Namespace | quote }}
+            - name: BACKEND_API_URL
+              value: {{ .Values.clusterWatcher.backendApiUrl | quote }}
           ports:
             - name: metrics
               containerPort: 8080

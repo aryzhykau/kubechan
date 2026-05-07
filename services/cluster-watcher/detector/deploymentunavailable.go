@@ -19,9 +19,9 @@ const defaultUnavailableThreshold = 5 * time.Minute
 // for longer than Threshold, avoiding false positives during normal rollouts and
 // initial provisioning.
 type DeploymentUnavailableDetector struct {
-	// Threshold is how long unavailability must persist before a symptom is raised.
-	// Defaults to 5 minutes if zero.
-	Threshold time.Duration
+	// Threshold returns how long unavailability must persist before a symptom is raised.
+	// If nil, defaults to 5 minutes.
+	Threshold func() time.Duration
 }
 
 func (d *DeploymentUnavailableDetector) Name() string { return "DeploymentUnavailable" }
@@ -49,9 +49,9 @@ func (d *DeploymentUnavailableDetector) Evaluate(_ context.Context, obj client.O
 		return nil, nil
 	}
 
-	threshold := d.Threshold
-	if threshold == 0 {
-		threshold = defaultUnavailableThreshold
+	threshold := defaultUnavailableThreshold
+	if d.Threshold != nil {
+		threshold = d.Threshold()
 	}
 
 	// Use the Available condition's LastTransitionTime as the start of unavailability.

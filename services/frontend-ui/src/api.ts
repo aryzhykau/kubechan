@@ -298,4 +298,14 @@ export const api = {
 
   getLLMModels: () =>
     apiFetch<{ providers: Record<string, { id: string; label: string }[]> }>('/api/v1/llm-models'),
+
+  // ── Admin system settings ──────────────────────────────────────────────────
+  getAdminSettings: () =>
+    apiFetch<Record<string, unknown>>('/api/v1/settings'),
+
+  updateAdminSettings: (patch: Record<string, unknown>) =>
+    apiFetch<{ status: string }>('/api/v1/settings', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
 }

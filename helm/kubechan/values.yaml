@@ -25,6 +25,9 @@ clusterWatcher:
   # Seconds a Deployment must have unavailable replicas before triggering DeploymentUnavailable detector.
   unavailableThresholdSecs: 300
 
+  # URL of the backend-api service for live threshold polling (leave empty to use env-var values only).
+  backendApiUrl: ""
+
   resources:
     requests:
       cpu: 100m
