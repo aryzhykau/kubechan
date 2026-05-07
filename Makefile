@@ -3,7 +3,7 @@
 # ─── Variables ────────────────────────────────────────────────────────────────
 
 # Pinned controller-gen version. Run 'make install-tools' once to install it.
-CONTROLLER_GEN_VERSION := v0.17.0
+CONTROLLER_GEN_VERSION := v0.21.0
 
 # Prefer locally installed controller-gen; fall back to 'go run' for CI.
 ifeq (, $(shell which controller-gen))

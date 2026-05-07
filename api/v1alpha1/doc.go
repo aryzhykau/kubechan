@@ -4,4 +4,5 @@
 // Package v1alpha1 contains API types for the kubechan.io API group.
 //
 // +groupName=kubechan.io
+// +kubebuilder:object:generate=true
 package v1alpha1
