@@ -20,6 +20,7 @@ spec:
         kubechan.io/component: backend-api
     spec:
       serviceAccountName: {{ include "kubechan.fullname" . }}-backend-api
+      {{- include "kubechan.nodeSelector" .Values.backendApi.nodeSelector | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

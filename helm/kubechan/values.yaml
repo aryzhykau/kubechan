@@ -31,6 +31,9 @@ clusterWatcher:
   # URL of the backend-api service for live threshold polling (leave empty to use env-var values only).
   backendApiUrl: ""
 
+  # Optional node selector. Example: kubernetes.io/arch: arm64
+  nodeSelector: {}
+
   resources:
     requests:
       cpu: 100m
@@ -55,6 +58,9 @@ diagnosticsWorker:
 
   # Max lines of previous (crashed) container logs to collect per container.
   prevLogTailLines: 200
+
+  # Optional node selector. Example: kubernetes.io/arch: arm64
+  nodeSelector: {}
 
   resources:
     requests:
@@ -97,6 +103,9 @@ backendApi:
     # Days to retain analysis results in SQLite.
     analysisResultsDays: 30
 
+  # Optional node selector. Example: kubernetes.io/arch: arm64
+  nodeSelector: {}
+
   resources:
     requests:
       cpu: 100m
@@ -128,6 +137,9 @@ llmGateway:
   # Provider credentials (region, modelId, thinkingBudget, etc.) are configured
   # per-user in the UI under Settings → LLM Provider.
   evidenceTokenBudget: 120000
+
+  # Optional node selector. Example: kubernetes.io/arch: arm64
+  nodeSelector: {}
 
   resources:
     requests:
@@ -173,6 +185,9 @@ frontendUi:
           - path: /
             pathType: Prefix
     tls: []
+
+  # Optional node selector. Example: kubernetes.io/arch: arm64
+  nodeSelector: {}
 
   resources:
     requests:

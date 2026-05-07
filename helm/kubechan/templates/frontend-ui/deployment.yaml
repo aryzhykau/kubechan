@@ -20,6 +20,7 @@ spec:
         kubechan.io/component: frontend-ui
     spec:
       serviceAccountName: {{ include "kubechan.fullname" . }}-frontend-ui
+      {{- include "kubechan.nodeSelector" .Values.frontendUi.nodeSelector | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 101  # nginx user

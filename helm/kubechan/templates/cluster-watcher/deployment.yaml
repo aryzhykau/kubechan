@@ -20,6 +20,7 @@ spec:
         kubechan.io/component: cluster-watcher
     spec:
       serviceAccountName: {{ include "kubechan.fullname" . }}-cluster-watcher
+      {{- include "kubechan.nodeSelector" .Values.clusterWatcher.nodeSelector | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         seccompProfile:

@@ -20,6 +20,7 @@ spec:
         kubechan.io/component: diagnostics-worker
     spec:
       serviceAccountName: {{ include "kubechan.fullname" . }}-diagnostics-worker
+      {{- include "kubechan.nodeSelector" .Values.diagnosticsWorker.nodeSelector | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         seccompProfile:

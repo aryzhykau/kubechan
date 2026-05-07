@@ -44,3 +44,14 @@ Usage: {{ include "kubechan.serviceAccountName" (dict "component" "cluster-watch
 {{- define "kubechan.serviceAccountName" -}}
 {{- printf "%s-%s" (include "kubechan.fullname" .context) .component }}
 {{- end }}
+
+{{/*
+Optional nodeSelector block. Renders nothing when nodeSelector is empty.
+Usage: {{- include "kubechan.nodeSelector" .Values.someComponent.nodeSelector | nindent 8 }}
+*/}}
+{{- define "kubechan.nodeSelector" -}}
+{{- if . }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}

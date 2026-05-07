@@ -20,6 +20,7 @@ spec:
         kubechan.io/component: llm-gateway
     spec:
       serviceAccountName: {{ include "kubechan.fullname" . }}-llm-gateway
+      {{- include "kubechan.nodeSelector" .Values.llmGateway.nodeSelector | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
