@@ -168,6 +168,7 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onRes
   function handleAugmented(diagnosticRunId: string, resources: Array<{ kind: string; name: string; namespace: string }>) {
     setShowAugment(false)
     onResourcesPatched(id, resources)
+    onAnalysisStart(title)
     setAnalysis({ status: 'collecting', diagnosticRunId })
     onAnalyzed(id, diagnosticRunId)
   }
