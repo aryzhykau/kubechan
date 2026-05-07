@@ -286,6 +286,61 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 }
 .btn-augment:hover { background: rgba(99,102,241,0.15); border-color: #818cf8; }
 
+/* ── Exclusion rule suggestion banner (on incident row) ─────────────── */
+.exc-suggest-banner {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius);
+  background: rgba(99,102,241,0.06);
+  border: 1px solid rgba(99,102,241,0.3);
+}
+.exc-suggest-body { display: flex; align-items: flex-start; gap: 0.6rem; min-width: 0; flex: 1; }
+.exc-suggest-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+.exc-suggest-text { display: flex; flex-direction: column; gap: 0.2rem; }
+.exc-suggest-text strong { font-size: 0.78rem; color: #818cf8; font-weight: 700; }
+.exc-suggest-reason {
+  font-size: 0.74rem;
+  color: var(--muted);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.btn-exclusion-suggest {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid rgba(99,102,241,0.5);
+  color: #818cf8;
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-exclusion-suggest:hover { background: rgba(99,102,241,0.15); border-color: #818cf8; }
+
+/* ── False-positive suggestion banner ────────────────────────────────────── */
+.fp-suggest-banner { margin-top:0.75rem; display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.6rem 0.9rem; border-radius:var(--radius); background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); }
+.fp-suggest-body { display:flex; align-items:flex-start; gap:0.6rem; min-width:0; flex:1; }
+.fp-suggest-icon { font-size:1rem; flex-shrink:0; margin-top:1px; }
+.fp-suggest-text { display:flex; flex-direction:column; gap:0.2rem; }
+.fp-suggest-text strong { font-size:0.78rem; color:#f87171; font-weight:700; }
+.fp-suggest-reason { font-size:0.74rem; color:var(--muted); line-height:1.45; }
+.btn-fp-suggest { flex-shrink:0; background:transparent; border:1px solid rgba(239,68,68,0.4); color:#f87171; padding:0.35rem 0.85rem; border-radius:var(--radius); cursor:pointer; font-size:0.78rem; font-weight:600; transition:all 0.15s; white-space:nowrap; }
+.btn-fp-suggest:hover { background:rgba(239,68,68,0.12); border-color:#f87171; }
+.fp-confirm { display:flex; align-items:center; gap:0.5rem; flex-shrink:0; }
+.fp-confirm-text { font-size:0.78rem; color:var(--muted); white-space:nowrap; }
+.btn-fp-yes { background:#ef4444; border:none; color:#fff; padding:0.3rem 0.7rem; border-radius:var(--radius); cursor:pointer; font-size:0.75rem; font-weight:600; }
+.btn-fp-yes:hover { background:#dc2626; }
+.btn-fp-cancel { background:transparent; border:1px solid var(--border); color:var(--muted); padding:0.3rem 0.65rem; border-radius:var(--radius); cursor:pointer; font-size:0.75rem; }
+
 .btn-analyze {
   background: linear-gradient(135deg, #6366f1, #818cf8);
   color: #fff;
@@ -660,6 +715,44 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   text-align: right;
   margin-top: 0.55rem;
   opacity: 0.8;
+}
+.speech-exclusion-banner {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: rgba(245,158,11,0.1);
+  border: 1px solid rgba(245,158,11,0.35);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.speech-exclusion-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fbbf24;
+  letter-spacing: 0.03em;
+}
+.speech-exclusion-reason {
+  font-size: 0.76rem;
+  color: #e2c87a;
+  margin: 0;
+  line-height: 1.45;
+  font-style: italic;
+}
+.speech-exclusion-btn {
+  align-self: flex-end;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fbbf24;
+  background: rgba(245,158,11,0.15);
+  border: 1px solid rgba(245,158,11,0.4);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.speech-exclusion-btn:hover {
+  background: rgba(245,158,11,0.28);
 }
 .speech-thinking {
   font-size: 0.78rem;

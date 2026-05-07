@@ -7,8 +7,9 @@ import "time"
 
 // ResourceRef identifies a Kubernetes resource.
 type ResourceRef struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	APIGroup string `json:"apiGroup,omitempty"`
 }
 
 // K8sEvent is a simplified Kubernetes event.

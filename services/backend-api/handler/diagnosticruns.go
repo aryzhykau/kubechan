@@ -64,17 +64,19 @@ func (h *DiagnosticRuns) Get(w http.ResponseWriter, r *http.Request) {
 
 // runSummary is returned by List.
 type runSummary struct {
-	DiagnosticRunID    string              `json:"diagnosticRunId"`
-	IncidentID         string              `json:"incidentId"`
-	RequestedAt        string              `json:"requestedAt"`
-	Status             string              `json:"status"`
-	AnalysisResultID   *string             `json:"analysisResultId"`
-	LikelyRootCause    *string             `json:"likelyRootCause"`
-	Confidence         *float64            `json:"confidence"`
-	Model              *string             `json:"model"`
-	AnalysisCreatedAt  *string             `json:"analysisCreatedAt"`
-	NeedsMoreInfo      *bool               `json:"needsMoreInfo,omitempty"`
-	SuggestedResources json.RawMessage     `json:"suggestedResources,omitempty"`
+	DiagnosticRunID      string          `json:"diagnosticRunId"`
+	IncidentID           string          `json:"incidentId"`
+	RequestedAt          string          `json:"requestedAt"`
+	Status               string          `json:"status"`
+	AnalysisResultID     *string         `json:"analysisResultId"`
+	LikelyRootCause      *string         `json:"likelyRootCause"`
+	Confidence           *float64        `json:"confidence"`
+	Model                *string         `json:"model"`
+	AnalysisCreatedAt    *string         `json:"analysisCreatedAt"`
+	NeedsMoreInfo        *bool           `json:"needsMoreInfo,omitempty"`
+	SuggestedResources   json.RawMessage `json:"suggestedResources,omitempty"`
+	SuggestFalsePositive bool            `json:"suggestFalsePositive,omitempty"`
+	SuggestExclusionRule json.RawMessage `json:"suggestExclusionRule,omitempty"`
 }
 
 // List handles GET /api/v1/diagnosticruns?incidentId=
@@ -84,7 +86,9 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 	const baseQuery = `
 		SELECT ar.diagnostic_run_id, ar.incident_id, ar.requested_at, ar.status,
 		       res.id, res.likely_root_cause, res.confidence, res.model, res.created_at,
-		       res.needs_more_info, res.suggested_resources
+		       res.needs_more_info, res.suggested_resources,
+		       json_extract(res.payload, '$.suggestFalsePositive'),
+		       json_extract(res.payload, '$.suggestExclusionRule')
 		FROM analysis_requests ar
 		LEFT JOIN analysis_results res ON res.id = (
 		    SELECT id FROM analysis_results WHERE diagnostic_run_id = ar.diagnostic_run_id
@@ -114,14 +118,15 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 			s                                                   runSummary
 			incidentNullStr, requestedAt, status               sql.NullString
 			analysisID, rootCause, model, analysisCreatedAt    sql.NullString
-			suggestedResources                                  sql.NullString
+			suggestedResources, suggestExclusionRule            sql.NullString
+			suggestFalsePositiveInt                             sql.NullInt64
 			confidence                                          sql.NullFloat64
 			needsMoreInfoInt                                    sql.NullInt64
 		)
 		if err := rows.Scan(
 			&s.DiagnosticRunID, &incidentNullStr, &requestedAt, &status,
 			&analysisID, &rootCause, &confidence, &model, &analysisCreatedAt,
-			&needsMoreInfoInt, &suggestedResources,
+			&needsMoreInfoInt, &suggestedResources, &suggestFalsePositiveInt, &suggestExclusionRule,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -150,6 +155,12 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 		}
 		if suggestedResources.Valid && suggestedResources.String != "" {
 			s.SuggestedResources = json.RawMessage(suggestedResources.String)
+		}
+		if suggestFalsePositiveInt.Valid && suggestFalsePositiveInt.Int64 != 0 {
+			s.SuggestFalsePositive = true
+		}
+		if suggestExclusionRule.Valid && suggestExclusionRule.String != "" && suggestExclusionRule.String != "null" {
+			s.SuggestExclusionRule = json.RawMessage(suggestExclusionRule.String)
 		}
 		summaries = append(summaries, s)
 	}

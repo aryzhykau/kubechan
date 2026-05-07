@@ -39,6 +39,13 @@ type IncidentSpec struct {
 	// Cross-namespace is allowed. Only populated for manual incidents.
 	// +optional
 	RelatedResources []ResourceRef `json:"relatedResources,omitempty"`
+
+	// FalsePositive marks this incident as a false positive — the behaviour was intentional
+	// and expected. Set by the user after reviewing an LLM analysis that suggested
+	// suggestFalsePositive. Once true, the incident will be auto-resolved.
+	// Only meaningful for manual incidents (source=manual). Auto incidents use ExclusionRules.
+	// +optional
+	FalsePositive bool `json:"falsePositive,omitempty"`
 }
 
 // IncidentStatus defines the observed state of Incident.

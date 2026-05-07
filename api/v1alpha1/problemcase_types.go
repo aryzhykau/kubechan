@@ -31,10 +31,31 @@ type ResourceRef struct {
 	// Namespace of the resource. Empty for cluster-scoped resources.
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
-	// Kind is the Kubernetes resource kind (e.g., Pod, Deployment).
+	// Kind is the Kubernetes resource kind (e.g., Pod, Deployment, ScaledObject).
 	Kind string `json:"kind"`
 	// Name is the resource name.
 	Name string `json:"name"`
+	// APIGroup is the Kubernetes API group for this resource kind, e.g. "apps" or "keda.sh".
+	// Empty means the core API group. Used by the dynamic client in diagnostics-worker
+	// to resolve arbitrary CRDs requested by the user or suggested by the LLM.
+	// +optional
+	APIGroup string `json:"apiGroup,omitempty"`
+	// EvidenceSlices controls which parts of this resource the diagnostics-worker collects
+	// when it appears in RelatedResources. Empty means collect all slices applicable to the
+	// kind (backward-compatible default).
+	//
+	// Valid values:
+	//   spec        — resource spec field (with redaction)
+	//   status      — full status object
+	//   conditions  — status.conditions array, extracted separately for clarity
+	//   events      — Kubernetes Events for this resource
+	//   logs        — container logs (Deployment, StatefulSet, DaemonSet, Pod, Job only)
+	//   metrics     — current CPU/memory from metrics-server (container-having kinds only)
+	//   labels      — metadata.labels
+	//   annotations — metadata.annotations (sensitive values redacted)
+	//   ownerRefs   — metadata.ownerReferences chain resolved recursively up to the root
+	// +optional
+	EvidenceSlices []string `json:"evidenceSlices,omitempty"`
 }
 
 // ProblemCaseSpec defines the desired state of ProblemCase.

@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from app.models import AnalyzeRequest, AnalyzeResponse, SuggestedResource
+from app.models import AnalyzeRequest, AnalyzeResponse, ExclusionRuleProposal, SuggestedResource
 from app.parser import parse_llm_json
 from app.prompt import build_prompt
 from app.providers.base import make_provider
@@ -41,6 +41,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         req.moodLevel,
         [p.model_dump() for p in req.priorDiagnoses],
         req.userMessage,
+        req.incidentSource,
     )
 
     logger.info("=== PROMPT TO MODEL ===\n%s\n=== END PROMPT ===", prompt)
@@ -70,12 +71,26 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 
     raw_suggested = parsed.get("suggestedResources") or []
     suggested = [
-        SuggestedResource(kind=str(s["kind"]), reason=str(s.get("reason", "")))
+        SuggestedResource(kind=str(s["kind"]), apiGroup=str(s.get("apiGroup", "")), reason=str(s.get("reason", "")))
         for s in raw_suggested
         if isinstance(s, dict) and s.get("kind")
     ]
 
     needs_more_info = bool(parsed.get("needsMoreInfo", False)) and len(suggested) > 0
+
+    # Parse suggestExclusionRule — only accept if it has required fields.
+    suggest_exclusion_rule: ExclusionRuleProposal | None = None
+    raw_exc = parsed.get("suggestExclusionRule")
+    if isinstance(raw_exc, dict) and raw_exc.get("reason") and raw_exc.get("targetResources"):
+        try:
+            suggest_exclusion_rule = ExclusionRuleProposal(
+                reason=str(raw_exc["reason"]),
+                detectors=[str(d) for d in (raw_exc.get("detectors") or [])],
+                targetResources=list(raw_exc.get("targetResources") or []),
+                timeWindow=raw_exc.get("timeWindow"),
+            )
+        except Exception:
+            suggest_exclusion_rule = None
 
     return AnalyzeResponse(
         evidenceId=req.evidenceId,
@@ -88,6 +103,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         confidence=min(max(float(parsed.get("confidence", 0.5)), 0.0), 1.0),
         needsMoreInfo=needs_more_info,
         suggestedResources=suggested,
+        suggestExclusionRule=suggest_exclusion_rule,
         thinkingBudgetUsed=thinking_tokens,
         rawResponse=raw,
         prompt=prompt,

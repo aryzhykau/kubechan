@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { api, type Incident, type AnalysisResult, type DiagnosticRunSummary } from './api'
+import { api, type Incident, type AnalysisResult, type DiagnosticRunSummary, type ExclusionRuleProposal } from './api'
 import { useWebSocket, type WSEvent } from './useWebSocket'
 import { type ChatterEvent } from './chatter'
 import { AugmentIncidentModal } from './AugmentIncidentModal'
@@ -129,18 +129,22 @@ function IncidentDetails({ incident, previousRun }: {
   )
 }
 
-function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onResolved, onResourcesPatched }: {
+function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onResolved, onResourcesPatched, onSuggestRule, onMarkFalsePositive }: {
   incident: Incident
   onAnalyzed: (name: string, runId: string) => void
   onAnalysisStart: (incidentName: string) => void
   previousRun?: DiagnosticRunSummary
   onResolved?: () => void
   onResourcesPatched: (incidentName: string, resources: Array<{ kind: string; name: string; namespace: string }>) => void
+  onSuggestRule?: (p: ExclusionRuleProposal) => void
+  onMarkFalsePositive?: () => void
 }) {
   const [analysis, setAnalysis] = useState<AnalysisState>({ status: 'idle' })
   const [showAugment, setShowAugment] = useState(false)
   const [resolveState, setResolveState] = useState<'idle' | 'confirm' | 'resolving' | 'error'>('idle')
   const [resolveError, setResolveError] = useState('')
+  const [fpState, setFpState] = useState<'idle' | 'confirm' | 'marking' | 'error'>('idle')
+  const [fpError, setFpError] = useState('')
   const id = incident.metadata.name
   const isResolved = incident.status.state === 'resolved'
   const isManual = incident.spec.source === 'manual'
@@ -182,6 +186,19 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onRes
     } catch (e: unknown) {
       setResolveError(String(e))
       setResolveState('error')
+    }
+  }
+
+  async function handleMarkFalsePositive() {
+    setFpState('marking')
+    try {
+      await api.markFalsePositive(id)
+      setFpState('idle')
+      onMarkFalsePositive?.()
+      onResolved?.()
+    } catch (e: unknown) {
+      setFpError(String(e))
+      setFpState('error')
     }
   }
 
@@ -275,6 +292,52 @@ function IncidentRow({ incident, onAnalyzed, onAnalysisStart, previousRun, onRes
         </div>
       )}
 
+      {previousRun?.suggestExclusionRule && onSuggestRule && (
+        <div className="exc-suggest-banner">
+          <div className="exc-suggest-body">
+            <span className="exc-suggest-icon">🛡</span>
+            <div className="exc-suggest-text">
+              <strong>Expected behaviour — not a real incident</strong>
+              <span className="exc-suggest-reason">{previousRun.suggestExclusionRule.reason}</span>
+            </div>
+          </div>
+          <button
+            className="btn-exclusion-suggest"
+            onClick={() => onSuggestRule(previousRun!.suggestExclusionRule!)}
+          >
+            Review &amp; Create Exclusion Rule
+          </button>
+        </div>
+      )}
+
+      {previousRun?.suggestFalsePositive && isManual && !isResolved && (
+        <div className="fp-suggest-banner">
+          <div className="fp-suggest-body">
+            <span className="fp-suggest-icon">🤷</span>
+            <div className="fp-suggest-text">
+              <strong>This looks like expected behaviour</strong>
+              <span className="fp-suggest-reason">KubeChan thinks this was never a real incident. Mark it as a false positive to close it.</span>
+            </div>
+          </div>
+          {fpState === 'idle' && (
+            <button className="btn-fp-suggest" onClick={() => setFpState('confirm')}>Mark as False Positive</button>
+          )}
+          {fpState === 'confirm' && (
+            <span className="fp-confirm">
+              <span className="fp-confirm-text">Close as false positive?</span>
+              <button className="btn-fp-yes" onClick={handleMarkFalsePositive}>Yes</button>
+              <button className="btn-fp-cancel" onClick={() => setFpState('idle')}>Cancel</button>
+            </span>
+          )}
+          {fpState === 'marking' && (
+            <span className="status-text pending"><span className="spinner" /> Marking…</span>
+          )}
+          {fpState === 'error' && (
+            <span className="status-text error" title={fpError}>✗ Failed</span>
+          )}
+        </div>
+      )}
+
       {showAugment && (
         <AugmentIncidentModal
           incidentId={id}
@@ -294,9 +357,11 @@ export interface IncidentListProps {
   onAction?: (event: ChatterEvent) => void
   onResolved?: () => void
   onReportManual?: () => void
+  onSuggestRule?: (p: ExclusionRuleProposal) => void
+  onMarkFalsePositive?: () => void
 }
 
-export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, onResolved, onReportManual }: IncidentListProps) {
+export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, onResolved, onReportManual, onSuggestRule, onMarkFalsePositive }: IncidentListProps) {
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -375,6 +440,8 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, on
                 analysisCreatedAt: result.createdAt,
                 needsMoreInfo: result.payload?.needsMoreInfo,
                 suggestedResources: result.payload?.suggestedResources,
+                suggestExclusionRule: result.payload?.suggestExclusionRule,
+                suggestFalsePositive: result.payload?.suggestFalsePositive,
               })
               return next
             })
@@ -423,6 +490,8 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, on
           previousRun={priorRuns.get(inc.metadata.name)}
           onResolved={onResolved}
           onResourcesPatched={patchIncidentResources}
+          onSuggestRule={onSuggestRule}
+          onMarkFalsePositive={onMarkFalsePositive}
         />
       ))}
 
@@ -438,6 +507,8 @@ export function IncidentList({ onAnalysisStart, onAnalysisComplete, onAction, on
               previousRun={priorRuns.get(inc.metadata.name)}
               onResolved={onResolved}
               onResourcesPatched={patchIncidentResources}
+              onSuggestRule={onSuggestRule}
+              onMarkFalsePositive={onMarkFalsePositive}
             />
           ))}
         </details>

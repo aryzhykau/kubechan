@@ -66,9 +66,11 @@ func (h *Augment) Augment(w http.ResponseWriter, r *http.Request) {
 		if !existing[k] {
 			existing[k] = true
 			inc.Spec.RelatedResources = append(inc.Spec.RelatedResources, v1alpha1.ResourceRef{
-				Kind:      rr.Kind,
-				Name:      rr.Name,
-				Namespace: rr.Namespace,
+				Kind:           rr.Kind,
+				Name:           rr.Name,
+				Namespace:      rr.Namespace,
+				APIGroup:       rr.APIGroup,
+				EvidenceSlices: rr.EvidenceSlices,
 			})
 		}
 	}

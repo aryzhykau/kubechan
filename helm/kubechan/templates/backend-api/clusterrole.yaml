@@ -44,6 +44,18 @@ rules:
   - apiGroups: ["kubechan.io"]
     resources: ["kubechanstates/status"]
     verbs: ["get", "update", "patch"]
+  # ExclusionRule — backend-api manages full lifecycle
+  - apiGroups: ["kubechan.io"]
+    resources: ["kubechanexclusionrules"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  - apiGroups: ["kubechan.io"]
+    resources: ["kubechanexclusionrules/status"]
+    verbs: ["get", "patch"]
+  # Dynamic CRD resource picker — allow read-only list/get across any installed CRD
+  # so the UI can enumerate arbitrary resources (KEDA, Argo, etc.) as incident evidence.
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

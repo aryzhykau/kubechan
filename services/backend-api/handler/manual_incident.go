@@ -35,9 +35,11 @@ type manualIncidentRequest struct {
 }
 
 type relatedResourceIn struct {
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
+	Kind           string   `json:"kind"`
+	Name           string   `json:"name"`
+	Namespace      string   `json:"namespace"`
+	APIGroup       string   `json:"apiGroup,omitempty"`
+	EvidenceSlices []string `json:"evidenceSlices,omitempty"`
 }
 
 // manualIncidentResponse is returned by POST /api/v1/incidents/manual.
@@ -93,9 +95,11 @@ func (h *ManualIncident) Create(w http.ResponseWriter, r *http.Request) {
 			rrNS = rootNS
 		}
 		relatedRefs = append(relatedRefs, v1alpha1.ResourceRef{
-			Kind:      rr.Kind,
-			Name:      rr.Name,
-			Namespace: rrNS,
+			Kind:           rr.Kind,
+			Name:           rr.Name,
+			Namespace:      rrNS,
+			APIGroup:       rr.APIGroup,
+			EvidenceSlices: rr.EvidenceSlices,
 		})
 	}
 

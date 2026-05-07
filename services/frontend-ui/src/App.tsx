@@ -4,13 +4,15 @@ import { KubeChanSidebar, type KubeChanState } from './KubeChanSidebar'
 import { DiagnosticsPage } from './DiagnosticsPage'
 import { DiagnosticRunDetail } from './DiagnosticRunDetail'
 import { ManualIncidentModal } from './ManualIncidentModal'
+import { ExclusionRuleModal } from './ExclusionRuleModal'
 import { LoginPage } from './LoginPage'
 import { UsersPage } from './UsersPage'
 import { LLMSettingsPage } from './LLMSettingsPage'
 import { AdminSettingsPage } from './AdminSettingsPage'
+import { ExclusionRulesPage } from './ExclusionRulesPage'
 import { pickChatterLine, type ChatterEvent } from './chatter'
 import { useWebSocket, type WSEvent } from './useWebSocket'
-import { api, getToken, clearToken, type CurrentUser } from './api'
+import { api, getToken, clearToken, type CurrentUser, type ExclusionRuleProposal } from './api'
 import type { AnalysisResult } from './api'
 import './app.css'
 
@@ -21,6 +23,7 @@ type View =
   | { type: 'users' }
   | { type: 'llm-settings' }
   | { type: 'admin-settings' }
+  | { type: 'exclusion-rules' }
 
 function App() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null | undefined>(undefined)
@@ -30,6 +33,7 @@ function App() {
   useEffect(() => { kubechanRef.current = kubechan }, [kubechan])
 
   const [showManualModal, setShowManualModal] = useState(false)
+  const [exclusionProposal, setExclusionProposal] = useState<ExclusionRuleProposal | null>(null)
 
   const [moodLevel, setMoodLevel] = useState(0)
   const moodLevelRef = useRef(0)
@@ -129,9 +133,24 @@ function App() {
     setKubechan({ pose: 'thinking', incidentName })
   }, [])
 
+  const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showReaction = useCallback((line: string) => {
+    setKubechan(prev => ({ ...prev, reactionLine: line }))
+    if (reactionTimerRef.current !== null) clearTimeout(reactionTimerRef.current)
+    reactionTimerRef.current = setTimeout(() => {
+      reactionTimerRef.current = null
+      setKubechan(prev => prev.reactionLine === line ? { ...prev, reactionLine: undefined } : prev)
+    }, 4500)
+  }, [])
+
   const handleAnalysisComplete = useCallback((result: AnalysisResult, incidentName: string) => {
     setKubechan({ pose: 'speaking', incidentName, result })
-  }, [])
+    if (result.payload?.suggestExclusionRule) {
+      const line = pickChatterLine('false-alarm', moodLevelRef.current)
+      showReaction(line)
+    }
+  }, [showReaction])
 
   const handleRunResultLoaded = useCallback((result: AnalysisResult | null, runId: string) => {
     if (result) {
@@ -158,17 +177,6 @@ function App() {
     }, 3000)
     setTimeout(() => clearInterval(poll), 5 * 60_000)
   }, [handleAnalysisComplete])
-
-  const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const showReaction = useCallback((line: string) => {
-    setKubechan(prev => ({ ...prev, reactionLine: line }))
-    if (reactionTimerRef.current !== null) clearTimeout(reactionTimerRef.current)
-    reactionTimerRef.current = setTimeout(() => {
-      reactionTimerRef.current = null
-      setKubechan(prev => prev.reactionLine === line ? { ...prev, reactionLine: undefined } : prev)
-    }, 4500)
-  }, [])
 
   const handleIncidentResolved = useCallback(() => {
     const line = pickChatterLine('incident-resolved', moodLevelRef.current)
@@ -265,6 +273,14 @@ function App() {
               Settings
             </button>
           )}
+          {currentUser.role === 'admin' && (
+            <button
+              className={`app-nav-btn${view.type === 'exclusion-rules' ? ' active' : ''}`}
+              onClick={() => setView({ type: 'exclusion-rules' })}
+            >
+              Exclusion Rules
+            </button>
+          )}
           <button
             className={`app-nav-btn${view.type === 'llm-settings' ? ' active' : ''}`}
             onClick={() => setView({ type: 'llm-settings' })}
@@ -288,6 +304,7 @@ function App() {
               onAction={triggerChatter}
               onResolved={handleIncidentResolved}
               onReportManual={() => setShowManualModal(true)}
+              onSuggestRule={setExclusionProposal}
             />
           )}
           {view.type === 'diagnostics' && (
@@ -310,6 +327,9 @@ function App() {
           {view.type === 'admin-settings' && currentUser.role === 'admin' && (
             <AdminSettingsPage />
           )}
+          {view.type === 'exclusion-rules' && currentUser.role === 'admin' && (
+            <ExclusionRulesPage />
+          )}
           {view.type === 'llm-settings' && (
             <LLMSettingsPage />
           )}
@@ -320,6 +340,17 @@ function App() {
         <ManualIncidentModal
           onClose={() => setShowManualModal(false)}
           onCreated={handleManualCreated}
+        />
+      )}
+      {exclusionProposal && (
+        <ExclusionRuleModal
+          open={!!exclusionProposal}
+          proposal={exclusionProposal}
+          onClose={() => setExclusionProposal(null)}
+          onCreated={() => {
+            setExclusionProposal(null)
+            triggerChatter('exclusionRuleCreated')
+          }}
         />
       )}
     </div>

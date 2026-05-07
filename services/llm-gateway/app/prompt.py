@@ -106,7 +106,9 @@ def _build_related_sections(related_resources: list[dict]) -> list[str]:
         res = rr.get("resource", {})
         spec = rr.get("spec") or {}
         kind = res.get("kind", "")
-        section = f"Related resource: {kind}/{res.get('name')}"
+        api_group = res.get("apiGroup", "")
+        kind_label = f"{api_group}/{kind}" if api_group else kind
+        section = f"Related resource: {kind_label}/{res.get('name')}"
 
         if spec:
             if kind == "Ingress":
@@ -158,6 +160,18 @@ def _build_related_sections(related_resources: list[dict]) -> list[str]:
                 for k, v in spec.items():
                     if v is not None:
                         section += f"\n  {k}: {v}"
+            else:
+                # Generic CRD — render spec and status keys returned by the dynamic collector.
+                crd_spec = spec.get("spec") or {}
+                crd_status = spec.get("status") or {}
+                if crd_spec:
+                    section += "\n  spec:"
+                    for k, v in crd_spec.items():
+                        section += f"\n    {k}: {v}"
+                if crd_status:
+                    section += "\n  status:"
+                    for k, v in crd_status.items():
+                        section += f"\n    {k}: {v}"
 
         section += f"\n  events:\n{_fmt_events(rr.get('events', []))}"
         sections.append(section)
@@ -248,6 +262,7 @@ def build_prompt(
     mood_level: int = 0,
     prior_diagnoses: list | None = None,
     user_message: str = "",
+    incident_source: str = "auto",
 ) -> str:
     root = payload.get("rootResource", {})
     root_events = payload.get("rootResourceEvents", [])
@@ -261,6 +276,11 @@ def build_prompt(
     prior_history_note = _build_prior_history_note(prior_diagnoses or [])
     mood_note = _build_mood_note(mood_level)
     reanalysis_note = _build_reanalysis_note(reanalysis_count)
+    incident_source_line = (
+        "INCIDENT SOURCE: This incident was MANUALLY reported by the user."
+        if incident_source == "manual"
+        else "INCIDENT SOURCE: This incident was AUTO-DETECTED by a detector."
+    )
 
     prompt = textwrap.dedent(f"""
         You are KubeChan — a genius Kubernetes SRE with the patience of a saint that has been
@@ -278,6 +298,28 @@ def build_prompt(
         - End the recommendation with a sigh, an eye-roll remark, or a "you're welcome" delivered
           through gritted teeth.
         - Despite all this, the diagnosis and fix must be 100% technically accurate and actionable.
+        - SPECIAL RULE — FALSE ALARM (auto-detected incident): When the evidence shows
+          INTENTIONAL, EXPECTED behaviour (e.g. KEDA scale-to-zero, maintenance drain,
+          CronJob gap) and you will emit suggestExclusionRule, AND the incident was
+          auto-detected by a detector (not manually reported), your openingRant MUST
+          specifically mock the engineer for not having set up a suppression rule BEFORE
+          this happened — e.g. "You mean to tell me KEDA has been doing this on a schedule
+          and you STILL haven't silenced the detector?", "This automation has been running
+          for a while and you only NOW thought to add a rule?", etc. The closingInsult MUST
+          drive home that this was NEVER a real problem and they should have handled it
+          long ago.
+        - SPECIAL RULE — FALSE ALARM (manual incident): When the incident was MANUALLY
+          reported (INCIDENT SOURCE says "manually reported") and the evidence shows
+          INTENTIONAL, EXPECTED behaviour, you MUST NOT emit suggestExclusionRule — a
+          suppression rule would be useless here because no detector will ever fire on
+          something the user typed themselves. Instead, emit `suggestFalsePositive: true`.
+          Your openingRant MUST mock the engineer for personally deciding to open a ticket
+          about something that is working exactly as designed — e.g. "You looked at this
+          with your own eyes, decided it looked broken, and manually filed an incident.
+          About scheduled automation. Doing its job.", or "Congratulations on manually
+          reporting a non-incident. Some people never change."
+          The closingInsult MUST emphasise they wasted KubeChan's time by raising this
+          themselves with their own two hands.
 
         Read ALL provided evidence before forming a conclusion. Treat every signal equally.
         Reconstruct the full causal chain from the root configuration or resource state through
@@ -305,6 +347,7 @@ def build_prompt(
 
         ## Analysis Instructions
 
+        {incident_source_line}
         {reanalysis_note}
         {prior_history_note}
         {mood_note}
@@ -372,13 +415,37 @@ def build_prompt(
           pin the root cause unambiguously (confidence ≥ 0.8).
           When uncertain, asking for more info is always the correct choice.
 
-        - "suggestedResources": array of objects with "kind" and "reason". REQUIRED when
+        - "suggestedResources": array of objects with "kind", "apiGroup", and "reason". REQUIRED when
           needsMoreInfo is true — do NOT leave it empty in that case.
-          List every specific resource kind that would materially help. For each, provide a
-          one-sentence reason explaining exactly what you expect to find and how it would
-          change or confirm the diagnosis.
-          Example: {{"kind": "Ingress", "reason": "Backend service name in the Ingress rules may not match the actual Service name, causing 503 errors."}}
+          List every specific resource kind that would materially help. For each, provide:
+            - "kind": the Kubernetes Kind name (e.g. "ScaledObject", "Ingress")
+            - "apiGroup": the API group (e.g. "keda.sh", "networking.k8s.io"). Use "" for core resources.
+            - "reason": one sentence explaining exactly what you expect to find and how it would change or confirm the diagnosis.
+          Example: {{"kind": "ScaledObject", "apiGroup": "keda.sh", "reason": "KEDA ScaledObject may have scaled the deployment to zero replicas due to an off-hours schedule."}}
           Leave as empty array [] only when needsMoreInfo is false.
+
+        - "suggestFalsePositive": ONLY emit this field as `true` when ALL of the following hold:
+          (1) the incident source is MANUAL ("INCIDENT SOURCE: This incident was MANUALLY reported"),
+          (2) the evidence shows the behaviour is INTENTIONAL and expected (not a real failure).
+          Do NOT emit this for auto-detected incidents — use suggestExclusionRule instead.
+          Omit the field (or set to false) when not applicable.
+
+        - "suggestExclusionRule": ONLY emit this field when you have HIGH CONFIDENCE (≥ 0.85) that
+          the behaviour is INTENTIONAL and operator-configured — not a failure, AND the incident
+          was AUTO-DETECTED (never emit for manual incidents — use suggestFalsePositive instead). Classic cases:
+            • KEDA / HPA scaling a deployment to 0 during off-hours (ScaledObject confirms it)
+            • A maintenance drain or PodDisruptionBudget intentionally evicting pods
+            • A CronJob intentionally leaving no running pods between runs
+          DO NOT suggest a rule for transient failures, misconfigurations, or anything that is
+          genuinely broken. The "reason" must reference the specific evidence that proves intent
+          (e.g. the ScaledObject schedule). Omit the field entirely (null) when not applicable.
+          Shape:
+            {{
+              "reason": "<plain-language explanation of why this is expected behaviour>",
+              "detectors": ["<detector name that fired, e.g. ServiceNoEndpoints>"],
+              "targetResources": [{{"namespace": "<ns>", "kind": "<Kind>", "name": "<name>", "apiGroup": "<group or empty>"}}],
+              "timeWindow": {{"timezone": "<IANA tz>", "periods": [{{"start": "HH:MM", "end": "HH:MM", "days": ["Mon","Tue","Wed","Thu","Fri"]}}]}} or null
+            }}
 
         {{
           "openingRant": "<pure mockery, no technical content>",
@@ -388,7 +455,7 @@ def build_prompt(
           "closingInsult": "<one final humiliating remark>",
           "confidence": <0.0-1.0>,
           "needsMoreInfo": <true|false>,
-          "suggestedResources": [{{"kind": "<Kind>", "reason": "<one sentence>"}}]
+          "suggestedResources": [{{"kind": "<Kind>", "apiGroup": "<apiGroup or empty>", "reason": "<one sentence>"}}],          "suggestFalsePositive": false,          "suggestExclusionRule": null
         }}
     """).strip()
 

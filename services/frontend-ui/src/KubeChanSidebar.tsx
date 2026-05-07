@@ -81,7 +81,15 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
     }
   }, [pose])
 
-  const imgSrc = pose === 'thinking' ? thinkingImg : '/kubechan-idle-1.png'
+  const hasFalseAlarm = pose === 'speaking' && !!result?.payload?.suggestExclusionRule
+  const [falseAlarmImg] = useState(() =>
+    Math.random() < 0.5 ? '/kubechan-facepalm-angry.png' : '/kubechan-facepalm-calm.png'
+  )
+  const imgSrc = pose === 'thinking'
+    ? thinkingImg
+    : hasFalseAlarm
+      ? falseAlarmImg
+      : '/kubechan-idle-1.png'
 
   useEffect(() => {
     if (contentRef.current) contentRef.current.scrollTop = 0

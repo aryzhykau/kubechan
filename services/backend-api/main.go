@@ -120,7 +120,7 @@ func main() {
 	analysis := &handler.Analysis{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	settings := &handler.Settings{DB: database}
 	kubechan := &handler.KubeChan{MoodSyncer: moodSyncer}
-	resources := &handler.Resources{K8s: k8s}
+	resources := &handler.Resources{K8s: k8s, Config: cfg}
 	manualIncident := &handler.ManualIncident{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	augment := &handler.Augment{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	internal := &handler.Internal{
@@ -135,6 +135,7 @@ func main() {
 	authHandler := &handler.Auth{DB: database, Logger: logger}
 	usersHandler := &handler.Users{DB: database}
 	llmSettings := &handler.LLMSettings{DB: database}
+	exclusionRules := &handler.ExclusionRules{K8s: k8s, DefaultNamespace: defaultNS}
 
 	// ── Router ────────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -166,6 +167,7 @@ func main() {
 			r.Post("/incidents/{id}/analyze", analysis.Analyze)
 			r.Post("/incidents/{id}/augment", augment.Augment)
 			r.Post("/incidents/{id}/resolve", incidents.Resolve)
+			r.Post("/incidents/{id}/false-positive", incidents.MarkFalsePositive)
 			r.Get("/incidents/{id}/evidence", analysis.GetEvidence)
 
 			r.Get("/problemcases", problemcases.List)
@@ -184,6 +186,12 @@ func main() {
 
 			r.Get("/namespaces", resources.ListNamespaces)
 			r.Get("/namespaces/{ns}/resources", resources.ListResources)
+			r.Get("/namespaces/{ns}/kinds", resources.ListKinds)
+
+			r.Get("/exclusion-rules", exclusionRules.List)
+			r.Post("/exclusion-rules", exclusionRules.Create)
+			r.Patch("/exclusion-rules/{name}", exclusionRules.SetEnabled)
+			r.Delete("/exclusion-rules/{name}", exclusionRules.Delete)
 
 			r.Get("/kubechan/state", kubechan.GetState)
 			r.Post("/kubechan/poke", kubechan.Poke)

@@ -155,7 +155,50 @@ func (h *Incidents) checkManualIncidentAccess(w http.ResponseWriter, r *http.Req
 	return true
 }
 
-// Resolve handles POST /api/v1/incidents/{id}/resolve
+// MarkFalsePositive handles POST /api/v1/incidents/{id}/false-positive
+// Sets spec.falsePositive=true on a manual incident and resolves it.
+func (h *Incidents) MarkFalsePositive(w http.ResponseWriter, r *http.Request) {
+	ns, name := namespacedName(chi.URLParam(r, "id"), h.DefaultNamespace)
+	inc := &v1alpha1.Incident{}
+	if err := h.K8s.Get(r.Context(), client.ObjectKey{Namespace: ns, Name: name}, inc); err != nil {
+		if apierrors.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "incident not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if inc.Spec.Source != "manual" {
+		writeError(w, http.StatusBadRequest, "only manual incidents can be marked as false positive")
+		return
+	}
+
+	if !h.checkManualIncidentAccess(w, r, name) {
+		return
+	}
+
+	// Patch spec.falsePositive = true.
+	base := inc.DeepCopy()
+	inc.Spec.FalsePositive = true
+	if err := h.K8s.Patch(r.Context(), inc, client.MergeFrom(base)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Also resolve the incident status if still open.
+	if inc.Status.State != v1alpha1.IncidentStateResolved {
+		now := metav1.NewTime(time.Now().UTC())
+		inc.Status.State = v1alpha1.IncidentStateResolved
+		inc.Status.ResolvedAt = &now
+		if err := h.K8s.Status().Update(r.Context(), inc); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, inc)
+}
 // Marks the Incident CRD status as resolved. Only valid for open incidents.
 func (h *Incidents) Resolve(w http.ResponseWriter, r *http.Request) {
 	ns, name := namespacedName(chi.URLParam(r, "id"), h.DefaultNamespace)

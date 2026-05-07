@@ -9,15 +9,9 @@ import {
   Typography,
   Box,
   Stack,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Chip,
   CircularProgress,
   Alert,
-  ToggleButtonGroup,
-  ToggleButton,
   Fade,
   ThemeProvider,
   createTheme,
@@ -25,9 +19,8 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import AddIcon from '@mui/icons-material/Add'
 import HelpIcon from '@mui/icons-material/Help'
-import { api, type SuggestedResource, type ResourceItem } from './api'
-
-const RELATED_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet', 'Pod', 'Job', 'Service', 'Ingress', 'PersistentVolumeClaim', 'ConfigMap'] as const
+import { api, type SuggestedResource } from './api'
+import { ResourcePicker, type ResourceEntry } from './ResourcePicker'
 
 const modalTheme = createTheme({
   palette: {
@@ -91,14 +84,14 @@ const modalTheme = createTheme({
   },
 })
 
-interface RelatedEntry { id: number; namespace: string; kind: string; name: string }
+interface RelatedEntry { id: number; namespace: string; kind: string; apiGroup: string; name: string; evidenceSlices: string[] }
 
 export interface AugmentIncidentModalProps {
   incidentId: string
   defaultNamespace?: string
   suggestions: SuggestedResource[]
   onClose: () => void
-  onAugmented: (diagnosticRunId: string, addedResources: Array<{ kind: string; name: string; namespace: string }>) => void
+  onAugmented: (diagnosticRunId: string, addedResources: Array<{ kind: string; name: string; namespace: string; apiGroup?: string }>) => void
 }
 
 let _rowId = 100
@@ -108,43 +101,23 @@ export function AugmentIncidentModal({
 }: AugmentIncidentModalProps) {
   const [namespaces, setNamespaces] = useState<string[]>([])
   const [loadingNS, setLoadingNS] = useState(true)
-  const [ns, setNs] = useState(defaultNamespace)
 
-  const [pendingKind, setPendingKind] = useState('')
-  const [pendingName, setPendingName] = useState('')
-  const [pendingNameOptions, setPendingNameOptions] = useState<ResourceItem[]>([])
-  const [loadingNames, setLoadingNames] = useState(false)
-
+  const [pendingEntry, setPendingEntry] = useState<ResourceEntry | null>(null)
   const [added, setAdded] = useState<RelatedEntry[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   useEffect(() => {
     api.listNamespaces()
-      .then(list => {
-        setNamespaces(list)
-        if (!defaultNamespace && list.length) setNs(list[0])
-      })
+      .then(list => setNamespaces(list))
       .catch(() => {})
       .finally(() => setLoadingNS(false))
   }, [defaultNamespace])
 
-  useEffect(() => {
-    if (!ns || !pendingKind) { setPendingNameOptions([]); setPendingName(''); return }
-    setLoadingNames(true)
-    setPendingName('')
-    api.listResources(ns, pendingKind)
-      .then(setPendingNameOptions)
-      .catch(() => setPendingNameOptions([]))
-      .finally(() => setLoadingNames(false))
-  }, [ns, pendingKind])
-
   function commitResource() {
-    if (!pendingKind || !pendingName || added.length >= 5) return
-    setAdded(prev => [...prev, { id: ++_rowId, namespace: ns, kind: pendingKind, name: pendingName }])
-    setPendingKind('')
-    setPendingName('')
-    setPendingNameOptions([])
+    if (!pendingEntry || added.length >= 5) return
+    setAdded(prev => [...prev, { id: ++_rowId, ...pendingEntry }])
+    setPendingEntry(null)
   }
 
   async function handleSubmit() {
@@ -152,7 +125,11 @@ export function AugmentIncidentModal({
     setSubmitting(true)
     setSubmitError(null)
     try {
-      const relatedResources = added.map(r => ({ kind: r.kind, name: r.name, namespace: r.namespace }))
+      const relatedResources = added.map(r => ({
+        kind: r.kind, name: r.name, namespace: r.namespace,
+        apiGroup: r.apiGroup || undefined,
+        evidenceSlices: r.evidenceSlices,
+      }))
       const res = await api.augmentIncident(incidentId, relatedResources)
       onAugmented(res.diagnosticRunId, relatedResources)
     } catch (e: unknown) {
@@ -161,7 +138,7 @@ export function AugmentIncidentModal({
     }
   }
 
-  const canAdd = !!pendingKind && !!pendingName && added.length < 5
+  const canAdd = !!pendingEntry && added.length < 5
 
   return (
     <ThemeProvider theme={modalTheme}>
@@ -225,66 +202,35 @@ export function AugmentIncidentModal({
             </Box>
           )}
 
-          {/* Namespace picker */}
-          <FormControl size="small" fullWidth>
-            <InputLabel>Namespace</InputLabel>
-            <Select
-              value={ns}
-              label="Namespace"
-              onChange={e => setNs(e.target.value)}
-              disabled={loadingNS}
-              endAdornment={loadingNS ? <CircularProgress size={13} sx={{ mr: 1.5, color: 'text.disabled' }} /> : null}
-            >
-              {namespaces.map(n => <MenuItem key={n} value={n}>{n}</MenuItem>)}
-            </Select>
-          </FormControl>
-
-          {/* Kind picker */}
-          <Box>
-            <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mb: 1, fontWeight: 600, letterSpacing: '0.04em' }}>
-              Resource kind
-            </Typography>
-            <ToggleButtonGroup
-              exclusive value={pendingKind}
-              onChange={(_, v) => { if (v) setPendingKind(v) }}
-              size="small"
-              sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.6, '& .MuiToggleButtonGroup-grouped': { margin: 0 } }}
-            >
-              {RELATED_KINDS.map(k => (
-                <ToggleButton key={k} value={k}>{k}</ToggleButton>
-              ))}
-            </ToggleButtonGroup>
-          </Box>
-
-          {/* Name picker */}
-          {pendingKind && (
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <FormControl size="small" sx={{ flex: 1 }}>
-                <InputLabel>Name</InputLabel>
-                <Select
-                  value={pendingName}
-                  label="Name"
-                  onChange={e => setPendingName(e.target.value)}
-                  disabled={loadingNames}
-                  endAdornment={loadingNames ? <CircularProgress size={13} sx={{ mr: 1.5, color: 'text.disabled' }} /> : null}
+          {/* Resource picker */}
+          {loadingNS ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+              <CircularProgress size={20} />
+            </Box>
+          ) : (
+            <Box>
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'text.secondary', mb: 1 }}>
+                Add resource
+              </Typography>
+              <ResourcePicker
+                value={pendingEntry}
+                onChange={setPendingEntry}
+                namespaces={namespaces}
+                defaultNamespace={defaultNamespace}
+              />
+              <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={!canAdd}
+                  onClick={commitResource}
+                  startIcon={<AddIcon />}
+                  sx={{ borderColor: '#2a2a42', color: 'text.secondary', '&:hover': { borderColor: '#6366f1', color: '#818cf8' } }}
                 >
-                  {pendingNameOptions.map(o => <MenuItem key={o.name} value={o.name}>{o.name}</MenuItem>)}
-                  {!loadingNames && pendingNameOptions.length === 0 && (
-                    <MenuItem value="" disabled>No {pendingKind}s found</MenuItem>
-                  )}
-                </Select>
-              </FormControl>
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={!canAdd}
-                onClick={commitResource}
-                startIcon={<AddIcon />}
-                sx={{ whiteSpace: 'nowrap', borderColor: '#2a2a42', color: 'text.secondary', '&:hover': { borderColor: '#6366f1', color: '#818cf8' } }}
-              >
-                Add
-              </Button>
-            </Stack>
+                  Add
+                </Button>
+              </Box>
+            </Box>
           )}
 
           {/* Added chips */}
@@ -293,7 +239,7 @@ export function AugmentIncidentModal({
               {added.map(r => (
                 <Chip
                   key={r.id}
-                  label={`${r.kind}/${r.name}`}
+                  label={`${r.apiGroup ? r.apiGroup + '/' : ''}${r.kind}/${r.name}`}
                   size="small"
                   onDelete={() => setAdded(prev => prev.filter(x => x.id !== r.id))}
                   sx={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}
