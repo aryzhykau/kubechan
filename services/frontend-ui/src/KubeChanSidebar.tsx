@@ -3,8 +3,8 @@ import type { AnalysisResult } from './api'
 
 const THINKING_IMAGES = [
   '/kubechan-looking.png',
-  '/kubechan-looking-1.png',
   '/kubechan-looking-2.png',
+  '/kubechan-looking-3.png',
 ]
 
 const THINKING_PHRASES = [
