@@ -33,7 +33,7 @@ func (h *Settings) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := map[string]any{}
 	for rows.Next() {
