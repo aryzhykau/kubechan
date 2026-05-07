@@ -1,6 +1,22 @@
 import { useRef, useEffect, useState } from 'react'
 import type { AnalysisResult } from './api'
 
+const THINKING_IMAGES = [
+  '/kubechan-looking.png',
+  '/kubechan-looking-1.png',
+  '/kubechan-looking-2.png',
+]
+
+const THINKING_PHRASES = [
+  "H-hmph… give me a second, I'm checking your dumb cluster…",
+  "Fine, fine, I'm looking into it. Don't rush me!",
+  "Y-you're lucky I'm even helping… scanning now…",
+  "Ugh, another mess to clean up. Just give me a moment…",
+  "I'm not doing this because I care! I'm just… running diagnostics…",
+  "Don't stare at me while I'm working, it's distracting!",
+  "This better not be something obvious you could've googled yourself…",
+]
+
 export type KubeChanPose = 'idle' | 'thinking' | 'speaking' | 'chatter'
 
 export interface KubeChanState {
@@ -24,10 +40,48 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
   onRate?: (resultId: string, rating: 'up' | 'down', confidence: number) => void
 }) {
   const { pose, result, incidentName, reactionLine } = state
-  const imgSrc = pose === 'thinking' ? '/kubechan-thinking.png' : '/kubechan-idle.png'
   const contentRef = useRef<HTMLDivElement>(null)
   const [shaking, setShaking] = useState(false)
   const [reacting, setReacting] = useState<'up' | 'down' | null>(null)
+  const [thinkingImg, setThinkingImg] = useState(THINKING_IMAGES[0])
+  const [thinkingPhrase, setThinkingPhrase] = useState(THINKING_PHRASES[0])
+  const [imgVisible, setImgVisible] = useState(true)
+
+  useEffect(() => {
+    if (pose !== 'thinking') {
+      setImgVisible(true)
+      return
+    }
+    setThinkingImg(THINKING_IMAGES[Math.floor(Math.random() * THINKING_IMAGES.length)])
+    setThinkingPhrase(THINKING_PHRASES[Math.floor(Math.random() * THINKING_PHRASES.length)])
+
+    let swapTimer: ReturnType<typeof setTimeout> | null = null
+    const imgInterval = setInterval(() => {
+      setImgVisible(false)
+      swapTimer = setTimeout(() => {
+        setThinkingImg(prev => {
+          const others = THINKING_IMAGES.filter(i => i !== prev)
+          return others[Math.floor(Math.random() * others.length)]
+        })
+        setImgVisible(true)
+      }, 200)
+    }, 2500)
+
+    const phraseInterval = setInterval(() => {
+      setThinkingPhrase(prev => {
+        const others = THINKING_PHRASES.filter(p => p !== prev)
+        return others[Math.floor(Math.random() * others.length)]
+      })
+    }, 5000)
+
+    return () => {
+      clearInterval(imgInterval)
+      clearInterval(phraseInterval)
+      if (swapTimer) clearTimeout(swapTimer)
+    }
+  }, [pose])
+
+  const imgSrc = pose === 'thinking' ? thinkingImg : '/kubechan-idle-1.png'
 
   useEffect(() => {
     if (contentRef.current) contentRef.current.scrollTop = 0
@@ -67,7 +121,9 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
                 {pose === 'thinking' && (
                   <span className="speech-thinking">
                     <span className="spinner" />
-                    H-hmph… give me a second, I'm checking your dumb cluster…
+                    <span key={thinkingPhrase} className="speech-thinking-text">
+                      {thinkingPhrase}
+                    </span>
                   </span>
                 )}
                 {pose === 'chatter' && (
@@ -159,7 +215,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
             reacting === 'down' ? 'kubechan-react-down' : '',
           ].filter(Boolean).join(' ')}
           onClick={handlePoke}
-          style={{ cursor: 'pointer' }}
+          style={{ cursor: 'pointer', opacity: imgVisible ? 1 : 0, transition: 'opacity 0.2s ease' }}
         />
         <div className={`kubechan-mood mood-${moodLevel}`}>
           {moodLevel === 0 && <span>· calm</span>}

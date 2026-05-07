@@ -23,7 +23,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
 .app { display: flex; flex-direction: column; min-height: 100vh; }
-
+.app-logo { width: 32px; height: 32px; object-fit: contain; object-position: center; }
 .app-header {
   display: flex;
   align-items: center;
@@ -668,6 +668,13 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   display: flex;
   align-items: center;
   gap: 0.45rem;
+}
+@keyframes thinking-phrase-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.speech-thinking-text {
+  animation: thinking-phrase-in 0.4s ease;
 }
 .speech-chatter {
   font-size: 0.83rem;
