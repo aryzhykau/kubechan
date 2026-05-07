@@ -11,7 +11,7 @@ clusterWatcher:
   enabled: true
   replicaCount: 1
   image:
-    repository: kubechan/cluster-watcher
+    repository: ghcr.io/aryzhykau/kubechan-cluster-watcher
     tag: ""  # defaults to .Chart.AppVersion
     pullPolicy: IfNotPresent
 
@@ -24,6 +24,9 @@ clusterWatcher:
 
   # Seconds a Deployment must have unavailable replicas before triggering DeploymentUnavailable detector.
   unavailableThresholdSecs: 300
+
+  # Kubernetes namespace this watcher manages (defaults to the release namespace).
+  controlNamespace: ""
 
   # URL of the backend-api service for live threshold polling (leave empty to use env-var values only).
   backendApiUrl: ""
@@ -43,7 +46,7 @@ diagnosticsWorker:
   enabled: true
   replicaCount: 1
   image:
-    repository: kubechan/diagnostics-worker
+    repository: ghcr.io/aryzhykau/kubechan-diagnostics-worker
     tag: ""
     pullPolicy: IfNotPresent
 
@@ -68,16 +71,19 @@ backendApi:
   enabled: true
   replicaCount: 1  # Must remain 1 — SQLite single-writer constraint
   image:
-    repository: kubechan/backend-api
+    repository: ghcr.io/aryzhykau/kubechan-backend-api
     tag: ""
     pullPolicy: IfNotPresent
 
   service:
     type: ClusterIP
     port: 8080
+    # Set to a specific port number when type is NodePort (optional).
+    nodePort: null
 
   storage:
-    # hostPath: ""  # Set to a local path (dev only) to skip PVC and use a host directory instead.
+    # Set to a local path (dev only) to skip PVC and use a host directory instead.
+    hostPath: ""
     pvc:
       # Size of the PVC for SQLite data. Increase for large clusters or long retention.
       size: 5Gi
@@ -106,12 +112,11 @@ llmGateway:
   enabled: true
   replicaCount: 1
   image:
-    repository: kubechan/llm-gateway
+    repository: ghcr.io/aryzhykau/kubechan-llm-gateway
     tag: ""
     pullPolicy: IfNotPresent
 
   service:
-    type: ClusterIP
     port: 8000
 
   # On EKS, set roleArn to attach an IAM role via IRSA instead of per-user credentials.
@@ -139,7 +144,7 @@ frontendUi:
   enabled: true
   replicaCount: 1
   image:
-    repository: kubechan/frontend-ui
+    repository: ghcr.io/aryzhykau/kubechan-frontend-ui
     tag: ""
     pullPolicy: IfNotPresent
 
@@ -155,6 +160,8 @@ frontendUi:
   service:
     type: ClusterIP
     port: 8080
+    # Set to a specific port number when type is NodePort (optional).
+    nodePort: null
 
   ingress:
     enabled: false
@@ -193,20 +200,4 @@ auth:
   # JWT token lifetime in hours.
   jwtTtlHours: 24
 
-# ---------------------------------------------------------------------------
-# Persona — tsundere assistant layer
-# ---------------------------------------------------------------------------
-persona:
-  # Enable persona-styled messages in the UI and analysis output.
-  enabled: false
-  # Enable idle chatter when no critical problems are active.
-  idleChatter: false
-  # Seconds between idle chatter messages (client-side timer).
-  idleIntervalSecs: 300
 
-# ---------------------------------------------------------------------------
-# Network Policy (optional hardening)
-# ---------------------------------------------------------------------------
-networkPolicy:
-  # Enable NetworkPolicy resources to restrict inter-service traffic.
-  enabled: false

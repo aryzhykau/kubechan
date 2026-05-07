@@ -1,0 +1,23 @@
+KubeChan has been installed successfully!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Admin password
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The admin password is stored in a Kubernetes Secret.
+Retrieve it with:
+
+  kubectl get secret {{ .Values.auth.adminSecretName }} \
+    -n {{ .Release.Namespace }} \
+    -o jsonpath='{.data.password}' | base64 -d && echo
+
+Default login: admin / <password from above>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  JWT secret (required before first login)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+If you have not already created the JWT signing secret, do so now:
+
+  kubectl create secret generic {{ .Values.auth.jwtSecretName }} \
+    -n {{ .Release.Namespace }} \
+    --from-literal=secret=$(openssl rand -base64 48)
+
