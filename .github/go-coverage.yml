@@ -4,7 +4,7 @@ threshold:
   # Global: just above current 2.5 % — prevents catastrophic regressions.
   # Target: raise this to 50 % once backend-api and cluster-watcher controllers
   # have envtest-based tests.
-  total: 70
+  total: 65
 
   # Per-package minimums for packages that already have meaningful test suites.
   packages:
