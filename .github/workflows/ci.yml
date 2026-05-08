@@ -61,6 +61,8 @@ jobs:
   lint-test-python:
     name: Lint & Test Python
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     defaults:
       run:
         working-directory: services/llm-gateway
