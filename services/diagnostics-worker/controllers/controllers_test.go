@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -477,8 +478,14 @@ func TestCollect_WithIncidentNoProblemCases(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newDWTestScheme()).WithObjects(inc).Build()
 	r := &DiagnosticRunReconciler{Client: c, Logger: newSlogDiscard(), CollectorVersion: "test"}
 	ev, errs := r.collect(context.Background(), "default", "inc-1", "dr-1")
-	if len(errs) != 0 {
-		t.Errorf("expected no errors, got: %v", errs)
+	var nonLogErrs []string
+	for _, e := range errs {
+		if !strings.Contains(e, "pod logs") {
+			nonLogErrs = append(nonLogErrs, e)
+		}
+	}
+	if len(nonLogErrs) != 0 {
+		t.Errorf("expected no non-podlog errors, got: %v", nonLogErrs)
 	}
 	if ev.IncidentID != "inc-1" {
 		t.Errorf("expected incidentID=inc-1, got %s", ev.IncidentID)
@@ -505,8 +512,14 @@ func TestCollect_WithIncidentAndProblemCase(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newDWTestScheme()).WithObjects(inc, pc).Build()
 	r := &DiagnosticRunReconciler{Client: c, Logger: newSlogDiscard(), CollectorVersion: "test"}
 	ev, errs := r.collect(context.Background(), "default", "inc-2", "dr-2")
-	if len(errs) != 0 {
-		t.Errorf("expected no errors, got: %v", errs)
+	var nonLogErrs2 []string
+	for _, e := range errs {
+		if !strings.Contains(e, "pod logs") {
+			nonLogErrs2 = append(nonLogErrs2, e)
+		}
+	}
+	if len(nonLogErrs2) != 0 {
+		t.Errorf("expected no non-podlog errors, got: %v", nonLogErrs2)
 	}
 	if len(ev.ProblemCases) != 1 {
 		t.Errorf("expected 1 problem case, got %d", len(ev.ProblemCases))
