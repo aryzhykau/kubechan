@@ -1,0 +1,561 @@
+
+=== DIRECTORY TREE (max depth 3, source files only) ===
+.badges
+.badges/2
+.badges/2/merge
+.badges/2/merge/coverage.svg
+.badges/main
+.badges/main/coverage.svg
+.data
+.github
+.github/agents
+.github/agents/go-test-writer.agent.md
+.github/agents/k8s-controller.agent.md
+.github/agents/planner.agent.md
+.github/go-coverage.yml
+.github/go.intructions.md
+.github/skills
+.github/skills/acquire-codebase-knowledge
+.github/skills/acquire-codebase-knowledge/SKILL.md
+.github/skills/acquire-codebase-knowledge/assets
+.github/skills/acquire-codebase-knowledge/references
+.github/skills/acquire-codebase-knowledge/scripts
+.github/skills/create-readme
+.github/skills/create-readme/SKILL.md
+.github/skills/documentation-writer
+.github/skills/documentation-writer/SKILL.md
+.github/skills/review-and-refactor
+.github/skills/review-and-refactor/SKILL.md
+.github/workflows
+.github/workflows/ci.yml
+.github/workflows/release.yml
+.gitignore
+CONTRIBUTING.md
+LICENSE
+Makefile
+README.md
+Tiltfile
+api
+api/v1alpha1
+api/v1alpha1/diagnosticrun_types.go
+api/v1alpha1/doc.go
+api/v1alpha1/exclusionrule_types.go
+api/v1alpha1/groupversion_info.go
+api/v1alpha1/incident_types.go
+api/v1alpha1/kubechanstate_types.go
+api/v1alpha1/problemcase_types.go
+api/v1alpha1/types_test.go
+api/v1alpha1/zz_generated.deepcopy.go
+collector.out
+cover_handler.out
+coverage.out
+docs
+docs/codebase
+docs/codebase/.codebase-scan.txt
+docs/plans
+docs/plans/db-architecture-design.md
+docs/plans/phase-0-foundation.md
+docs/plans/phase-1-cluster-watcher.md
+docs/plans/phase-2a-diagnostics-worker.md
+docs/plans/phase-2b-backend-api-core.md
+docs/plans/phase-3a-llm-gateway.md
+docs/plans/phase-3b-backend-api-analysis.md
+docs/plans/phase-4-frontend-ui.md
+docs/plans/phase-5-hardening.md
+docs/plans/phase-6-user-auth.md
+docs/plans/phase-7-exclusion-rules-and-smart-evidence.md
+docs/plans/phase-manual-incident.md
+docs/project-description.md
+full-plan.md
+go.mod
+go.sum
+hack
+hack/boilerplate.go.txt
+hack/demo-keda-off-hours.yaml
+hack/demo-manual-incident.yaml
+hack/hooks
+hack/hooks/pre-commit
+hack/test-crasher-configmap.yaml
+hack/test-crasher-db.yaml
+hack/test-crasher-probe.yaml
+hack/test-crasher-pvc.yaml
+handler.out
+helm
+helm/kubechan
+helm/kubechan/Chart.yaml
+helm/kubechan/crds
+helm/kubechan/crds/kubechan.io_diagnosticruns.yaml
+helm/kubechan/crds/kubechan.io_incidents.yaml
+helm/kubechan/crds/kubechan.io_kubechanexclusionrules.yaml
+helm/kubechan/crds/kubechan.io_kubechanstates.yaml
+helm/kubechan/crds/kubechan.io_problemcases.yaml
+helm/kubechan/templates
+helm/kubechan/templates/NOTES.txt
+helm/kubechan/templates/_helpers.tpl
+helm/kubechan/templates/backend-api
+helm/kubechan/templates/cluster-watcher
+helm/kubechan/templates/diagnostics-worker
+helm/kubechan/templates/frontend-ui
+helm/kubechan/templates/llm-gateway
+helm/kubechan/values-dev.yaml
+helm/kubechan/values.yaml
+services
+services/backend-api
+services/backend-api/Dockerfile
+services/backend-api/db
+services/backend-api/db/db.go
+services/backend-api/db/db_test.go
+services/backend-api/db/migrations
+services/backend-api/db/pruner.go
+services/backend-api/handler
+services/backend-api/handler/analysis.go
+services/backend-api/handler/analysis_test.go
+services/backend-api/handler/augment.go
+services/backend-api/handler/augment_test.go
+services/backend-api/handler/auth.go
+services/backend-api/handler/auth2_test.go
+services/backend-api/handler/diagnosticruns.go
+services/backend-api/handler/diagnosticruns_test.go
+services/backend-api/handler/exclusion_rules.go
+services/backend-api/handler/exclusion_rules_test.go
+services/backend-api/handler/handler2_test.go
+services/backend-api/handler/handler_test.go
+services/backend-api/handler/helpers.go
+services/backend-api/handler/incidents.go
+services/backend-api/handler/incidents_test.go
+services/backend-api/handler/internal.go
+services/backend-api/handler/internal2_test.go
+services/backend-api/handler/kubechan.go
+services/backend-api/handler/kubechan_test.go
+services/backend-api/handler/llm_models.go
+services/backend-api/handler/llm_models_test.go
+services/backend-api/handler/llm_settings.go
+services/backend-api/handler/llm_settings_test.go
+services/backend-api/handler/manual_incident.go
+services/backend-api/handler/manual_incident_test.go
+services/backend-api/handler/problemcases.go
+services/backend-api/handler/resources.go
+services/backend-api/handler/resources_test.go
+services/backend-api/handler/settings.go
+services/backend-api/handler/settings_test.go
+services/backend-api/k8s
+services/backend-api/k8s/client.go
+services/backend-api/k8s/handlers.go
+services/backend-api/k8s/informer.go
+services/backend-api/k8s/k8s_test.go
+services/backend-api/k8s/moodsyncer.go
+services/backend-api/main.go
+services/backend-api/startup
+services/backend-api/startup/admin_bootstrap.go
+services/backend-api/startup/recovery.go
+services/backend-api/startup/startup_test.go
+services/backend-api/ws
+services/backend-api/ws/client.go
+services/backend-api/ws/events.go
+services/backend-api/ws/hub.go
+services/backend-api/ws/ws_test.go
+services/cluster-watcher
+services/cluster-watcher/Dockerfile
+services/cluster-watcher/controllers
+services/cluster-watcher/controllers/controllers_test.go
+services/cluster-watcher/controllers/correlation_reconciler.go
+services/cluster-watcher/controllers/deployment_reconciler.go
+services/cluster-watcher/controllers/event_reconciler.go
+services/cluster-watcher/controllers/exclusionrule_reconciler.go
+services/cluster-watcher/controllers/helpers.go
+services/cluster-watcher/controllers/node_reconciler.go
+services/cluster-watcher/controllers/pod_reconciler.go
+services/cluster-watcher/controllers/problemcase_reconciler.go
+services/cluster-watcher/controllers/service_reconciler.go
+services/cluster-watcher/debounce
+services/cluster-watcher/debounce/debouncer.go
+services/cluster-watcher/debounce/debouncer_test.go
+services/cluster-watcher/detector
+services/cluster-watcher/detector/crashloopbackoff.go
+services/cluster-watcher/detector/crashloopbackoff_test.go
+services/cluster-watcher/detector/deploymentunavailable.go
+services/cluster-watcher/detector/deploymentunavailable_test.go
+services/cluster-watcher/detector/imagepullbackoff.go
+services/cluster-watcher/detector/imagepullbackoff_test.go
+services/cluster-watcher/detector/interface.go
+services/cluster-watcher/detector/names_test.go
+services/cluster-watcher/detector/pendingtoolong.go
+services/cluster-watcher/detector/pendingtoolong_test.go
+services/cluster-watcher/detector/servicenoendpoints.go
+services/cluster-watcher/detector/servicenoendpoints_test.go
+services/cluster-watcher/exclusion
+services/cluster-watcher/exclusion/matcher.go
+services/cluster-watcher/exclusion/matcher_test.go
+services/cluster-watcher/main.go
+services/cluster-watcher/problemcase
+services/cluster-watcher/problemcase/lifecycle.go
+services/cluster-watcher/problemcase/lifecycle_test.go
+services/cluster-watcher/problemcase/lookup.go
+services/cluster-watcher/problemcase/lookup_test.go
+services/cluster-watcher/watcherconfig
+services/cluster-watcher/watcherconfig/config.go
+services/cluster-watcher/watcherconfig/config_test.go
+services/diagnostics-worker
+services/diagnostics-worker/Dockerfile
+services/diagnostics-worker/collector
+services/diagnostics-worker/collector/types.go
+services/diagnostics-worker/collector/types_test.go
+
+=== STACK DETECTION (manifest files) ===
+
+--- Makefile ---
+.PHONY: generate generate-objects generate-crds dev-up dev-down lint lint-go lint-python test test-go test-python build build-go build-python build-frontend e2e e2e-clean
+
+# ─── Variables ────────────────────────────────────────────────────────────────
+
+# Pinned controller-gen version. Run 'make install-tools' once to install it.
+CONTROLLER_GEN_VERSION := v0.21.0
+
+# Prefer locally installed controller-gen; fall back to 'go run' for CI.
+ifeq (, $(shell which controller-gen))
+CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
+else
+CONTROLLER_GEN := controller-gen
+endif
+
+# ─── Code generation ─────────────────────────────────────────────────────────
+
+## generate: Run all code generation (DeepCopy + CRD YAMLs)
+generate: generate-objects generate-crds
+
+## generate-objects: Generate DeepCopy methods via controller-gen
+generate-objects:
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
+
+## generate-crds: Generate CRD YAMLs via controller-gen
+generate-crds:
+	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=helm/kubechan/crds/
+
+# ─── Local dev ───────────────────────────────────────────────────────────────
+
+## dev-up: Apply CRDs and start Tilt
+dev-up:
+	kubectl config use-context docker-desktop
+	kubectl create namespace kubechan --dry-run=client -o yaml | kubectl apply -f -
+	kubectl apply -f helm/kubechan/crds/ --server-side
+	tilt up
+
+## dev-down: Stop Tilt
+dev-down:
+	tilt down
+
+# ─── Linting ─────────────────────────────────────────────────────────────────
+
+## lint: Run all linters
+lint: lint-go lint-python
+
+## lint-go: Run golangci-lint on all Go packages
+lint-go:
+	golangci-lint run ./...
+
+## lint-python: Run pyright on llm-gateway
+lint-python:
+	cd services/llm-gateway && pyright .
+
+# ─── Testing ─────────────────────────────────────────────────────────────────
+
+## test: Run all unit tests
+test: test-go test-python
+
+## test-go: Run Go unit tests
+test-go:
+	go test ./...
+
+## test-python: Run Python unit tests for llm-gateway
+test-python:
+	cd services/llm-gateway && python -m pytest -v
+
+# ─── Build (local verification) ──────────────────────────────────────────────
+
+## build: Build all services locally
+build: build-go build-python build-frontend
+
+## build-go: Compile all Go services
+build-go:
+	go build ./services/cluster-watcher/
+	go build ./services/diagnostics-worker/
+	go build ./services/backend-api/
+
+## build-python: Install llm-gateway dependencies
+build-python:
+	pip install -r services/llm-gateway/requirements.txt
+
+[TRUNCATED] Showing first 80 of 119 lines.
+--- go.mod ---
+module github.com/org/kubechan
+
+go 1.26.2
+
+require (
+	github.com/go-chi/chi/v5 v5.2.5
+	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
+	golang.org/x/crypto v0.50.0
+	k8s.io/api v0.32.3
+	k8s.io/apimachinery v0.32.3
+	k8s.io/client-go v0.32.3
+	modernc.org/sqlite v1.50.0
+	sigs.k8s.io/controller-runtime v0.20.4
+)
+
+require (
+	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
+	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
+	github.com/fsnotify/fsnotify v1.7.0 // indirect
+	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
+	github.com/go-logr/logr v1.4.3 // indirect
+	github.com/go-logr/zapr v1.3.0 // indirect
+	github.com/go-openapi/jsonpointer v0.21.0 // indirect
+	github.com/go-openapi/jsonreference v0.20.2 // indirect
+	github.com/go-openapi/swag v0.23.0 // indirect
+	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/google/btree v1.1.3 // indirect
+	github.com/google/gnostic-models v0.6.8 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
+	github.com/google/gofuzz v1.2.0 // indirect
+	github.com/josharian/intern v1.0.0 // indirect
+	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
+	github.com/prometheus/client_golang v1.19.1 // indirect
+	github.com/prometheus/client_model v0.6.1 // indirect
+	github.com/prometheus/common v0.55.0 // indirect
+	github.com/prometheus/procfs v0.15.1 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
+	go.uber.org/zap v1.27.0 // indirect
+	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/oauth2 v0.30.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/term v0.42.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/time v0.12.0 // indirect
+	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
+	google.golang.org/protobuf v1.36.7 // indirect
+	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
+	gopkg.in/inf.v0 v0.9.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+	k8s.io/apiextensions-apiserver v0.32.1 // indirect
+	k8s.io/klog/v2 v2.130.1 // indirect
+	k8s.io/kube-openapi v0.0.0-20241105132330-32ad38e42d3f // indirect
+	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect
+	modernc.org/libc v1.72.0 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
+	sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 // indirect
+	sigs.k8s.io/structured-merge-diff/v4 v4.4.2 // indirect
+	sigs.k8s.io/yaml v1.4.0 // indirect
+)
+
+--- go.sum ---
+github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
+github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
+github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
+github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
+github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
+github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
+github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
+github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=
+github.com/emicklei/go-restful/v3 v3.11.0/go.mod h1:6n3XBCmQQb25CM2LCACGz8ukIrRry+4bhvbpWn3mrbc=
+github.com/evanphx/json-patch v0.5.2 h1:xVCHIVMUu1wtM/VkR9jVZ45N3FhZfYMMYGorLCR8P3k=
+github.com/evanphx/json-patch v0.5.2/go.mod h1:ZWS5hhDbVDyob71nXKNL0+PWn6ToqBHMikGIFbs31qQ=
+github.com/evanphx/json-patch/v5 v5.9.11 h1:/8HVnzMq13/3x9TPvjG08wUGqBTmZBsCWzjTM0wiaDU=
+github.com/evanphx/json-patch/v5 v5.9.11/go.mod h1:3j+LviiESTElxA4p3EMKAB9HXj3/XEtnUf6OZxqIQTM=
+github.com/fsnotify/fsnotify v1.7.0 h1:8JEhPFa5W2WU7YfeZzPNqzMP6Lwt7L2715Ggo0nosvA=
+github.com/fsnotify/fsnotify v1.7.0/go.mod h1:40Bi/Hjc2AVfZrqy+aj+yEI+/bRxZnMJyTJwOpGvigM=
+github.com/fxamacker/cbor/v2 v2.7.0 h1:iM5WgngdRBanHcxugY4JySA0nk1wZorNOpTgCMedv5E=
+github.com/fxamacker/cbor/v2 v2.7.0/go.mod h1:pxXPTn3joSm21Gbwsv0w9OSA2y1HFR9qXEeXQVeNoDQ=
+github.com/go-chi/chi/v5 v5.2.5 h1:Eg4myHZBjyvJmAFjFvWgrqDTXFyOzjj7YIm3L3mu6Ug=
+github.com/go-chi/chi/v5 v5.2.5/go.mod h1:X7Gx4mteadT3eDOMTsXzmI4/rwUpOwBHLpAfupzFJP0=
+github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
+github.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
+github.com/go-logr/zapr v1.3.0 h1:XGdV8XW8zdwFiwOA2Dryh1gj2KRQyOOoNmBy4EplIcQ=
+github.com/go-logr/zapr v1.3.0/go.mod h1:YKepepNBd1u/oyhd/yQmtjVXmm9uML4IXUgMOwR8/Gg=
+github.com/go-openapi/jsonpointer v0.19.6/go.mod h1:osyAmYz/mB/C3I+WsTTSgw1ONzaLJoLCyoi6/zppojs=
+github.com/go-openapi/jsonpointer v0.21.0 h1:YgdVicSA9vH5RiHs9TZW5oyafXZFc6+2Vc1rr/O9oNQ=
+github.com/go-openapi/jsonpointer v0.21.0/go.mod h1:IUyH9l/+uyhIYQ/PXVA41Rexl+kOkAPDdXEYns6fzUY=
+github.com/go-openapi/jsonreference v0.20.2 h1:3sVjiK66+uXK/6oQ8xgcRKcFgQ5KXa2KvnJRumpMGbE=
+github.com/go-openapi/jsonreference v0.20.2/go.mod h1:Bl1zwGIM8/wsvqjsOQLJ/SH+En5Ap4rVB5KVcIDZG2k=
+github.com/go-openapi/swag v0.22.3/go.mod h1:UzaqsxGiab7freDnrUUra0MwWfN/q7tE4j+VcZ0yl14=
+github.com/go-openapi/swag v0.23.0 h1:vsEVJDUo2hPJ2tu0/Xc+4noaxyEffXNIs3cOULZ+GrE=
+github.com/go-openapi/swag v0.23.0/go.mod h1:esZ8ITTYEsH1V2trKHjAN8Ai7xHb8RV+YSZ577vPjgQ=
+github.com/go-task/slim-sprig/v3 v3.0.0 h1:sUs3vkvUymDpBKi3qH1YSqBQk9+9D/8M2mN1vB6EwHI=
+github.com/go-task/slim-sprig/v3 v3.0.0/go.mod h1:W848ghGpv3Qj3dhTPRyJypKRiqCdHZiAzKg9hl15HA8=
+github.com/gogo/protobuf v1.3.2 h1:Ov1cvc58UF3b5XjBnZv7+opcTcQFZebYjWzi34vdm4Q=
+github.com/gogo/protobuf v1.3.2/go.mod h1:P1XiOD3dCwIKUDQYPy72D8LYyHL2YPYrpS2s69NZV8Q=
+github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
+github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
+github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
+github.com/golang/protobuf v1.5.4/go.mod h1:lnTiLA8Wa4RWRcIUkrtSVa5nRhsEGBg48fD6rSs7xps=
+github.com/google/btree v1.1.3 h1:CVpQJjYgC4VbzxeGVHfvZrv1ctoYCAI8vbl07Fcxlyg=
+github.com/google/btree v1.1.3/go.mod h1:qOPhT0dTNdNzV6Z/lhRX0YXUafgPLFUh+gZMl761Gm4=
+github.com/google/gnostic-models v0.6.8 h1:yo/ABAfM5IMRsS1VnXjTBvUb61tFIHozhlYvRgGre9I=
+github.com/google/gnostic-models v0.6.8/go.mod h1:5n7qKqH0f5wFt+aWF8CW6pZLLNOfYuF5OpfBSENuI8U=
+github.com/google/go-cmp v0.5.9/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
+github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
+github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
+github.com/google/gofuzz v1.0.0/go.mod h1:dBl0BpW6vV/+mYPU4Po3pmUjxk6FQPldtuIdl/M65Eg=
+github.com/google/gofuzz v1.2.0 h1:xRy4A+RhZaiKjJ1bPfwQ8sedCA+YS2YcCHW6ec7JMi0=
+github.com/google/gofuzz v1.2.0/go.mod h1:dBl0BpW6vV/+mYPU4Po3pmUjxk6FQPldtuIdl/M65Eg=
+github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e h1:ijClszYn+mADRFY17kjQEVQ1XRhq2/JR1M3sGqeJoxs=
+github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e/go.mod h1:boTsfXsheKC2y+lKOCMpSfarhxDeIzfZG1jqGcPl3cA=
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
+github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
+github.com/josharian/intern v1.0.0 h1:vlS4z54oSdjm0bgjRigI+G1HpF+tI+9rE5LLzOg8HmY=
+github.com/josharian/intern v1.0.0/go.mod h1:5DoeVV0s6jJacbCEi61lwdGj/aVlrQvzHFFd8Hwg//Y=
+github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnrnM=
+github.com/json-iterator/go v1.1.12/go.mod h1:e30LSqwooZae/UwlEbR2852Gd8hjQvJoHmT4TnhNGBo=
+github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=
+github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
+github.com/kr/pretty v0.2.1/go.mod h1:ipq/a2n7PKx3OHsz4KJII5eveXtPO4qwEXGdVfWzfnI=
+github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
+github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
+github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
+github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
+github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
+github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
+github.com/mailru/easyjson v0.7.7 h1:UGYAvKxe3sBsEDzO8ZeWOSlIQfWFlxbzLZe7hwFURr0=
+github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
+github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
+github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
+github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
+github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd h1:TRLaZ9cD/w8PVh93nsPXa1VrQ6jlwL5oN8l14QlcNfg=
+
+[TRUNCATED] Showing first 80 of 239 lines.
+
+=== ENTRY POINTS ===
+No common entry points found. Check 'main' or 'scripts.start' in manifest files above.
+
+=== LINTING AND FORMATTING CONFIG ===
+No linting or formatting config files found in project root.
+
+=== ENVIRONMENT VARIABLE TEMPLATES ===
+No .env.example or .env.template found. Identify required environment variables by searching the code and config for environment variable reads.
+
+=== TODO / FIXME / HACK (production code only, test dirs excluded) ===
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:28: TODO_LIMIT = 60
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:291: """Search for TODO/FIXME/HACK comments."""
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:291: """Search for TODO/FIXME/HACK comments."""
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:291: """Search for TODO/FIXME/HACK comments."""
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:293: patterns = ["TODO", "FIXME", "HACK"]
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:293: patterns = ["TODO", "FIXME", "HACK"]
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:293: patterns = ["TODO", "FIXME", "HACK"]
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:320: return todos[:TODO_LIMIT]
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:617: # TODOs
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:620: print_section("TODO / FIXME / HACK (production code only, test dirs excluded)", todos, output_file)
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:620: print_section("TODO / FIXME / HACK (production code only, test dirs excluded)", todos, output_file)
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:620: print_section("TODO / FIXME / HACK (production code only, test dirs excluded)", todos, output_file)
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:622: print_section("TODO / FIXME / HACK (production code only, test dirs excluded)", ["None found."], output_file)
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:622: print_section("TODO / FIXME / HACK (production code only, test dirs excluded)", ["None found."], output_file)
+.github/skills/acquire-codebase-knowledge/scripts/scan.py:622: print_section("TODO / FIXME / HACK (production code only, test dirs excluded)", ["None found."], output_file)
+
+=== GIT RECENT COMMITS (last 20) ===
+946da49 feat(ui): add more images to analysis thinking animation cycle
+37a5772 fix(ci): fix .badges mkdir path (job working-dir is services/llm-gateway)
+44e39ca fix(ci): create .badges dir before generating python coverage badge
+b7a17c6 update badge .badges/main/coverage.svg
+34a0f28 Merge pull request #2 from aryzhykau/feature/phase-7-exclusion-rules-smart-evidence
+0b84f8e ci: lower coverage threshold to 65%
+6155f63 test: add Get-error and FindOpen-error path tests to raise coverage above 70%
+04d18cc fix(tests): check conn.Close return value in ws_test.go (errcheck)
+955a3f2 fix(tests): remove unused database/sql import from handler_test.go
+0bb68d1 fix(tests): tolerate pod-log errors in collect tests (no kubeconfig in unit env)
+633f448 fix(tests): remove unused database/sql import from db_test.go
+2f12c4d fix(tests): resolve golangci-lint errcheck and unused issues
+8714b90 test: additional coverage improvements across backend-api and cluster-watcher
+57c83ba test: raise coverage to ~76% and set threshold to 70%
+afc7346 test: add backend-api and diagnostics-worker test coverage
+941afc8 update badge .badges/2/merge/coverage.svg
+893fbd3 ci: only commit go coverage badge on main
+b953605 ci: only generate+commit python badge on main
+65cb92d ci: add Python coverage badge (tj-actions/coverage-badge-py)
+23910e5 ci: add contents:write permission for go coverage badge
+
+=== HIGH-CHURN FILES (last 90 days, top 20) ===
+  17 .github/workflows/ci.yml
+   8 services/backend-api/main.go
+   8 services/frontend-ui/src/app.css
+   7 api/v1alpha1/zz_generated.deepcopy.go
+   7 services/backend-api/handler/internal.go
+   7 services/frontend-ui/src/IncidentList.tsx
+   7 services/frontend-ui/src/api.ts
+   7 helm/kubechan/values.yaml
+   6 services/frontend-ui/src/KubeChanSidebar.tsx
+   6 helm/kubechan/crds/kubechan.io_incidents.yaml
+   6 services/frontend-ui/src/App.tsx
+   5 helm/kubechan/values-dev.yaml
+   5 services/backend-api/handler/diagnosticruns.go
+   5 services/backend-api/handler/incidents.go
+   5 README.md
+   5 services/llm-gateway/main.py
+   4 services/backend-api/ws/ws_test.go
+   4 services/backend-api/db/db_test.go
+   4 .gitignore
+   4 helm/kubechan/templates/backend-api/clusterrole.yaml
+
+=== MONOREPO SIGNALS ===
+Sub-package directory found: services/
+
+=== CODE METRICS ===
+Total files scanned: 250
+Total lines of code: 29128
+
+Files by language:
+  Other: 119
+  Go: 94
+  Python: 18
+  TypeScript/React: 15
+  TypeScript: 4
+
+Top 10 largest files:
+services/frontend-ui/public/kubechan-facepalm-angry.png: 2884.9KB
+services/frontend-ui/public/kubechan-pray-cry.png: 2719.7KB
+services/frontend-ui/public/kubechan-pray-scream.png: 2710.8KB
+services/frontend-ui/public/kubechan-facepalm-calm.png: 2705.0KB
+services/frontend-ui/public/kubechan-pray-calm.png: 2652.5KB
+services/frontend-ui/public/kubechan-idle-1.png: 2645.4KB
+services/frontend-ui/public/kubechan-sigh-angry.png: 2643.0KB
+services/frontend-ui/public/kubechan-playful.png: 2635.6KB
+services/frontend-ui/public/kubechan-sigh-calm.png: 2622.3KB
+services/frontend-ui/public/kubechan-tired-1.png: 2596.3KB
+
+=== CI/CD PIPELINES ===
+CI/CD: GitHub Actions
+
+=== CONTAINERS & ORCHESTRATION ===
+No containerization configs detected.
+
+=== SECURITY & COMPLIANCE ===
+No security configs detected.
+
+=== PERFORMANCE & TESTING ===
+No performance testing configs detected.
+
+=== SCAN COMPLETE ===

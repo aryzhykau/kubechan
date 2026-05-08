@@ -135,8 +135,9 @@ func (r *DiagnosticRunReconciler) collect(
 	}
 	ev.IncidentID = inc.Name
 	ev.RootResource = collector.ResourceRef{
-		Kind: inc.Spec.RootResource.Kind,
-		Name: inc.Spec.RootResource.Name,
+		Kind:      inc.Spec.RootResource.Kind,
+		Name:      inc.Spec.RootResource.Name,
+		Namespace: inc.Spec.RootResource.Namespace,
 	}
 
 	for _, pcName := range inc.Spec.ProblemCases {

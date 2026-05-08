@@ -151,7 +151,7 @@ export function ExclusionRuleModal({ open, onClose, proposal, onCreated }: Exclu
       enabled: true,
       detectors: detectors.length > 0 ? detectors : undefined,
       targetResources: validTargets.map(t => ({
-        namespace: t.namespace || 'default',
+        namespace: t.namespace,
         kind: t.kind,
         name: t.name,
       })),
