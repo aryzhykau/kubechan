@@ -5,6 +5,13 @@ const THINKING_IMAGES = [
   '/kubechan-looking.png',
   '/kubechan-looking-2.png',
   '/kubechan-looking-3.png',
+  '/kubechan-pray-calm.png',
+  '/kubechan-pray-cry.png',
+  '/kubechan-pray-scream.png',
+  '/kubechan-rolleye.png',
+  '/kubechan-sigh-angry.png',
+  '/kubechan-sigh-calm.png',
+  '/kubechan-tired-1.png',
 ]
 
 const THINKING_PHRASES = [
