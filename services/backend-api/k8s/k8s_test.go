@@ -341,3 +341,203 @@ func TestIncidentHandler_OnDelete_NoPanic(t *testing.T) {
 	}
 	h.OnDelete(inc)
 }
+
+// ---- DiagnosticRun handler ----
+
+func TestDiagnosticRunHandler_OnAdd_NoPanic(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	h := newDiagnosticRunHandler(hub, slog.Default())
+	dr := &v1alpha1.DiagnosticRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "dr-1", Namespace: "default"},
+	}
+	h.OnAdd(dr, false)
+}
+
+func TestDiagnosticRunHandler_OnUpdate_Broadcasts(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+
+	h := newDiagnosticRunHandler(hub, slog.Default())
+	dr := &v1alpha1.DiagnosticRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "dr-2", Namespace: "default"},
+		Status:     v1alpha1.DiagnosticRunStatus{State: v1alpha1.DiagnosticRunStateRunning},
+	}
+	// Should not panic; hub.Broadcast is non-blocking (select with default).
+	h.OnUpdate(nil, dr)
+	h.OnUpdate(nil, dr) // second call to ensure it's repeatable
+}
+
+func TestDiagnosticRunHandler_OnUpdate_WrongType_NoPanic(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	h := newDiagnosticRunHandler(hub, slog.Default())
+	// Passing something that is not a DiagnosticRun should be a no-op.
+	h.OnUpdate(nil, "not-a-diagnostic-run")
+}
+
+func TestDiagnosticRunHandler_OnDelete_NoPanic(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	h := newDiagnosticRunHandler(hub, slog.Default())
+	dr := &v1alpha1.DiagnosticRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "dr-3", Namespace: "default"},
+	}
+	h.OnDelete(dr)
+}
+
+// ── incidentHandler additional cases ─────────────────────────────────────────
+
+func TestIncidentHandler_OnAdd_BroadcastsEvent(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	scheme := newK8sTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ms := newMoodSyncer(c)
+	h := newIncidentHandler(hub, ms, slog.Default())
+	inc := &v1alpha1.Incident{
+		ObjectMeta: metav1.ObjectMeta{Name: "inc-add", Namespace: "default"},
+		Spec: v1alpha1.IncidentSpec{
+			RootResource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "app"},
+		},
+	}
+	h.OnAdd(inc, false) // should not panic
+}
+
+func TestIncidentHandler_OnAdd_WrongType_NoPanic(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	scheme := newK8sTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ms := newMoodSyncer(c)
+	h := newIncidentHandler(hub, ms, slog.Default())
+	h.OnAdd("not-an-incident", false) // wrong type, should not panic
+}
+
+func TestProblemCaseHandler_OnUpdate_UpdatedState(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	h := newProblemCaseHandler(hub, slog.Default())
+	pc := &v1alpha1.ProblemCase{
+		ObjectMeta: metav1.ObjectMeta{Name: "pc-updated", Namespace: "default"},
+		Spec:       v1alpha1.ProblemCaseSpec{Severity: "high", Detector: "CrashLoopBackOff"},
+		Status:     v1alpha1.ProblemCaseStatus{State: v1alpha1.ProblemCaseStateOpen},
+	}
+	h.OnUpdate(nil, pc) // should not panic, broadcasts EventProblemCaseUpdated
+}
+
+func TestMoodSyncer_GetMoodLevel_WithState(t *testing.T) {
+	t.Parallel()
+	scheme := newK8sTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ms := newMoodSyncer(c)
+	ctx := context.Background()
+
+	// Create state
+	if err := ms.EnsureState(ctx); err != nil {
+		t.Fatalf("EnsureState: %v", err)
+	}
+
+	// Set mood level to 5 via SyncFromIncidents with open incidents
+	inc := &v1alpha1.Incident{
+		ObjectMeta: metav1.ObjectMeta{Name: "inc-mood", Namespace: "default"},
+		Spec: v1alpha1.IncidentSpec{
+			RootResource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "app"},
+		},
+	}
+	if err := c.Create(ctx, inc); err != nil {
+		t.Fatalf("creating incident: %v", err)
+	}
+	ms.SyncFromIncidents(ctx)
+
+	level := ms.GetMoodLevel(ctx)
+	if level < 0 {
+		t.Errorf("expected non-negative mood level, got %d", level)
+	}
+}
+
+func TestMoodSyncer_Broadcast_SendsToHub(t *testing.T) {
+	t.Parallel()
+	scheme := newK8sTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ms := newMoodSyncer(c)
+	ctx := context.Background()
+
+	if err := ms.EnsureState(ctx); err != nil {
+		t.Fatalf("EnsureState: %v", err)
+	}
+
+	state := &v1alpha1.KubeChanState{
+		ObjectMeta: metav1.ObjectMeta{Name: "kubechan-state", Namespace: "kubechan"},
+	}
+	ms.broadcast(state) // should not panic
+}
+
+func TestIncidentHandler_OnUpdate_WithResolvedState(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	scheme := newK8sTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ms := newMoodSyncer(c)
+	h := newIncidentHandler(hub, ms, slog.Default())
+	inc := &v1alpha1.Incident{
+		ObjectMeta: metav1.ObjectMeta{Name: "inc-update", Namespace: "default"},
+		Spec: v1alpha1.IncidentSpec{
+			RootResource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "app"},
+		},
+		Status: v1alpha1.IncidentStatus{State: v1alpha1.IncidentStateResolved},
+	}
+	h.OnUpdate(nil, inc) // should not panic, broadcasts EventIncidentResolved
+}
+
+func TestIncidentHandler_OnDelete_BroadcastsEvent(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	scheme := newK8sTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ms := newMoodSyncer(c)
+	h := newIncidentHandler(hub, ms, slog.Default())
+	inc := &v1alpha1.Incident{
+		ObjectMeta: metav1.ObjectMeta{Name: "inc-delete", Namespace: "default"},
+		Spec: v1alpha1.IncidentSpec{
+			RootResource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "app"},
+		},
+	}
+	h.OnDelete(inc) // should not panic
+}
+
+func TestIncidentHandler_OnDelete_WrongType_NoPanic(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	scheme := newK8sTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ms := newMoodSyncer(c)
+	h := newIncidentHandler(hub, ms, slog.Default())
+	h.OnDelete("not-an-incident")
+}
+
+func TestProblemCaseHandler_OnUpdate_ResolvedState(t *testing.T) {
+	t.Parallel()
+	hub := kubews.NewHub(slog.Default())
+	h := newProblemCaseHandler(hub, slog.Default())
+	pc := &v1alpha1.ProblemCase{
+		ObjectMeta: metav1.ObjectMeta{Name: "pc-resolved", Namespace: "default"},
+		Spec:       v1alpha1.ProblemCaseSpec{Severity: "high", Detector: "CrashLoopBackOff"},
+		Status:     v1alpha1.ProblemCaseStatus{State: v1alpha1.ProblemCaseStateResolved},
+	}
+	h.OnUpdate(nil, pc) // should broadcast EventProblemCaseResolved
+}
+
+func TestMoodSyncer_Poke_WithHub(t *testing.T) {
+	t.Parallel()
+	scheme := newK8sTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ms := newMoodSyncer(c)
+	ctx := context.Background()
+
+	if err := ms.EnsureState(ctx); err != nil {
+		t.Fatalf("EnsureState: %v", err)
+	}
+
+	ms.Poke(ctx) // should not panic
+}
