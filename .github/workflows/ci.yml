@@ -83,6 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
+      contents: write
     defaults:
       run:
         working-directory: services/llm-gateway
@@ -124,6 +125,19 @@ jobs:
           thresholdAll: 0.70
           thresholdNew: 0.70
           thresholdModified: 0.70
+
+      - name: Generate Python coverage badge
+        uses: tj-actions/coverage-badge-py@v2
+        with:
+          working-directory: services/llm-gateway
+          output: .badges/python-coverage.svg
+
+      - name: Commit Python coverage badge
+        if: github.ref == 'refs/heads/main'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update python coverage badge [skip ci]"
+          file_pattern: .badges/python-coverage.svg
 
   # ── Frontend: build ────────────────────────────────────────────────────────
   build-frontend:
