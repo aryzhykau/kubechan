@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# pre-commit: regenerate DeepCopy + CRD manifests and stage the results.
+set -euo pipefail
+
+# ── Locate Go (handles GVM, standard install, Homebrew) ──────────────────────
+if ! command -v go &>/dev/null; then
+  # Try GVM: use the version recorded in .go-version, or the latest installed.
+  GVM_DIR="${GVM_ROOT:-$HOME/.gvm}"
+  if [[ -f .go-version ]]; then
+    GO_VER="$(cat .go-version | tr -d '[:space:]')"
+  else
+    GO_VER="$(ls "$GVM_DIR/gos" 2>/dev/null | sort -V | tail -1)"
+  fi
+  if [[ -x "$GVM_DIR/gos/$GO_VER/bin/go" ]]; then
+    export PATH="$GVM_DIR/gos/$GO_VER/bin:$PATH"
+  else
+    echo "pre-commit: cannot find Go binary. Install Go or run 'gvm use <version>'." >&2
+    exit 1
+  fi
+fi
+
+echo "pre-commit: running make generate ($(go version | awk '{print $3}'))…"
+make generate
+
+# Stage any files that changed under the generated paths.
+GENERATED=(
+  api/v1alpha1/zz_generated.deepcopy.go
+  helm/kubechan/crds/
+)
+git add "${GENERATED[@]}"

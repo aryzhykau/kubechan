@@ -18,4 +18,23 @@ dependencies = [
 dev = [
     "pyright>=1.1",
     "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "--cov=app --cov=main --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=70"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+omit = [
+    "tests/*",
+    ".venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
 ]

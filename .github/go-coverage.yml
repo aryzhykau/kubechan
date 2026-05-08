@@ -1,0 +1,20 @@
+# Go test coverage thresholds for vladopajic/go-test-coverage
+# Raise threshold-total as more packages gain unit tests.
+threshold:
+  # Global: just above current 2.5 % — prevents catastrophic regressions.
+  # Target: raise this to 50 % once backend-api and cluster-watcher controllers
+  # have envtest-based tests.
+  total: 65
+
+  # Per-package minimums for packages that already have meaningful test suites.
+  packages:
+    - path: github.com/org/kubechan/services/cluster-watcher/detector
+      threshold: 80
+
+exclude:
+  # Generated code — no point measuring it.
+  paths:
+    - "^github.com/org/kubechan/api/v1alpha1/zz_generated"
+  # main entry-points have nothing testable.
+  suffix:
+    - /main.go

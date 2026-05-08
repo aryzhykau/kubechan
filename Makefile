@@ -89,6 +89,15 @@ build-frontend:
 install-tools:
 	go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
 
+## install-hooks: Install git hooks from hack/hooks/ into .git/hooks/
+install-hooks:
+	@for hook in hack/hooks/*; do \
+	  name=$$(basename $$hook); \
+	  ln -sf ../../$$hook .git/hooks/$$name; \
+	  chmod +x .git/hooks/$$name; \
+	  echo "installed .git/hooks/$$name -> ../../$$hook"; \
+	done
+
 # ─── E2E (Phase 5) ───────────────────────────────────────────────────────────
 
 ## e2e: Run end-to-end tests against Docker Desktop cluster

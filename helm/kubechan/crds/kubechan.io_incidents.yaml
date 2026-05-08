@@ -57,6 +57,13 @@ spec:
           spec:
             description: IncidentSpec defines the desired state of Incident.
             properties:
+              falsePositive:
+                description: |-
+                  FalsePositive marks this incident as a false positive — the behaviour was intentional
+                  and expected. Set by the user after reviewing an LLM analysis that suggested
+                  suggestFalsePositive. Once true, the incident will be auto-resolved.
+                  Only meaningful for manual incidents (source=manual). Auto incidents use ExclusionRules.
+                type: boolean
               problemCases:
                 description: |-
                   ProblemCases is the list of ProblemCase names (in the same namespace) grouped
@@ -72,9 +79,34 @@ spec:
                   description: ResourceRef identifies a Kubernetes resource by namespace,
                     kind, and name.
                   properties:
+                    apiGroup:
+                      description: |-
+                        APIGroup is the Kubernetes API group for this resource kind, e.g. "apps" or "keda.sh".
+                        Empty means the core API group. Used by the dynamic client in diagnostics-worker
+                        to resolve arbitrary CRDs requested by the user or suggested by the LLM.
+                      type: string
+                    evidenceSlices:
+                      description: |-
+                        EvidenceSlices controls which parts of this resource the diagnostics-worker collects
+                        when it appears in RelatedResources. Empty means collect all slices applicable to the
+                        kind (backward-compatible default).
+
+                        Valid values:
+                          spec        — resource spec field (with redaction)
+                          status      — full status object
+                          conditions  — status.conditions array, extracted separately for clarity
+                          events      — Kubernetes Events for this resource
+                          logs        — container logs (Deployment, StatefulSet, DaemonSet, Pod, Job only)
+                          metrics     — current CPU/memory from metrics-server (container-having kinds only)
+                          labels      — metadata.labels
+                          annotations — metadata.annotations (sensitive values redacted)
+                          ownerRefs   — metadata.ownerReferences chain resolved recursively up to the root
+                      items:
+                        type: string
+                      type: array
                     kind:
                       description: Kind is the Kubernetes resource kind (e.g., Pod,
-                        Deployment).
+                        Deployment, ScaledObject).
                       type: string
                     name:
                       description: Name is the resource name.
@@ -93,9 +125,34 @@ spec:
                   RootResource is the workload root (Deployment, StatefulSet, DaemonSet, etc.)
                   that all member ProblemCases trace back to via owner references.
                 properties:
+                  apiGroup:
+                    description: |-
+                      APIGroup is the Kubernetes API group for this resource kind, e.g. "apps" or "keda.sh".
+                      Empty means the core API group. Used by the dynamic client in diagnostics-worker
+                      to resolve arbitrary CRDs requested by the user or suggested by the LLM.
+                    type: string
+                  evidenceSlices:
+                    description: |-
+                      EvidenceSlices controls which parts of this resource the diagnostics-worker collects
+                      when it appears in RelatedResources. Empty means collect all slices applicable to the
+                      kind (backward-compatible default).
+
+                      Valid values:
+                        spec        — resource spec field (with redaction)
+                        status      — full status object
+                        conditions  — status.conditions array, extracted separately for clarity
+                        events      — Kubernetes Events for this resource
+                        logs        — container logs (Deployment, StatefulSet, DaemonSet, Pod, Job only)
+                        metrics     — current CPU/memory from metrics-server (container-having kinds only)
+                        labels      — metadata.labels
+                        annotations — metadata.annotations (sensitive values redacted)
+                        ownerRefs   — metadata.ownerReferences chain resolved recursively up to the root
+                    items:
+                      type: string
+                    type: array
                   kind:
                     description: Kind is the Kubernetes resource kind (e.g., Pod,
-                      Deployment).
+                      Deployment, ScaledObject).
                     type: string
                   name:
                     description: Name is the resource name.
@@ -115,13 +172,6 @@ spec:
                 - auto
                 - manual
                 type: string
-              falsePositive:
-                description: |-
-                  FalsePositive marks this incident as a false positive — the behaviour was intentional
-                  and expected. Set by the user after reviewing an LLM suggestion. Once true, the
-                  incident will be auto-resolved. Only meaningful for manual incidents (source=manual).
-                  Auto incidents use ExclusionRules instead.
-                type: boolean
               userMessage:
                 description: UserMessage is the plain-text description provided by
                   the user for manual incidents.

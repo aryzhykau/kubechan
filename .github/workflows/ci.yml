@@ -35,6 +35,9 @@ jobs:
   build-test-go:
     name: Build & Test Go
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -54,13 +57,33 @@ jobs:
       - name: Build backend-api
         run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./services/backend-api/
 
-      - name: Test Go
-        run: go test -race -count=1 ./...
+      - name: Test Go with coverage
+        run: go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Go coverage gate + PR comment
+        uses: vladopajic/go-test-coverage@v2
+        with:
+          profile: coverage.out
+          local-prefix: github.com/org/kubechan
+          config: .github/go-coverage.yml
+          git-token: ${{ github.ref == 'refs/heads/main' && secrets.GITHUB_TOKEN || '' }}
+          git-branch: ${{ github.ref == 'refs/heads/main' && 'main' || '' }}
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: coverage.out
+          retention-days: 14
 
   # ── Python: lint + test ────────────────────────────────────────────────────
   lint-test-python:
     name: Lint & Test Python
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
     defaults:
       run:
         working-directory: services/llm-gateway
@@ -73,13 +96,49 @@ jobs:
           cache-dependency-glob: services/llm-gateway/uv.lock
 
       - name: Install dependencies
-        run: uv sync --frozen --group dev
+        run: unset VIRTUAL_ENV; uv sync --frozen --group dev
 
       - name: Pyright
-        run: uv run pyright .
+        run: unset VIRTUAL_ENV; uv run pyright .
 
-      - name: Pytest
-        run: uv run pytest -v
+      - name: Pytest + coverage
+        run: unset VIRTUAL_ENV; uv run pytest -v
+        # pyproject.toml addopts already include:
+        #   --cov=app --cov=main --cov-report=term-missing
+        #   --cov-report=xml:coverage.xml --cov-fail-under=70
+        # The step will exit non-zero when coverage < 70 %, blocking the PR.
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: services/llm-gateway/coverage.xml
+          retention-days: 14
+
+      - name: Post coverage summary to PR
+        if: github.event_name == 'pull_request'
+        uses: orgoro/coverage@v3.2
+        with:
+          coverageFile: services/llm-gateway/coverage.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          thresholdAll: 0.70
+          thresholdNew: 0.70
+          thresholdModified: 0.70
+
+      - name: Generate Python coverage badge
+        if: github.ref == 'refs/heads/main'
+        uses: tj-actions/coverage-badge-py@v2
+        with:
+          working-directory: services/llm-gateway
+          output: .badges/python-coverage.svg
+
+      - name: Commit Python coverage badge
+        if: github.ref == 'refs/heads/main'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update python coverage badge [skip ci]"
+          file_pattern: .badges/python-coverage.svg
 
   # ── Frontend: build ────────────────────────────────────────────────────────
   build-frontend:

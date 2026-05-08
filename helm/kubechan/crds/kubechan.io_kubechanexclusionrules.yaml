@@ -18,26 +18,28 @@ spec:
     - jsonPath: .spec.enabled
       name: Enabled
       type: boolean
-    - jsonPath: .spec.description
-      name: Description
+    - jsonPath: .spec.namespace
+      name: Namespace
       type: string
     - jsonPath: .status.suppressedCount
       name: Suppressed
       type: integer
-    - jsonPath: .status.lastMatchedAt
-      name: Last Matched
-      type: date
+    - jsonPath: .spec.description
+      name: Description
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: KubechanExclusionRule suppresses false-positive incident creation
-          for a specific resource or selector during optional time windows.
+        description: |-
+          KubechanExclusionRule suppresses specific KubeChan detectors for matched resources,
+          optionally within a recurring time window.
         properties:
           apiVersion:
             description: |-
               APIVersion defines the versioned schema of this representation of an object.
               Servers should convert recognized schemas to the latest internal value, and
               may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
             description: |-
@@ -45,91 +47,136 @@ spec:
               Servers may infer this from the endpoint the client submits requests to.
               Cannot be updated.
               In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
           spec:
-            description: ExclusionRuleSpec defines the rule's matching criteria.
+            description: ExclusionRuleSpec defines the desired state of KubechanExclusionRule.
             properties:
               description:
-                description: Human-readable reason for this exclusion.
+                description: Description is a human-readable explanation of why this
+                  rule exists.
                 type: string
               detectors:
-                description: Detector names this rule applies to. Empty means all detectors.
+                description: |-
+                  Detectors lists the detector names to suppress.
+                  Empty slice means suppress ALL detectors for matched resources.
                 items:
                   type: string
                 type: array
               enabled:
                 default: true
-                description: Whether the rule is active.
+                description: |-
+                  Enabled controls whether this rule is actively enforced.
+                  Defaults to true.
                 type: boolean
               namespace:
-                description: Namespace scope for this rule. Applies to all resources
-                  matched by TargetResources or Selector in this namespace.
+                description: |-
+                  Namespace optionally scopes the entire rule to a single namespace.
+                  When set, the rule only fires if the affected resource lives in this namespace.
+                  Acts as a fast pre-filter before TargetResources / Selector are evaluated.
                 type: string
               selector:
-                description: Label-selector based matching (OR with TargetResources).
+                description: |-
+                  Selector matches resources by label selector, optionally filtered by namespace and kinds.
+                  Can be used together with TargetResources — a resource matching EITHER is suppressed.
                 properties:
                   kinds:
-                    description: Resource kinds to match. Empty means any kind.
+                    description: |-
+                      Kinds restricts matching to specific resource kinds (e.g. ["Deployment", "Service"]).
+                      Empty means any kind.
                     items:
                       type: string
                     type: array
                   matchLabels:
                     additionalProperties:
                       type: string
-                    description: Label key/value pairs the target resource must have.
+                    description: MatchLabels requires all listed key=value label pairs
+                      to be present on the resource.
                     type: object
                   namespace:
-                    description: Namespace to scope selector matching.
+                    description: |-
+                      Namespace further narrows the selector to a specific namespace.
+                      If ExclusionRuleSpec.Namespace is also set, both must agree.
                     type: string
                 type: object
               targetResources:
-                description: Exact resources to suppress.
+                description: |-
+                  TargetResources is a list of exact resource references to match.
+                  Can be used together with Selector — a resource matching EITHER is suppressed.
                 items:
-                  description: ResourceRef references a specific Kubernetes resource.
+                  description: ResourceRef identifies a Kubernetes resource by namespace,
+                    kind, and name.
                   properties:
                     apiGroup:
-                      description: APIGroup of the resource, e.g. "apps" or "keda.sh".
-                        Empty means core group.
+                      description: |-
+                        APIGroup is the Kubernetes API group for this resource kind, e.g. "apps" or "keda.sh".
+                        Empty means the core API group. Used by the dynamic client in diagnostics-worker
+                        to resolve arbitrary CRDs requested by the user or suggested by the LLM.
                       type: string
                     evidenceSlices:
-                      description: Optional override for which evidence slices to collect.
+                      description: |-
+                        EvidenceSlices controls which parts of this resource the diagnostics-worker collects
+                        when it appears in RelatedResources. Empty means collect all slices applicable to the
+                        kind (backward-compatible default).
+
+                        Valid values:
+                          spec        — resource spec field (with redaction)
+                          status      — full status object
+                          conditions  — status.conditions array, extracted separately for clarity
+                          events      — Kubernetes Events for this resource
+                          logs        — container logs (Deployment, StatefulSet, DaemonSet, Pod, Job only)
+                          metrics     — current CPU/memory from metrics-server (container-having kinds only)
+                          labels      — metadata.labels
+                          annotations — metadata.annotations (sensitive values redacted)
+                          ownerRefs   — metadata.ownerReferences chain resolved recursively up to the root
                       items:
                         type: string
                       type: array
                     kind:
+                      description: Kind is the Kubernetes resource kind (e.g., Pod,
+                        Deployment, ScaledObject).
                       type: string
                     name:
+                      description: Name is the resource name.
                       type: string
                     namespace:
+                      description: Namespace of the resource. Empty for cluster-scoped
+                        resources.
                       type: string
                   required:
                   - kind
                   - name
-                  - namespace
                   type: object
                 type: array
               timeWindow:
-                description: Optional time window during which this rule is active.
-                  Outside the window the rule does not suppress.
+                description: |-
+                  TimeWindow restricts the rule to specific recurring time periods.
+                  Absent means the rule applies 24/7.
                 properties:
                   periods:
-                    description: One or more recurring time periods.
+                    description: Periods is the list of recurring time intervals during
+                      which the rule fires.
                     items:
-                      description: ExclusionPeriod is a recurring daily time range.
+                      description: ExclusionPeriod is a single recurring time slot
+                        within a week.
                       properties:
                         days:
-                          description: Days of the week. Mon,Tue,Wed,Thu,Fri,Sat,Sun.
+                          description: |-
+                            Days lists the days of week this period applies to.
+                            Valid values: Mon, Tue, Wed, Thu, Fri, Sat, Sun.
                           items:
                             type: string
                           type: array
                         end:
-                          description: End time "HH:MM" 24h. If End < Start the period
-                            spans midnight.
+                          description: |-
+                            End is the period end time in "HH:MM" 24-hour format.
+                            End < Start is valid and means the period spans midnight.
                           type: string
                         start:
-                          description: Start time "HH:MM" 24h.
+                          description: Start is the period start time in "HH:MM" 24-hour
+                            format.
                           type: string
                       required:
                       - days
@@ -138,8 +185,9 @@ spec:
                       type: object
                     type: array
                   timezone:
-                    description: IANA timezone name, e.g. "Europe/Berlin". Defaults
-                      to UTC.
+                    default: UTC
+                    description: Timezone is an IANA timezone name, e.g. "Europe/Berlin".
+                      Defaults to UTC.
                     type: string
                 required:
                 - periods
@@ -149,14 +197,16 @@ spec:
             - enabled
             type: object
           status:
-            description: ExclusionRuleStatus reflects observed rule activity.
+            description: ExclusionRuleStatus defines the observed state of KubechanExclusionRule.
             properties:
               lastMatchedAt:
-                description: Last time this rule suppressed an incident.
+                description: LastMatchedAt records when this rule last suppressed
+                  a ProblemCase creation.
                 format: date-time
                 type: string
               suppressedCount:
-                description: Total number of times this rule has suppressed an incident.
+                description: SuppressedCount is the lifetime count of ProblemCase
+                  creations suppressed by this rule.
                 type: integer
             type: object
         type: object
