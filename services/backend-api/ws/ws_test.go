@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	gorillaws "github.com/gorilla/websocket"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -195,6 +196,113 @@ func TestServeWSWithAuth_InvalidToken_Returns401(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 got %d", rec.Code)
 	}
+}
+
+// ---- ServeWS full connection tests (register/readPump/writePump) ----
+
+func TestServeWS_Connect_RegistersClient(t *testing.T) {
+	hub := NewHub(slog.Default())
+	srv := httptest.NewServer(ServeWS(hub, slog.Default()))
+	defer srv.Close()
+
+	u := "ws" + srv.URL[4:] // replace "http" with "ws"
+	conn, _, err := connectWS(u)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Give readPump/writePump a moment to start.
+	time.Sleep(20 * time.Millisecond)
+
+	hub.mu.RLock()
+	count := len(hub.clients)
+	hub.mu.RUnlock()
+	if count != 1 {
+		t.Errorf("expected 1 registered client, got %d", count)
+	}
+}
+
+func TestServeWS_Broadcast_DeliveredToClient(t *testing.T) {
+	hub := NewHub(slog.Default())
+	srv := httptest.NewServer(ServeWS(hub, slog.Default()))
+	defer srv.Close()
+
+	u := "ws" + srv.URL[4:]
+	conn, _, err := connectWS(u)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	time.Sleep(20 * time.Millisecond)
+
+	msg := []byte(`{"type":"test-broadcast"}`)
+	hub.Broadcast(msg)
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, got, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(got) != string(msg) {
+		t.Errorf("got %q, want %q", got, msg)
+	}
+}
+
+func TestServeWS_ClientDisconnect_Unregisters(t *testing.T) {
+	hub := NewHub(slog.Default())
+	srv := httptest.NewServer(ServeWS(hub, slog.Default()))
+	defer srv.Close()
+
+	u := "ws" + srv.URL[4:]
+	conn, _, err := connectWS(u)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	// Close the connection and wait for readPump to unregister.
+	conn.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	hub.mu.RLock()
+	count := len(hub.clients)
+	hub.mu.RUnlock()
+	if count != 0 {
+		t.Errorf("expected 0 clients after disconnect, got %d", count)
+	}
+}
+
+func TestServeWSWithAuth_ValidToken_Connects(t *testing.T) {
+	secret := "testsecret32bytesfortestingonly!!"
+	t.Setenv("JWT_SECRET", secret)
+
+	hub := NewHub(slog.Default())
+	srv := httptest.NewServer(ServeWSWithAuth(hub, slog.Default()))
+	defer srv.Close()
+
+	tok := signTestToken(t, secret, time.Hour)
+	u := "ws" + srv.URL[4:] + "?token=" + tok
+	conn, _, err := connectWS(u)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	time.Sleep(20 * time.Millisecond)
+
+	hub.mu.RLock()
+	count := len(hub.clients)
+	hub.mu.RUnlock()
+	if count != 1 {
+		t.Errorf("expected 1 registered client, got %d", count)
+	}
+}
+
+// connectWS is a helper for the WS integration tests above.
+func connectWS(u string) (*gorillaws.Conn, *http.Response, error) {
+	return gorillaws.DefaultDialer.Dial(u, nil)
 }
 
 // TestMain ensures JWT_SECRET env is not leaked from non-t.Setenv tests.

@@ -4,12 +4,23 @@
 package db
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+// helpers for logPruneResult tests
+var errFake = errors.New("fake error")
+
+type fakeResult int64
+
+func (f fakeResult) LastInsertId() (int64, error) { return 0, nil }
+func (f fakeResult) RowsAffected() (int64, error) { return int64(f), nil }
 
 // ── Open / migrations ─────────────────────────────────────────────────────────
 
@@ -185,4 +196,90 @@ func TestPruner_RunsWithoutError(t *testing.T) {
 
 	// prune on empty tables should be a no-op without error.
 	prune(t.Context(), db, logger)
+}
+func TestReadSettingInt_ExistingKey(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "rsi.db")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	db, err := Open(path, logger)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	_, _ = db.Exec(`INSERT INTO settings(key, value) VALUES ('test.days', '42')`)
+	got := readSettingInt(db, "test.days", 7)
+	if got != 42 {
+		t.Errorf("got %d, want 42", got)
+	}
+}
+
+func TestReadSettingInt_MissingKey_ReturnsFallback(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "rsi2.db")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	db, err := Open(path, logger)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	got := readSettingInt(db, "no.such.key", 99)
+	if got != 99 {
+		t.Errorf("got %d, want 99 (fallback)", got)
+	}
+}
+
+func TestReadSettingInt_InvalidValue_ReturnsFallback(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "rsi3.db")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	db, err := Open(path, logger)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	_, _ = db.Exec(`INSERT INTO settings(key, value) VALUES ('bad.val', 'notanumber')`)
+	got := readSettingInt(db, "bad.val", 5)
+	if got != 5 {
+		t.Errorf("got %d, want 5 (fallback for invalid)", got)
+	}
+}
+
+func TestLogPruneResult_WithError(t *testing.T) {
+	t.Parallel()
+	// Should not panic when err is non-nil.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logPruneResult(logger, "evidence", nil, errFake)
+}
+
+func TestLogPruneResult_Success_NoRows(t *testing.T) {
+	t.Parallel()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	// nil res with no error — RowsAffected will return 0.
+	logPruneResult(logger, "evidence", fakeResult(0), nil)
+}
+
+func TestLogPruneResult_Success_WithRows(t *testing.T) {
+	t.Parallel()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logPruneResult(logger, "evidence", fakeResult(3), nil)
+}
+
+func TestStartPruner_CancelledContext_StopsGracefully(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "sp.db")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	db, err := Open(path, logger)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	StartPruner(ctx, db, logger)
+	time.Sleep(20 * time.Millisecond) // let it fire once
+	cancel()                           // signal stop
+	time.Sleep(20 * time.Millisecond) // goroutine should exit
 }
