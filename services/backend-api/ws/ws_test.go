@@ -210,7 +210,7 @@ func TestServeWS_Connect_RegistersClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Give readPump/writePump a moment to start.
 	time.Sleep(20 * time.Millisecond)
@@ -233,7 +233,7 @@ func TestServeWS_Broadcast_DeliveredToClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	time.Sleep(20 * time.Millisecond)
 
@@ -263,7 +263,7 @@ func TestServeWS_ClientDisconnect_Unregisters(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Close the connection and wait for readPump to unregister.
-	conn.Close()
+	_ = conn.Close()
 	time.Sleep(100 * time.Millisecond)
 
 	hub.mu.RLock()

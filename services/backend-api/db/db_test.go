@@ -82,18 +82,6 @@ func TestPing(t *testing.T) {
 
 // ── SettingGet / SettingSet / SettingsAll ─────────────────────────────────────
 
-func openSettingsDB(t *testing.T) *sql.DB {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "settings.db")
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	db, err := Open(path, logger)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
-}
-
 func TestSettingGet_ExistingKey(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sg.db")

@@ -27,20 +27,6 @@ func newStartupScheme() *runtime.Scheme {
 	return s
 }
 
-func openTestDB(t *testing.T) interface {
-	Close() error
-} {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "startup_test.db")
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	db, err := backenddb.Open(path, logger)
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
-}
-
 // ── RecoverPendingRequests ────────────────────────────────────────────────────
 
 func TestRecoverPendingRequests_NoPending(t *testing.T) {

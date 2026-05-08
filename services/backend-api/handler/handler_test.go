@@ -35,18 +35,6 @@ func newTestScheme() *runtime.Scheme {
 	return s
 }
 
-func newTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "test.db")
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	db, err := backenddb.Open(path, logger)
-	if err != nil {
-		t.Fatalf("db.Open() error = %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
-}
-
 // withChiParam injects a chi URL parameter into the request context.
 func withChiParam(r *http.Request, key, val string) *http.Request {
 	rctx := chi.NewRouteContext()

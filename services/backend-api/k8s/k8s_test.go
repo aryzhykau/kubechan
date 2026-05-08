@@ -539,5 +539,5 @@ func TestMoodSyncer_Poke_WithHub(t *testing.T) {
 		t.Fatalf("EnsureState: %v", err)
 	}
 
-	ms.Poke(ctx) // should not panic
+	_, _ = ms.Poke(ctx) // should not panic
 }
