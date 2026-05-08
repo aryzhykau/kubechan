@@ -6,7 +6,6 @@ package handler
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
