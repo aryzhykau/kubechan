@@ -127,6 +127,7 @@ jobs:
           thresholdModified: 0.70
 
       - name: Generate Python coverage badge
+        if: github.ref == 'refs/heads/main'
         uses: tj-actions/coverage-badge-py@v2
         with:
           working-directory: services/llm-gateway
