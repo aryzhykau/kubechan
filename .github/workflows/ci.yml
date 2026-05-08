@@ -66,6 +66,7 @@ jobs:
           local-prefix: github.com/org/kubechan
           config: .github/go-coverage.yml
           git-token: ${{ github.event_name == 'pull_request' && secrets.GITHUB_TOKEN || '' }}
+          git-branch: main
 
       - name: Upload coverage artifact
         if: always()
