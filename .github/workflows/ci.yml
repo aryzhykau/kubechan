@@ -37,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -65,7 +66,7 @@ jobs:
           profile: coverage.out
           local-prefix: github.com/org/kubechan
           config: .github/go-coverage.yml
-          git-token: ${{ github.event_name == 'pull_request' && secrets.GITHUB_TOKEN || '' }}
+          git-token: ${{ secrets.GITHUB_TOKEN }}
           git-branch: main
 
       - name: Upload coverage artifact
