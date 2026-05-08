@@ -5,6 +5,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "github.com/org/kubechan/api/v1alpha1"
 	"github.com/org/kubechan/services/cluster-watcher/debounce"
@@ -816,6 +818,23 @@ func TestPodReconciler_Reconcile_PodWithNoDetectors(t *testing.T) {
 	_ = result
 }
 
+func TestPodReconciler_Reconcile_GetError(t *testing.T) {
+	t.Parallel()
+	scheme := newCtrlTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return fmt.Errorf("injected get error")
+			},
+		}).Build()
+	d := debounce.New(func() time.Duration { return 0 })
+	r := &PodReconciler{Client: c, Scheme: scheme, Debouncer: d, Detectors: nil, ControlNamespace: "kubechan"}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "mypod"}})
+	if err == nil {
+		t.Error("expected error from Get, got nil")
+	}
+}
 
 // ── DeploymentReconciler.Reconcile early exits ────────────────────────────────
 
@@ -863,6 +882,27 @@ func TestDeploymentReconciler_Reconcile_NotFound_CancelsDebounce(t *testing.T) {
 	}
 }
 
+func TestDeploymentReconciler_Reconcile_GetError(t *testing.T) {
+	t.Parallel()
+	scheme := newCtrlTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return fmt.Errorf("injected get error")
+			},
+		}).Build()
+	d := debounce.New(func() time.Duration { return 0 })
+	r := &DeploymentReconciler{
+		Client: c, Scheme: scheme, Debouncer: d,
+		Detectors: nil, ControlNamespace: "kubechan",
+	}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "some-deploy"}})
+	if err == nil {
+		t.Error("expected error from Get, got nil")
+	}
+}
+
 // ── EventReconciler.Reconcile ─────────────────────────────────────────────────
 
 func TestEventReconciler_Reconcile_NotFound(t *testing.T) {
@@ -898,6 +938,24 @@ func TestEventReconciler_Reconcile_EventFound(t *testing.T) {
 	_ = result
 }
 
+func TestEventReconciler_Reconcile_GetError(t *testing.T) {
+	t.Parallel()
+	c := fake.NewClientBuilder().
+		WithScheme(newCtrlTestScheme()).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return fmt.Errorf("injected get error")
+			},
+		}).Build()
+	r := &EventReconciler{Client: c, Scheme: newCtrlTestScheme()}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "ev1", Namespace: "default"},
+	})
+	if err == nil {
+		t.Error("expected error from Get, got nil")
+	}
+}
+
 // ── NodeReconciler.Reconcile ──────────────────────────────────────────────────
 
 func TestNodeReconciler_Reconcile_NotFound(t *testing.T) {
@@ -927,6 +985,24 @@ func TestNodeReconciler_Reconcile_NodeFound(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	_ = result
+}
+
+func TestNodeReconciler_Reconcile_GetError(t *testing.T) {
+	t.Parallel()
+	c := fake.NewClientBuilder().
+		WithScheme(newCtrlTestScheme()).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return fmt.Errorf("injected get error")
+			},
+		}).Build()
+	r := &NodeReconciler{Client: c, Scheme: newCtrlTestScheme()}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "some-node"},
+	})
+	if err == nil {
+		t.Error("expected error from Get, got nil")
+	}
 }
 
 // ── ServiceReconciler.Reconcile ───────────────────────────────────────────────

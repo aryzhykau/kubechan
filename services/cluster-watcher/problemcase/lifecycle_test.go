@@ -5,6 +5,7 @@ package problemcase
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	v1alpha1 "github.com/org/kubechan/api/v1alpha1"
@@ -15,6 +16,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func newScheme() *runtime.Scheme {
@@ -264,5 +266,37 @@ func TestResolve_AlreadyResolved_Noop(t *testing.T) {
 	err := Resolve(context.Background(), c, pc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateOrUpdate_FindOpenError(t *testing.T) {
+	t.Parallel()
+	c := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				return fmt.Errorf("injected list error")
+			},
+		}).Build()
+	err := CreateOrUpdate(context.Background(), c, controlNS, testRef(),
+		v1alpha1.SeverityHigh, "CrashLoop", nil)
+	if err == nil {
+		t.Error("expected error from FindOpen, got nil")
+	}
+}
+
+func TestCreateOrUpdate_CreateError_NonAlreadyExists(t *testing.T) {
+	t.Parallel()
+	c := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				return fmt.Errorf("injected create error")
+			},
+		}).Build()
+	err := CreateOrUpdate(context.Background(), c, controlNS, testRef(),
+		v1alpha1.SeverityHigh, "CrashLoop", []detector.Symptom{{Message: "crash"}})
+	if err == nil {
+		t.Error("expected error from Create, got nil")
 	}
 }
