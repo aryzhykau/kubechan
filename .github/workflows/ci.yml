@@ -66,8 +66,8 @@ jobs:
           profile: coverage.out
           local-prefix: github.com/org/kubechan
           config: .github/go-coverage.yml
-          git-token: ${{ secrets.GITHUB_TOKEN }}
-          git-branch: main
+          git-token: ${{ github.ref == 'refs/heads/main' && secrets.GITHUB_TOKEN || '' }}
+          git-branch: ${{ github.ref == 'refs/heads/main' && 'main' || '' }}
 
       - name: Upload coverage artifact
         if: always()
