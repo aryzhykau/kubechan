@@ -73,13 +73,13 @@ jobs:
           cache-dependency-glob: services/llm-gateway/uv.lock
 
       - name: Install dependencies
-        run: uv sync --frozen --group dev
+        run: unset VIRTUAL_ENV; uv sync --frozen --group dev
 
       - name: Pyright
-        run: uv run pyright .
+        run: unset VIRTUAL_ENV; uv run pyright .
 
       - name: Pytest + coverage
-        run: uv run pytest -v
+        run: unset VIRTUAL_ENV; uv run pytest -v
         # pyproject.toml addopts already include:
         #   --cov=app --cov=main --cov-report=term-missing
         #   --cov-report=xml:coverage.xml --cov-fail-under=70
