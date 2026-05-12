@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1alpha1 "github.com/org/kubechan/api/v1alpha1"
@@ -38,6 +39,7 @@ type PodReconciler struct {
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
+		Watches(&v1alpha1.KubechanExclusionRule{}, handler.EnqueueRequestsFromMapFunc(ruleToPodsMapper(r.Client))).
 		Complete(r)
 }
 

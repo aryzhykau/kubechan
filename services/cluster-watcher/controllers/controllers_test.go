@@ -1696,3 +1696,246 @@ func TestExclusionRuleReconciler_Reconcile_SkipsManualIncident(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// ── ruleNamespace ─────────────────────────────────────────────────────────────
+
+func TestRuleNamespace(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		obj    client.Object
+		wantNS string
+	}{
+		{
+			"rule with explicit namespace scope",
+			&v1alpha1.KubechanExclusionRule{
+				ObjectMeta: metav1.ObjectMeta{Name: "r1", Namespace: "kubechan"},
+				Spec:       v1alpha1.ExclusionRuleSpec{Namespace: "prod"},
+			},
+			"prod",
+		},
+		{
+			"rule with empty namespace scope means cluster-wide (empty string)",
+			&v1alpha1.KubechanExclusionRule{
+				ObjectMeta: metav1.ObjectMeta{Name: "r2", Namespace: "kubechan"},
+				Spec:       v1alpha1.ExclusionRuleSpec{Namespace: ""},
+			},
+			"",
+		},
+		{
+			"non-rule object falls back to object namespace",
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
+			},
+			"default",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ruleNamespace(tc.obj)
+			if got != tc.wantNS {
+				t.Errorf("ruleNamespace() = %q, want %q", got, tc.wantNS)
+			}
+		})
+	}
+}
+
+// ── ruleToPodsMapper ─────────────────────────────────────────────────────────
+
+func TestRuleToPodsMapper_ReturnsPodRequests(t *testing.T) {
+	t.Parallel()
+	pod1 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "staging"}}
+	pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "staging"}}
+	podOther := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-c", Namespace: "prod"}}
+
+	c := fake.NewClientBuilder().
+		WithScheme(newCtrlTestScheme()).
+		WithObjects(pod1, pod2, podOther).
+		Build()
+
+	rule := &v1alpha1.KubechanExclusionRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "kubechan"},
+		Spec:       v1alpha1.ExclusionRuleSpec{Namespace: "staging"},
+	}
+
+	mapFn := ruleToPodsMapper(c)
+	reqs := mapFn(context.Background(), rule)
+
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests for namespace staging, got %d", len(reqs))
+	}
+	names := map[string]bool{}
+	for _, r := range reqs {
+		names[r.Name] = true
+	}
+	if !names["pod-a"] || !names["pod-b"] {
+		t.Errorf("expected pod-a and pod-b in requests, got %v", names)
+	}
+}
+
+func TestRuleToPodsMapper_ClusterWideRule(t *testing.T) {
+	t.Parallel()
+	pod1 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-x", Namespace: "ns1"}}
+	pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-y", Namespace: "ns2"}}
+
+	c := fake.NewClientBuilder().
+		WithScheme(newCtrlTestScheme()).
+		WithObjects(pod1, pod2).
+		Build()
+
+	// Namespace="" means cluster-wide — mapper lists all namespaces
+	rule := &v1alpha1.KubechanExclusionRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "kubechan"},
+		Spec:       v1alpha1.ExclusionRuleSpec{Namespace: ""},
+	}
+
+	mapFn := ruleToPodsMapper(c)
+	reqs := mapFn(context.Background(), rule)
+
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests for cluster-wide rule, got %d", len(reqs))
+	}
+}
+
+func TestRuleToPodsMapper_NoPodsReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	c := fake.NewClientBuilder().WithScheme(newCtrlTestScheme()).Build()
+
+	rule := &v1alpha1.KubechanExclusionRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "kubechan"},
+		Spec:       v1alpha1.ExclusionRuleSpec{Namespace: "empty-ns"},
+	}
+
+	mapFn := ruleToPodsMapper(c)
+	reqs := mapFn(context.Background(), rule)
+
+	if len(reqs) != 0 {
+		t.Errorf("expected 0 requests, got %d", len(reqs))
+	}
+}
+
+// ── ruleToServicesMapper ─────────────────────────────────────────────────────
+
+func TestRuleToServicesMapper_ReturnsServiceRequests(t *testing.T) {
+	t.Parallel()
+	svc1 := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "svc-a", Namespace: "staging"}}
+	svc2 := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "svc-b", Namespace: "staging"}}
+	svcOther := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "svc-c", Namespace: "prod"}}
+
+	c := fake.NewClientBuilder().
+		WithScheme(newCtrlTestScheme()).
+		WithObjects(svc1, svc2, svcOther).
+		Build()
+
+	rule := &v1alpha1.KubechanExclusionRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "kubechan"},
+		Spec:       v1alpha1.ExclusionRuleSpec{Namespace: "staging"},
+	}
+
+	mapFn := ruleToServicesMapper(c)
+	reqs := mapFn(context.Background(), rule)
+
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests for namespace staging, got %d", len(reqs))
+	}
+	names := map[string]bool{}
+	for _, r := range reqs {
+		names[r.Name] = true
+	}
+	if !names["svc-a"] || !names["svc-b"] {
+		t.Errorf("expected svc-a and svc-b in requests, got %v", names)
+	}
+}
+
+func TestRuleToServicesMapper_NoServicesReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	c := fake.NewClientBuilder().WithScheme(newCtrlTestScheme()).Build()
+
+	rule := &v1alpha1.KubechanExclusionRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "kubechan"},
+		Spec:       v1alpha1.ExclusionRuleSpec{Namespace: "empty-ns"},
+	}
+
+	mapFn := ruleToServicesMapper(c)
+	reqs := mapFn(context.Background(), rule)
+
+	if len(reqs) != 0 {
+		t.Errorf("expected 0 requests, got %d", len(reqs))
+	}
+}
+
+// ── ruleToDeploymentsMapper ──────────────────────────────────────────────────
+
+func TestRuleToDeploymentsMapper_ReturnsDeploymentRequests(t *testing.T) {
+	t.Parallel()
+	dep1 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "staging"}}
+	dep2 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "dep-b", Namespace: "staging"}}
+	depOther := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "dep-c", Namespace: "prod"}}
+
+	c := fake.NewClientBuilder().
+		WithScheme(newCtrlTestScheme()).
+		WithObjects(dep1, dep2, depOther).
+		Build()
+
+	rule := &v1alpha1.KubechanExclusionRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "kubechan"},
+		Spec:       v1alpha1.ExclusionRuleSpec{Namespace: "staging"},
+	}
+
+	mapFn := ruleToDeploymentsMapper(c)
+	reqs := mapFn(context.Background(), rule)
+
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests for namespace staging, got %d", len(reqs))
+	}
+	names := map[string]bool{}
+	for _, r := range reqs {
+		names[r.Name] = true
+	}
+	if !names["dep-a"] || !names["dep-b"] {
+		t.Errorf("expected dep-a and dep-b in requests, got %v", names)
+	}
+}
+
+func TestRuleToDeploymentsMapper_ClusterWideRule(t *testing.T) {
+	t.Parallel()
+	dep1 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "dep-x", Namespace: "ns1"}}
+	dep2 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "dep-y", Namespace: "ns2"}}
+
+	c := fake.NewClientBuilder().
+		WithScheme(newCtrlTestScheme()).
+		WithObjects(dep1, dep2).
+		Build()
+
+	rule := &v1alpha1.KubechanExclusionRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "kubechan"},
+		Spec:       v1alpha1.ExclusionRuleSpec{Namespace: ""},
+	}
+
+	mapFn := ruleToDeploymentsMapper(c)
+	reqs := mapFn(context.Background(), rule)
+
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests for cluster-wide rule, got %d", len(reqs))
+	}
+}
+
+func TestRuleToDeploymentsMapper_NoDeploymentsReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	c := fake.NewClientBuilder().WithScheme(newCtrlTestScheme()).Build()
+
+	rule := &v1alpha1.KubechanExclusionRule{
+		ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "kubechan"},
+		Spec:       v1alpha1.ExclusionRuleSpec{Namespace: "empty-ns"},
+	}
+
+	mapFn := ruleToDeploymentsMapper(c)
+	reqs := mapFn(context.Background(), rule)
+
+	if len(reqs) != 0 {
+		t.Errorf("expected 0 requests, got %d", len(reqs))
+	}
+}
+

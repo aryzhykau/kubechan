@@ -1,360 +1,216 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { IncidentList } from './IncidentList'
-import { KubeChanSidebar, type KubeChanState } from './KubeChanSidebar'
-import { DiagnosticsPage } from './DiagnosticsPage'
-import { DiagnosticRunDetail } from './DiagnosticRunDetail'
-import { ManualIncidentModal } from './ManualIncidentModal'
-import { ExclusionRuleModal } from './ExclusionRuleModal'
-import { LoginPage } from './LoginPage'
-import { UsersPage } from './UsersPage'
-import { LLMSettingsPage } from './LLMSettingsPage'
-import { AdminSettingsPage } from './AdminSettingsPage'
-import { ExclusionRulesPage } from './ExclusionRulesPage'
-import { pickChatterLine, type ChatterEvent } from './chatter'
-import { useWebSocket, type WSEvent } from './useWebSocket'
-import { api, getToken, clearToken, type CurrentUser, type ExclusionRuleProposal } from './api'
-import type { AnalysisResult } from './api'
+import { useEffect } from 'react'
+import { createBrowserRouter, RouterProvider, Navigate, Outlet, useNavigate, NavLink } from 'react-router-dom'
+import { Box, CircularProgress, Button, Tooltip, Avatar, Chip } from '@mui/material'
+import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined'
+import ListAltIcon from '@mui/icons-material/ListAlt'
+import PeopleOutlinedIcon from '@mui/icons-material/PeopleOutlined'
+import TuneIcon from '@mui/icons-material/Tune'
+import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
+import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined'
+import LogoutIcon from '@mui/icons-material/Logout'
+import { KubeChanSidebar } from './components/KubeChanSidebar'
+import { IncidentList } from './pages/incidents/IncidentList'
+import { DiagnosticsPage } from './pages/diagnostics/DiagnosticsPage'
+import { DiagnosticRunDetail } from './pages/diagnostics/DiagnosticRunDetail'
+import { UsersPage } from './pages/admin/UsersPage'
+import { AdminSettingsPage } from './pages/admin/AdminSettingsPage'
+import { ExclusionRulesPage } from './pages/admin/ExclusionRulesPage'
+import { LLMSettingsPage } from './pages/llm/LLMSettingsPage'
+import { LoginPage } from './pages/login/LoginPage'
+import { ManualIncidentModal } from './pages/manual-incident/ManualIncidentModal'
+import { ExclusionRuleModal } from './pages/exclusion-rules/ExclusionRuleModal'
+import { useAppDispatch, useAppSelector } from './store/hooks'
+import { setUser, clearUser, selectCurrentUser } from './store/slices/authSlice'
+import { selectKubeChan, selectMoodLevel } from './store/slices/kubechanSlice'
+import { closeManualModal, selectUI } from './store/slices/uiSlice'
+import { useMeQuery } from './store/api/authApi'
+import { incidentsApi } from './store/api/incidentsApi'
+import { useKubeChan } from './hooks/useKubeChan'
 import './app.css'
 
-type View =
-  | { type: 'incidents' }
-  | { type: 'diagnostics' }
-  | { type: 'run-detail'; runId: string }
-  | { type: 'users' }
-  | { type: 'llm-settings' }
-  | { type: 'admin-settings' }
-  | { type: 'exclusion-rules' }
+// ── Auth bootstrap inside Provider ───────────────────────────────────────────
 
-function App() {
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null | undefined>(undefined)
-  const [view, setView] = useState<View>({ type: 'incidents' })
-  const [kubechan, setKubechan] = useState<KubeChanState>({ pose: 'idle' })
-  const kubechanRef = useRef(kubechan)
-  useEffect(() => { kubechanRef.current = kubechan }, [kubechan])
-
-  const [showManualModal, setShowManualModal] = useState(false)
-  const [exclusionProposal, setExclusionProposal] = useState<ExclusionRuleProposal | null>(null)
-
-  const [moodLevel, setMoodLevel] = useState(0)
-  const moodLevelRef = useRef(0)
-  useEffect(() => { moodLevelRef.current = moodLevel }, [moodLevel])
-
-  const chatterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pokeCountRef = useRef(0)
-  const pokeResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastInteractionRef = useRef(Date.now())
-  const silenceStageRef = useRef<0 | 1 | 2>(0)
-
-  // Auth gate: check existing token on mount
-  useEffect(() => {
-    const token = getToken()
-    if (!token) {
-      setCurrentUser(null)
-      return
-    }
-    api.me().then(u => setCurrentUser(u)).catch(() => {
-      clearToken()
-      setCurrentUser(null)
-    })
-  }, [])
-
-  const triggerChatter = useCallback((event: ChatterEvent) => {
-    const pose = kubechanRef.current.pose
-    if (event === 'idle' || event === 'silence-hint' || event === 'silence-paranoid') {
-      if (pose !== 'idle') return
-    } else {
-      if (pose === 'thinking' || pose === 'speaking') return
-      lastInteractionRef.current = Date.now()
-      silenceStageRef.current = 0
-    }
-    const line = pickChatterLine(event, moodLevelRef.current)
-    if (chatterTimerRef.current !== null) {
-      clearTimeout(chatterTimerRef.current)
-    }
-    setKubechan({ pose: 'chatter', chatterLine: line })
-    chatterTimerRef.current = setTimeout(() => {
-      chatterTimerRef.current = null
-      setKubechan(prev => prev.pose === 'chatter' ? { pose: 'idle' } : prev)
-    }, 9000)
-  }, [])
-
-  const handlePoke = useCallback(() => {
-    pokeCountRef.current += 1
-    const count = pokeCountRef.current
-    const event: ChatterEvent =
-      count >= 5 ? 'poke-rage' :
-      count >= 3 ? 'poke-annoyed' :
-      'poke'
-    triggerChatter(event)
-    if (pokeResetTimerRef.current !== null) clearTimeout(pokeResetTimerRef.current)
-    pokeResetTimerRef.current = setTimeout(() => {
-      pokeCountRef.current = 0
-    }, 8000)
-    api.poke().catch(() => {})
-  }, [triggerChatter])
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const dispatch  = useAppDispatch()
+  const current   = useAppSelector(selectCurrentUser)
+  const { data: me, isLoading, isError } = useMeQuery()
 
   useEffect(() => {
-    const id = setInterval(() => {
-      if (kubechanRef.current.pose === 'idle') triggerChatter('idle')
-    }, 60_000)
-    return () => clearInterval(id)
-  }, [triggerChatter])
+    if (me)      dispatch(setUser(me))
+    if (isError) dispatch(clearUser())
+  }, [me, isError, dispatch])
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (kubechanRef.current.pose !== 'idle') return
-      const idleMs = Date.now() - lastInteractionRef.current
-      if (idleMs >= 10 * 60_000 && silenceStageRef.current < 2) {
-        silenceStageRef.current = 2
-        triggerChatter('silence-paranoid')
-      } else if (idleMs >= 5 * 60_000 && silenceStageRef.current < 1) {
-        silenceStageRef.current = 1
-        triggerChatter('silence-hint')
-      }
-    }, 30_000)
-    return () => clearInterval(id)
-  }, [triggerChatter])
-
-  const handleWS = useCallback((event: WSEvent) => {
-    if (event.type === 'Incident.Created') {
-      triggerChatter('new-incident')
-    } else if (event.type === 'KubeChanState.Updated') {
-      const e = event as { type: string; moodLevel?: number }
-      if (typeof e.moodLevel === 'number') setMoodLevel(e.moodLevel)
-    }
-  }, [triggerChatter])
-  useWebSocket(handleWS)
-
-  useEffect(() => {
-    api.getKubeChanState().then(s => setMoodLevel(s.moodLevel)).catch(() => {})
-  }, [])
-
-  const handleAnalysisStart = useCallback((incidentName: string) => {
-    setKubechan({ pose: 'thinking', incidentName })
-  }, [])
-
-  const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const showReaction = useCallback((line: string) => {
-    setKubechan(prev => ({ ...prev, reactionLine: line }))
-    if (reactionTimerRef.current !== null) clearTimeout(reactionTimerRef.current)
-    reactionTimerRef.current = setTimeout(() => {
-      reactionTimerRef.current = null
-      setKubechan(prev => prev.reactionLine === line ? { ...prev, reactionLine: undefined } : prev)
-    }, 4500)
-  }, [])
-
-  const handleAnalysisComplete = useCallback((result: AnalysisResult, incidentName: string) => {
-    setKubechan({ pose: 'speaking', incidentName, result })
-    if (result.payload?.suggestExclusionRule) {
-      const line = pickChatterLine('false-alarm', moodLevelRef.current)
-      showReaction(line)
-    }
-  }, [showReaction])
-
-  const handleRunResultLoaded = useCallback((result: AnalysisResult | null, runId: string) => {
-    if (result) {
-      setKubechan({ pose: 'speaking', incidentName: result.incidentId || runId, result })
-    } else {
-      setKubechan({ pose: 'idle' })
-    }
-  }, [])
-
-  const handleManualCreated = useCallback((incidentId: string, diagnosticRunId: string) => {
-    setShowManualModal(false)
-    setKubechan({ pose: 'thinking', incidentName: incidentId })
-    setView({ type: 'incidents' })
-    const poll = setInterval(async () => {
-      try {
-        const result = await api.getDiagnosticRunAnalysisResult(diagnosticRunId)
-        if (result && result.status === 'completed') {
-          clearInterval(poll)
-          handleAnalysisComplete(result, incidentId)
-        }
-      } catch {
-        // still pending — keep polling
-      }
-    }, 3000)
-    setTimeout(() => clearInterval(poll), 5 * 60_000)
-  }, [handleAnalysisComplete])
-
-  const handleIncidentResolved = useCallback(() => {
-    const line = pickChatterLine('incident-resolved', moodLevelRef.current)
-    if (chatterTimerRef.current !== null) clearTimeout(chatterTimerRef.current)
-    lastInteractionRef.current = Date.now()
-    silenceStageRef.current = 0
-    setKubechan({ pose: 'chatter', chatterLine: line })
-    chatterTimerRef.current = setTimeout(() => {
-      chatterTimerRef.current = null
-      setKubechan(prev => prev.pose === 'chatter' ? { pose: 'idle' } : prev)
-    }, 9000)
-  }, [])
-
-  const handleRate = useCallback(async (resultId: string, rating: 'up' | 'down', confidence: number) => {
-    try {
-      await api.rateAnalysisResult(resultId, rating)
-    } catch {
-      // fire-and-forget; rating failure doesn't break UX
-    }
-    const event: ChatterEvent = rating === 'up'
-      ? (confidence >= 0.75 ? 'rating-up-flustered' : 'rating-up')
-      : (confidence >= 0.75 ? 'rating-down-high-conf' : 'rating-down-low-conf')
-    const line = pickChatterLine(event, moodLevelRef.current)
-    setKubechan(prev => {
-      if (prev.pose !== 'speaking' || !prev.result || prev.result.id !== resultId) return prev
-      return { ...prev, result: { ...prev.result, userRating: rating } }
-    })
-    showReaction(line)
-  }, [moodLevelRef, showReaction])
-
-  // ── Conditional rendering (after all hooks) ──────────────────────────────
-
-  if (currentUser === undefined) {
-    return <div className="app-loading">Loading…</div>
+  if (isLoading || current === undefined) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CircularProgress size={32} />
+      </Box>
+    )
   }
 
-  if (currentUser === null) {
-    return <LoginPage onLogin={() => {
-      api.me().then(u => setCurrentUser(u)).catch(() => {
-        clearToken()
-        setCurrentUser(null)
-      })
-    }} />
-  }
+  if (current === null) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
+// ── Shell layout ──────────────────────────────────────────────────────────────
+
+const NAV_ITEMS = [
+  { to: '/',                 label: 'Incidents',       icon: <ListAltIcon sx={{ fontSize: '1rem' }} />,        end: true  },
+  { to: '/diagnostics',      label: 'Diagnostics',     icon: <BugReportOutlinedIcon sx={{ fontSize: '1rem' }} />, end: false },
+  { to: '/admin/exclusions', label: 'Exclusion Rules', icon: <ShieldOutlinedIcon sx={{ fontSize: '1rem' }} />,  end: false },
+  { to: '/admin/users',      label: 'Users',           icon: <PeopleOutlinedIcon sx={{ fontSize: '1rem' }} />,  end: false },
+  { to: '/admin/settings',   label: 'Settings',        icon: <TuneIcon sx={{ fontSize: '1rem' }} />,            end: false },
+  { to: '/llm-settings',     label: 'LLM',             icon: <SmartToyOutlinedIcon sx={{ fontSize: '1rem' }} />,end: false },
+]
+
+function AppShell() {
+  const dispatch    = useAppDispatch()
+  const kubechan    = useAppSelector(selectKubeChan)
+  const moodLevel   = useAppSelector(selectMoodLevel)
+  const ui          = useAppSelector(selectUI)
+  const navigate    = useNavigate()
+  const currentUser = useAppSelector(selectCurrentUser)
+
+  const { triggerChatter, handleAnalysisStart, handleRunResultLoaded, handleRate } = useKubeChan()
 
   return (
     <div className="app">
+      {/* ── Top header ── */}
       <header className="app-header">
-        <img
-          src="/logo.png"
-          alt="KubeChan"
-          className={"app-logo"}
-        />
+        <img src="/kubechan-idle-1.png" alt="KubeChan" className="app-logo" />
         <h1>KubeChan</h1>
-        <nav className="app-nav">
-          <button
-            className={`app-nav-btn${view.type === 'incidents' ? ' active' : ''}`}
-            onClick={() => { setView({ type: 'incidents' }); triggerChatter('nav-incidents') }}
-          >
-            Incidents
-          </button>
-          <button
-            className={`app-nav-btn${view.type === 'diagnostics' || view.type === 'run-detail' ? ' active' : ''}`}
-            onClick={() => {
-              setView({ type: 'diagnostics' })
-              if (kubechanRef.current.pose === 'speaking') {
-                const line = pickChatterLine('dismissed-analysis', moodLevelRef.current)
-                setKubechan({ pose: 'chatter', chatterLine: line })
-                if (chatterTimerRef.current !== null) clearTimeout(chatterTimerRef.current)
-                chatterTimerRef.current = setTimeout(() => {
-                  chatterTimerRef.current = null
-                  setKubechan(prev => prev.pose === 'chatter' ? { pose: 'idle' } : prev)
-                }, 9000)
-              } else {
-                triggerChatter('nav-diagnostics')
-              }
-            }}
-          >
-            Diagnostics
-          </button>
-          {currentUser.role === 'admin' && (
-            <button
-              className={`app-nav-btn${view.type === 'users' ? ' active' : ''}`}
-              onClick={() => setView({ type: 'users' })}
-            >
-              Users
-            </button>
-          )}
-          {currentUser.role === 'admin' && (
-            <button
-              className={`app-nav-btn${view.type === 'admin-settings' ? ' active' : ''}`}
-              onClick={() => setView({ type: 'admin-settings' })}
-            >
-              Settings
-            </button>
-          )}
-          {currentUser.role === 'admin' && (
-            <button
-              className={`app-nav-btn${view.type === 'exclusion-rules' ? ' active' : ''}`}
-              onClick={() => setView({ type: 'exclusion-rules' })}
-            >
-              Exclusion Rules
-            </button>
-          )}
-          <button
-            className={`app-nav-btn${view.type === 'llm-settings' ? ' active' : ''}`}
-            onClick={() => setView({ type: 'llm-settings' })}
-          >
-            LLM Settings
-          </button>
-        </nav>
-        <div className="app-user-info">
-          <span className="app-username">{currentUser.username}</span>
-          <button className="app-logout-btn" onClick={() => { clearToken(); setCurrentUser(null) }}>
-            Sign out
-          </button>
-        </div>
+
+        {/* Nav links */}
+        <Box component="nav" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 3 }}>
+          {NAV_ITEMS.map(({ to, label, icon, end }) => (
+            <NavLink key={to} to={to} end={end} style={{ textDecoration: 'none' }}>
+              {({ isActive }) => (
+                <Button
+                  size="small"
+                  startIcon={icon}
+                  sx={{
+                    fontSize: '0.78rem',
+                    fontWeight: isActive ? 700 : 400,
+                    color: isActive ? 'primary.light' : 'text.secondary',
+                    bgcolor: isActive ? 'rgba(99,102,241,0.12)' : 'transparent',
+                    borderBottom: isActive ? '2px solid' : '2px solid transparent',
+                    borderColor: isActive ? 'primary.main' : 'transparent',
+                    borderRadius: '6px 6px 0 0',
+                    px: 1.5, py: 0.5,
+                    minWidth: 0,
+                    '&:hover': { bgcolor: 'rgba(255,255,255,0.05)', color: 'text.primary' },
+                  }}
+                >
+                  {label}
+                </Button>
+              )}
+            </NavLink>
+          ))}
+        </Box>
+
+        {/* Spacer */}
+        <Box sx={{ flex: 1 }} />
+
+        {/* User chip + logout */}
+        {currentUser && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Chip
+              avatar={<Avatar sx={{ bgcolor: 'primary.dark', fontSize: '0.65rem !important' }}>{currentUser.username[0].toUpperCase()}</Avatar>}
+              label={currentUser.username}
+              size="small"
+              variant="outlined"
+              sx={{ fontSize: '0.75rem', borderColor: 'divider', color: 'text.secondary' }}
+            />
+            <Tooltip title="Logout">
+              <Box
+                component="button"
+                onClick={() => { dispatch(clearUser()); navigate('/login') }}
+                sx={{
+                  display: 'flex', alignItems: 'center', gap: 0.5,
+                  background: 'none', border: '1px solid', borderColor: 'divider',
+                  borderRadius: 1, px: 1, py: 0.5, cursor: 'pointer',
+                  color: 'text.secondary', fontSize: '0.75rem',
+                  '&:hover': { borderColor: 'primary.main', color: 'text.primary' },
+                }}
+              >
+                <LogoutIcon sx={{ fontSize: '0.9rem' }} />
+              </Box>
+            </Tooltip>
+          </Box>
+        )}
       </header>
+
+      {/* ── Body: main + right sidebar ── */}
       <div className="app-body">
         <main className="app-main">
-          {view.type === 'incidents' && (
-            <IncidentList
-              onAnalysisStart={handleAnalysisStart}
-              onAnalysisComplete={handleAnalysisComplete}
-              onAction={triggerChatter}
-              onResolved={handleIncidentResolved}
-              onReportManual={() => setShowManualModal(true)}
-              onSuggestRule={setExclusionProposal}
-            />
-          )}
-          {view.type === 'diagnostics' && (
-            <DiagnosticsPage
-              onSelectRun={runId => setView({ type: 'run-detail', runId })}
-              onAction={triggerChatter}
-            />
-          )}
-          {view.type === 'run-detail' && (
-            <DiagnosticRunDetail
-              runId={view.runId}
-              onBack={() => { setView({ type: 'diagnostics' }); setKubechan({ pose: 'idle' }) }}
-              onResultLoaded={handleRunResultLoaded}
-              onAction={triggerChatter}
-            />
-          )}
-          {view.type === 'users' && currentUser.role === 'admin' && (
-            <UsersPage />
-          )}
-          {view.type === 'admin-settings' && currentUser.role === 'admin' && (
-            <AdminSettingsPage />
-          )}
-          {view.type === 'exclusion-rules' && currentUser.role === 'admin' && (
-            <ExclusionRulesPage />
-          )}
-          {view.type === 'llm-settings' && (
-            <LLMSettingsPage />
-          )}
+          <Outlet context={{ triggerChatter, handleAnalysisStart, handleRunResultLoaded, handleRate }} />
         </main>
-        <KubeChanSidebar state={kubechan} onPoke={handlePoke} moodLevel={moodLevel} onRate={handleRate} />
+
+        {/* KubeChan character sidebar — right side */}
+        <KubeChanSidebar
+          state={kubechan}
+          moodLevel={moodLevel}
+          onRate={handleRate}
+        />
       </div>
-      {showManualModal && (
+
+      {ui.showManualModal && (
         <ManualIncidentModal
-          onClose={() => setShowManualModal(false)}
-          onCreated={handleManualCreated}
+          onClose={() => dispatch(closeManualModal())}
+          onCreated={(incidentId, diagnosticRunId) => {
+            dispatch(closeManualModal())
+            handleAnalysisStart(incidentId)
+            navigate(`/diagnostics/${encodeURIComponent(diagnosticRunId)}`)
+          }}
         />
       )}
-      {exclusionProposal && (
+
+      {ui.exclusionProposal && (
         <ExclusionRuleModal
-          open={!!exclusionProposal}
-          proposal={exclusionProposal}
-          onClose={() => setExclusionProposal(null)}
+          open={!!ui.exclusionProposal}
+          onClose={() => dispatch({ type: 'ui/setExclusionProposal', payload: null })}
+          proposal={ui.exclusionProposal}
           onCreated={() => {
-            setExclusionProposal(null)
-            triggerChatter('exclusionRuleCreated')
+            dispatch({ type: 'ui/setExclusionProposal', payload: null })
+            dispatch(incidentsApi.util.invalidateTags([{ type: 'Incident', id: 'LIST' }]))
           }}
         />
       )}
     </div>
   )
+}
+
+// ── Router ────────────────────────────────────────────────────────────────────
+
+const router = createBrowserRouter([
+  {
+    path: '/login',
+    element: <LoginPage />,
+  },
+  {
+    path: '/',
+    element: (
+      <AuthGate>
+        <AppShell />
+      </AuthGate>
+    ),
+    children: [
+      { index: true,              element: <IncidentList /> },
+      { path: 'diagnostics',      element: <DiagnosticsPage /> },
+      { path: 'diagnostics/:id',  element: <DiagnosticRunDetail /> },
+      { path: 'admin/users',      element: <UsersPage /> },
+      { path: 'admin/settings',   element: <AdminSettingsPage /> },
+      { path: 'admin/exclusions', element: <ExclusionRulesPage /> },
+      { path: 'llm-settings',     element: <LLMSettingsPage /> },
+      { path: '*',                element: <Navigate to="/" replace /> },
+    ],
+  },
+])
+
+// ── Root export ───────────────────────────────────────────────────────────────
+
+function App() {
+  return <RouterProvider router={router} />
 }
 
 export default App

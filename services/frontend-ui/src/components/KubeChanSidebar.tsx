@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react'
-import type { AnalysisResult } from './api'
+import type { AnalysisResult } from '../api/index'
 
 const THINKING_IMAGES = [
   '/kubechan-looking.png',

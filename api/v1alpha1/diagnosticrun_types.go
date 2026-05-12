@@ -16,6 +16,17 @@ const (
 	DiagnosticRunStateFailed    DiagnosticRunState = "failed"
 )
 
+// DiagnosticRunAnalysisState is the lifecycle state of the LLM analysis phase for a DiagnosticRun.
+// +kubebuilder:validation:Enum=not_queued;in_progress;completed;failed
+type DiagnosticRunAnalysisState string
+
+const (
+	DiagnosticRunAnalysisStateNotQueued  DiagnosticRunAnalysisState = "not_queued"
+	DiagnosticRunAnalysisStateInProgress DiagnosticRunAnalysisState = "in_progress"
+	DiagnosticRunAnalysisStateCompleted  DiagnosticRunAnalysisState = "completed"
+	DiagnosticRunAnalysisStateFailed     DiagnosticRunAnalysisState = "failed"
+)
+
 // RedactionSummary contains a summary of the log/evidence redaction process.
 type RedactionSummary struct {
 	// PatternsApplied is the number of redaction pattern matches found and replaced.
@@ -84,11 +95,21 @@ type DiagnosticRunStatus struct {
 	// LogTruncationInfo contains information about log truncation.
 	// +optional
 	LogTruncationInfo *LogTruncationInfo `json:"logTruncationInfo,omitempty"`
+
+	// AnalysisState is the current state of the LLM analysis phase for this run.
+	// +kubebuilder:default=not_queued
+	// +optional
+	AnalysisState DiagnosticRunAnalysisState `json:"analysisState,omitempty"`
+
+	// AnalysisResultRef is the analysis_results.id for the completed LLM analysis.
+	// +optional
+	AnalysisResultRef string `json:"analysisResultRef,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.state"
+// +kubebuilder:printcolumn:name="Analysis",type=string,JSONPath=".status.analysisState"
 // +kubebuilder:printcolumn:name="Problem Case",type=string,JSONPath=".spec.problemCaseRef"
 // +kubebuilder:printcolumn:name="Requested",type=date,JSONPath=".spec.requestedAt"
 // +kubebuilder:printcolumn:name="Collected",type=date,JSONPath=".status.collectedAt"

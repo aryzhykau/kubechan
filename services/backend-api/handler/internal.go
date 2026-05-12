@@ -126,6 +126,10 @@ func (h *Internal) ReceiveEvidence(w http.ResponseWriter, r *http.Request) {
 				TruncatedBytes: req.LogTruncationInfo.TruncatedBytes,
 			}
 		}
+		// Mark analysis as in_progress if we will dispatch to the LLM gateway.
+		if h.LLMGatewayURL != "" {
+			dr.Status.AnalysisState = v1alpha1.DiagnosticRunAnalysisStateInProgress
+		}
 		_ = h.K8s.Status().Patch(r.Context(), dr, statusPatch)
 	}
 
@@ -135,6 +139,21 @@ func (h *Internal) ReceiveEvidence(w http.ResponseWriter, r *http.Request) {
 	if h.LLMGatewayURL != "" {
 		go h.dispatchAnalysis(evidenceID, req)
 	}
+}
+
+// patchAnalysisState updates the AnalysisState (and optionally AnalysisResultRef) on a DiagnosticRun.
+func (h *Internal) patchAnalysisState(drName string, state v1alpha1.DiagnosticRunAnalysisState, resultRef string) {
+	ctx := context.Background()
+	dr := &v1alpha1.DiagnosticRun{}
+	if err := h.K8s.Get(ctx, client.ObjectKey{Namespace: h.DefaultNamespace, Name: drName}, dr); err != nil {
+		return
+	}
+	patch := client.MergeFrom(dr.DeepCopy())
+	dr.Status.AnalysisState = state
+	if resultRef != "" {
+		dr.Status.AnalysisResultRef = resultRef
+	}
+	_ = h.K8s.Status().Patch(ctx, dr, patch)
 }
 
 func nullStr(s string) any {
@@ -312,18 +331,21 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	resp, err := httpClient.Post(h.LLMGatewayURL+"/analyze", "application/json", bytes.NewReader(body))
 	if err != nil {
 		logger.Error("dispatchAnalysis: llm-gateway call failed", "err", err)
+		h.patchAnalysisState(req.DiagnosticRunID, v1alpha1.DiagnosticRunAnalysisStateFailed, "")
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Error("dispatchAnalysis: llm-gateway non-200", "status", resp.StatusCode)
+		h.patchAnalysisState(req.DiagnosticRunID, v1alpha1.DiagnosticRunAnalysisStateFailed, "")
 		return
 	}
 
 	var result llmAnalyzeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		logger.Error("dispatchAnalysis: decode response", "err", err)
+		h.patchAnalysisState(req.DiagnosticRunID, v1alpha1.DiagnosticRunAnalysisStateFailed, "")
 		return
 	}
 
@@ -358,8 +380,12 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	)
 	if err != nil {
 		logger.Error("dispatchAnalysis: insert analysis_result", "err", err)
+		h.patchAnalysisState(req.DiagnosticRunID, v1alpha1.DiagnosticRunAnalysisStateFailed, "")
 		return
 	}
+
+	// Patch analysisState → completed on the DiagnosticRun CRD.
+	h.patchAnalysisState(req.DiagnosticRunID, v1alpha1.DiagnosticRunAnalysisStateCompleted, analysisID)
 
 	logger.Info("analysis completed", "evidenceId", evidenceID, "analysisId", analysisID, "confidence", result.Confidence)
 
@@ -367,6 +393,7 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	if h.Hub != nil {
 		msg, _ := json.Marshal(map[string]any{
 			"type":                 "Analysis.Completed",
+			"diagnosticRunId":      req.DiagnosticRunID,
 			"analysisId":          analysisID,
 			"incidentId":          req.IncidentID,
 			"rootCause":           result.LikelyRootCause,
