@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>KubeChan — AI-Powered Kubernetes Troubleshooting Assistant</title>
-  <meta name="description" content="KubeChan is an open-source, read-only Kubernetes AI assistant that automatically detects cluster anomalies, collects diagnostic evidence, and delivers LLM-powered root cause analysis through a real-time web UI." />
-  <meta name="keywords" content="kubernetes troubleshooting, kubernetes AI, CrashLoopBackOff detector, kubernetes diagnostics, k8s root cause analysis, kubernetes monitoring, AI ops, kubernetes operator, controller-runtime, AWS Bedrock kubernetes" />
+  <meta name="description" content="KubeChan is an open-source, read-only Kubernetes AI assistant that automatically detects cluster problems, collects evidence, and delivers AI-powered root cause analysis through a real-time web UI. Supports AWS Bedrock and GitHub Copilot." />
+  <meta name="keywords" content="kubernetes troubleshooting, kubernetes AI, kubernetes diagnostics, k8s root cause analysis, kubernetes monitoring, AI ops, AWS Bedrock kubernetes, GitHub Copilot kubernetes, kubernetes incident management" />
   <meta name="author" content="KubeChan" />
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://aryzhykau.github.io/kubechan/" />
@@ -14,7 +14,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://aryzhykau.github.io/kubechan/" />
   <meta property="og:title" content="KubeChan — AI-Powered Kubernetes Troubleshooting Assistant" />
-  <meta property="og:description" content="KubeChan watches your cluster, detects broken workloads, collects diagnostic evidence, and calls an LLM for root-cause analysis — delivered through a web UI with an opinionated tsundere character." />
+  <meta property="og:description" content="KubeChan watches your cluster, detects broken workloads, and delivers AI-powered root cause analysis — with AWS Bedrock or GitHub Copilot — through a web UI with an opinionated tsundere character." />
   <meta property="og:image" content="https://raw.githubusercontent.com/aryzhykau/kubechan/main/services/frontend-ui/public/kubechan-idle-1.png" />
   <meta property="og:image:alt" content="KubeChan character mascot" />
   <meta property="og:site_name" content="KubeChan" />
@@ -690,8 +690,8 @@
         <h1 id="hero-heading">Your cluster is broken.<br /><em>KubeChan knows why.</em></h1>
         <p class="hero-sub">
           An open-source Kubernetes AI troubleshooting assistant that <strong>watches your cluster</strong>,
-          detects broken workloads, collects diagnostic evidence, and delivers <strong>LLM-powered root cause analysis</strong>
-          — with an opinionated personality who will judge your configuration choices.
+          detects broken workloads, and delivers <strong>AI-powered root cause analysis</strong>
+          — with AWS Bedrock or GitHub Copilot — and an opinionated personality who will judge your configuration choices.
         </p>
         <div class="hero-ctas">
           <a href="#quickstart" class="btn-primary">
@@ -719,16 +719,16 @@
         <div class="section-divider"></div>
         <h2 id="about-heading">Stop guessing. Start diagnosing.</h2>
         <p class="section-lead">
-          KubeChan is a Kubernetes-native operator that continuously observes your cluster,
-          surfaces real problems, and asks an LLM to explain exactly what went wrong and how to fix it.
-          No agents. No write access. Just clarity.
+          KubeChan is a Kubernetes-native observability tool that continuously watches your cluster,
+          surfaces real problems the moment they happen, and asks an AI to explain exactly what went wrong and how to fix it.
+          No manual log digging. No guesswork. Just clear answers.
         </p>
 
         <div class="advisory-banner" role="note">
           <span class="icon" aria-hidden="true">🛡️</span>
           <div>
-            <strong>KubeChan never modifies cluster state.</strong>
-            <p>It operates in purely advisory mode — read-only access to your cluster. No LLM has direct API access. Evidence is collected by the diagnostics-worker and passed to the gateway, keeping your credentials and secrets safe.</p>
+            <strong>KubeChan never modifies your cluster.</strong>
+            <p>It operates in read-only mode — all analysis is purely advisory. No AI model has direct access to your cluster. Your secrets and credentials are never exposed.</p>
           </div>
         </div>
       </div>
@@ -742,7 +742,7 @@
         <h2 id="hiw-heading">Two paths to root cause analysis</h2>
         <p class="section-lead">
           KubeChan supports fully automated detection <em>and</em> user-reported incidents.
-          Both paths run through the same evidence collection and LLM analysis pipeline.
+          Both paths run through the same evidence collection and AI analysis pipeline.
         </p>
 
         <div class="pipeline-grid">
@@ -750,49 +750,35 @@
           <div class="pipeline-card auto">
             <div class="pipeline-title">
               <span class="pipeline-badge auto">Auto</span>
-              <h3>Cluster-watcher detects an anomaly</h3>
+              <h3>KubeChan spots a problem</h3>
             </div>
             <ol class="pipeline-steps">
               <li>
                 <span class="step-num">1</span>
                 <div class="step-text">
                   <strong>Detect</strong>
-                  cluster-watcher reconcilers spot CrashLoopBackOff, ImagePullBackOff, pending pods, unavailable deployments, or services with no endpoints.
+                  KubeChan continuously watches your workloads and automatically spots crash-looping containers, unavailable deployments, services with no traffic, and more.
                 </div>
               </li>
               <li>
                 <span class="step-num">2</span>
                 <div class="step-text">
-                  <strong>Correlate</strong>
-                  ProblemCase CRDs are grouped by workload root into an Incident CRD via the CorrelationReconciler.
+                  <strong>Group</strong>
+                  Related problems on the same workload are consolidated into a single incident — no duplicate alerts.
                 </div>
               </li>
               <li>
                 <span class="step-num">3</span>
                 <div class="step-text">
-                  <strong>Trigger</strong>
-                  User clicks "Ask KubeChan to help" in the UI, creating a DiagnosticRun CRD.
+                  <strong>Analyze</strong>
+                  Click "Ask KubeChan to help" — she collects all available evidence and sends it to the AI for analysis.
                 </div>
               </li>
               <li>
                 <span class="step-num">4</span>
                 <div class="step-text">
-                  <strong>Collect evidence</strong>
-                  diagnostics-worker gathers logs, K8s events, ConfigMaps, PVCs, Ingresses, and POSTs to backend-api.
-                </div>
-              </li>
-              <li>
-                <span class="step-num">5</span>
-                <div class="step-text">
-                  <strong>Analyze</strong>
-                  llm-gateway builds a structured prompt, calls AWS Bedrock or GitHub Copilot, and returns a 5-section analysis.
-                </div>
-              </li>
-              <li>
-                <span class="step-num">6</span>
-                <div class="step-text">
-                  <strong>Surface</strong>
-                  Analysis is broadcast via WebSocket and rendered live in the KubeChan UI sidebar.
+                  <strong>Answer</strong>
+                  A structured analysis arrives in seconds: root cause, evidence, and step-by-step fix — live in your browser.
                 </div>
               </li>
             </ol>
@@ -802,42 +788,35 @@
           <div class="pipeline-card manual">
             <div class="pipeline-title">
               <span class="pipeline-badge manual">Manual</span>
-              <h3>User reports an issue</h3>
+              <h3>You report an issue</h3>
             </div>
             <ol class="pipeline-steps">
               <li>
                 <span class="step-num">1</span>
                 <div class="step-text">
                   <strong>Report</strong>
-                  User clicks "+ Report an issue" and fills in the root resource, a description, and optional related resources.
+                  Click "+ Report an issue", pick the affected workload, describe the problem, and optionally tag related resources for deeper context.
                 </div>
               </li>
               <li>
                 <span class="step-num">2</span>
                 <div class="step-text">
-                  <strong>Create</strong>
-                  backend-api creates an Incident CRD (source: manual), DiagnosticRun, and queues an analysis request.
+                  <strong>Analyze</strong>
+                  KubeChan collects evidence and runs the same AI analysis — your description is included to guide the investigation.
                 </div>
               </li>
               <li>
                 <span class="step-num">3</span>
                 <div class="step-text">
-                  <strong>Collect evidence</strong>
-                  Identical diagnostics pipeline runs — your description is included verbatim in the LLM prompt.
+                  <strong>Add context if needed</strong>
+                  If the AI needs more information, it tells you exactly what resources to add. One click opens the context window to re-analyze with fuller evidence.
                 </div>
               </li>
               <li>
                 <span class="step-num">4</span>
                 <div class="step-text">
-                  <strong>Needs more info?</strong>
-                  If confidence &lt; 0.65 the LLM returns suggested resources. Add context and re-analyze with AugmentIncidentModal.
-                </div>
-              </li>
-              <li>
-                <span class="step-num">5</span>
-                <div class="step-text">
                   <strong>Resolve</strong>
-                  Once fixed, click "Resolve" — KubeChan patches the Incident CRD status and reacts in the sidebar.
+                  Once the issue is fixed, click "Resolve" — KubeChan closes the incident and reacts in the sidebar.
                 </div>
               </li>
             </ol>
@@ -851,41 +830,51 @@
       <div class="container">
         <p class="section-eyebrow">Features</p>
         <div class="section-divider"></div>
-        <h2 id="features-heading">Everything you need to diagnose a broken cluster</h2>
+        <h2 id="features-heading">Everything you need to stop firefighting</h2>
         <p class="section-lead">
-          From automated detection to LLM-driven root cause analysis, KubeChan covers the full troubleshooting workflow.
+          From automatic detection to AI-driven root cause analysis, KubeChan covers the full troubleshooting workflow — so you spend less time debugging and more time shipping.
         </p>
 
         <div class="feature-grid">
           <article class="feature-card">
             <div class="feature-icon" style="background:rgba(79,142,247,0.12);" aria-hidden="true">🔍</div>
-            <h3>Automated anomaly detection</h3>
-            <p>Five built-in detectors watch Pods, Deployments, Services, and etc. Nothing can escape her watchful eyes.</p>
+            <h3>Always-on problem detection</h3>
+            <p>KubeChan watches your workloads around the clock and alerts you the moment something breaks — no dashboards to check, no alerts to configure.</p>
           </article>
           <article class="feature-card">
-            <div class="feature-icon" style="background:rgba(168,85,247,0.12);" aria-hidden="true">🧪</div>
-            <h3>Deep evidence collection</h3>
-            <p>Current &amp; previous crash logs, K8s events, ConfigMap contents, PVC phases, Ingress specs — everything is collected and prepared for analysis.</p>
+            <div class="feature-icon" style="background:rgba(168,85,247,0.12);" aria-hidden="true">📝</div>
+            <h3>Report issues yourself</h3>
+            <p>Not every problem is auto-detected. Describe what's wrong, pick the affected workload, and attach related resources for a deeper investigation.</p>
           </article>
           <article class="feature-card">
             <div class="feature-icon" style="background:rgba(34,197,94,0.12);" aria-hidden="true">🤖</div>
-            <h3>Multi-provider LLM analysis</h3>
-            <p>Supports AWS Bedrock and GitHub Copilot. Credentials configured per-user in the UI — no shared secrets.</p>
+            <h3>Your choice of AI provider</h3>
+            <p>Works with AWS Bedrock and GitHub Copilot. Each user configures their own credentials in the UI — no shared secrets, no platform lock-in.</p>
           </article>
           <article class="feature-card">
-            <div class="feature-icon" style="background:rgba(245,158,11,0.12);" aria-hidden="true">⚡</div>
-            <h3>Real-time updates</h3>
-            <p>Incident changes, analysis completions, and KubeChan mood updates in real time, every action can change her mood.</p>
+            <div class="feature-icon" style="background:rgba(245,158,11,0.12);" aria-hidden="true">🔄</div>
+            <h3>Smart follow-up analysis</h3>
+            <p>When the AI isn't confident enough, it tells you exactly which resources it needs. Add the context with one click and get a better answer instantly.</p>
           </article>
           <article class="feature-card">
-            <div class="feature-icon" style="background:rgba(239,68,68,0.12);" aria-hidden="true">🔄</div>
-            <h3>Confidence-aware re-analysis</h3>
-            <p>When evidence is insufficient (confidence &lt; 0.65), KubeChan asks for specific resources. Add context and re-analyze with a click.</p>
+            <div class="feature-icon" style="background:rgba(239,68,68,0.12);" aria-hidden="true">✅</div>
+            <h3>Close incidents when you're done</h3>
+            <p>Mark incidents as resolved once fixed. KubeChan acknowledges the closure in the sidebar — a small but satisfying moment of closure.</p>
           </article>
           <article class="feature-card">
-            <div class="feature-icon" style="background:rgba(79,142,247,0.12);" aria-hidden="true">🎭</div>
-            <h3>Tsundere personality</h3>
-            <p>KubeChan has a mood system, pose transitions, and reaction lines. She will absolutely judge your ConfigMap choices.</p>
+            <div class="feature-icon" style="background:rgba(34,197,94,0.12);" aria-hidden="true">⚡</div>
+            <h3>Live updates in real time</h3>
+            <p>New incidents, analysis completions, and status changes appear instantly in the UI — no page refresh needed.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon" style="background:rgba(79,142,247,0.12);" aria-hidden="true">👍</div>
+            <h3>Rate the analysis</h3>
+            <p>Was the diagnosis helpful? Give it a thumbs up or down. Feedback helps you track answer quality over time.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon" style="background:rgba(168,85,247,0.12);" aria-hidden="true">🎭</div>
+            <h3>A personality that keeps you honest</h3>
+            <p>KubeChan has moods, opinions, and a tsundere personality that reacts to what's happening in your cluster. She will absolutely judge your configuration choices.</p>
           </article>
         </div>
       </div>
@@ -894,46 +883,46 @@
     <!-- ═══════════════ DETECTORS ═══════════════ -->
     <section id="detectors" aria-labelledby="detectors-heading" style="background: var(--surface);">
       <div class="container">
-        <p class="section-eyebrow">Detectors</p>
+        <p class="section-eyebrow">Problem detection</p>
         <div class="section-divider"></div>
         <h2 id="detectors-heading">Knows what's wrong before you do</h2>
         <p class="section-lead">
-          cluster-watcher runs continuously against your workloads.
-          It detects problems in your cluster and lets you know before you do — with zero configuration required. Each detector has a severity level to help you prioritize what to fix first.
+          KubeChan continuously watches your workloads and detects common failure patterns automatically —
+          with zero configuration required. Each problem is assigned a severity so you know what to fix first.
         </p>
         <div class="detector-table-wrap">
           <table>
             <thead>
               <tr>
-                <th scope="col">Detector</th>
-                <th scope="col">Trigger condition</th>
+                <th scope="col">Problem</th>
+                <th scope="col">When is it triggered?</th>
                 <th scope="col">Severity</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td><span class="detector-name">CrashLoopBackOffDetector</span></td>
-                <td>Pod in <code style="font-family:monospace;color:var(--amber)">CrashLoopBackOff</code> state</td>
+                <td><span class="detector-name">Crash-looping container</span></td>
+                <td>A container keeps failing and restarting in a loop</td>
                 <td><span class="severity sev-critical">Critical</span></td>
               </tr>
               <tr>
-                <td><span class="detector-name">ImagePullBackOffDetector</span></td>
-                <td>Pod failing to pull container image</td>
+                <td><span class="detector-name">Image download failure</span></td>
+                <td>A container image cannot be pulled from the registry</td>
                 <td><span class="severity sev-high">High</span></td>
               </tr>
               <tr>
-                <td><span class="detector-name">PendingTooLongDetector</span></td>
-                <td>Pod stuck in Pending &gt; threshold (default 5 min)</td>
+                <td><span class="detector-name">Pod stuck waiting</span></td>
+                <td>A pod has been waiting to start for longer than expected</td>
                 <td><span class="severity sev-high">High</span></td>
               </tr>
               <tr>
-                <td><span class="detector-name">DeploymentUnavailableDetector</span></td>
-                <td>Deployment has unavailable replicas</td>
+                <td><span class="detector-name">Unavailable deployment</span></td>
+                <td>A deployment has fewer running replicas than required</td>
                 <td><span class="severity sev-high">High</span></td>
               </tr>
               <tr>
-                <td><span class="detector-name">ServiceNoEndpointsDetector</span></td>
-                <td>Service has no ready endpoints</td>
+                <td><span class="detector-name">Service with no traffic</span></td>
+                <td>A service has no healthy pods to send traffic to</td>
                 <td><span class="severity sev-medium">Medium</span></td>
               </tr>
             </tbody>
@@ -945,12 +934,12 @@
     <!-- ═══════════════ ANALYSIS PREVIEW ═══════════════ -->
     <section id="analysis" aria-labelledby="analysis-heading">
       <div class="container">
-        <p class="section-eyebrow">LLM Analysis</p>
+        <p class="section-eyebrow">AI Analysis</p>
         <div class="section-divider"></div>
         <h2 id="analysis-heading">Not just logs. Actual answers.</h2>
         <p class="section-lead">
-          KubeChan's analysis is structured into five sections — from her personal opening comment to actionable steps —
-          with a confidence score and an option to request more evidence when ambiguous.
+          KubeChan's analysis is structured into five clear sections — from an opening comment to actionable steps —
+          with a confidence score and the option to request more evidence when the answer isn't certain enough.
         </p>
 
         <div class="analysis-layout">
@@ -1003,46 +992,6 @@
       </div>
     </section>
 
-    <!-- ═══════════════ STACK ═══════════════ -->
-    <section id="stack" aria-labelledby="stack-heading" style="background: var(--surface);">
-      <div class="container">
-        <p class="section-eyebrow">Tech stack</p>
-        <div class="section-divider"></div>
-        <h2 id="stack-heading">Five services. One cluster. Zero write access.</h2>
-        <p class="section-lead">
-          KubeChan is a microservices system deployed as a Helm chart — fully Kubernetes-native,
-          using CRDs as the internal message bus between components.
-        </p>
-        <div class="stack-grid">
-          <div class="stack-card">
-            <div class="stack-icon" aria-hidden="true">🐹</div>
-            <div class="stack-name">cluster-watcher</div>
-            <div class="stack-desc">Go · controller-runtime</div>
-          </div>
-          <div class="stack-card">
-            <div class="stack-icon" aria-hidden="true">🔬</div>
-            <div class="stack-name">diagnostics-worker</div>
-            <div class="stack-desc">Go · controller-runtime</div>
-          </div>
-          <div class="stack-card">
-            <div class="stack-icon" aria-hidden="true">🗄️</div>
-            <div class="stack-name">backend-api</div>
-            <div class="stack-desc">Go · chi · SQLite</div>
-          </div>
-          <div class="stack-card">
-            <div class="stack-icon" aria-hidden="true">🐍</div>
-            <div class="stack-name">llm-gateway</div>
-            <div class="stack-desc">Python · FastAPI · uv</div>
-          </div>
-          <div class="stack-card">
-            <div class="stack-icon" aria-hidden="true">⚛️</div>
-            <div class="stack-name">frontend-ui</div>
-            <div class="stack-desc">React 19 · Vite · MUI</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- ═══════════════ QUICKSTART ═══════════════ -->
     <section id="quickstart" aria-labelledby="qs-heading">
       <div class="container">
@@ -1050,8 +999,8 @@
         <div class="section-divider"></div>
         <h2 id="qs-heading">Install with Helm in minutes</h2>
         <p class="section-lead">
-          KubeChan ships as a Helm chart. Deploy it into any Kubernetes cluster with a single command.
-          No shared LLM credentials needed — each user configures their own provider in the UI.
+          KubeChan ships as a Helm chart. Deploy it into any Kubernetes cluster in minutes.
+          No shared AI credentials needed — each user connects their own provider directly in the UI.
         </p>
 
         <div class="quickstart-grid">
@@ -1066,8 +1015,8 @@
             <div class="qs-step">
               <div class="qs-num" aria-hidden="true">2</div>
               <div>
-                <h4>Install the CRDs</h4>
-                <p>KubeChan uses four custom resource definitions. Apply them before the Helm release so the controllers can start cleanly.</p>
+                <h4>Install the prerequisites</h4>
+                <p>Apply the KubeChan resource definitions before installing the chart so all components start cleanly.</p>
               </div>
             </div>
             <div class="qs-step">
@@ -1166,7 +1115,6 @@
         <li><a href="https://github.com/aryzhykau/kubechan" target="_blank" rel="noopener noreferrer">GitHub</a></li>
         <li><a href="https://github.com/aryzhykau/kubechan/issues" target="_blank" rel="noopener noreferrer">Issues</a></li>
         <li><a href="docs.html">Docs</a></li>
-        <li><a href="https://github.com/aryzhykau/kubechan" target="_blank" rel="noopener noreferrer">GitHub</a></li>
       </ul>
     </div>
     <p class="footer-copy">
