@@ -59,6 +59,7 @@ func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&appsv1.Deployment{}).
 		Watches(&appsv1.ReplicaSet{}, rsToDeployment).
+		Watches(&v1alpha1.KubechanExclusionRule{}, handler.EnqueueRequestsFromMapFunc(ruleToDeploymentsMapper(r.Client))).
 		Complete(r)
 }
 

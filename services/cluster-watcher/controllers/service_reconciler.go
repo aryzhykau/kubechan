@@ -58,6 +58,7 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Service{}).
 		Watches(&discoveryv1.EndpointSlice{}, esToService).
+		Watches(&v1alpha1.KubechanExclusionRule{}, handler.EnqueueRequestsFromMapFunc(ruleToServicesMapper(r.Client))).
 		Complete(r)
 }
 

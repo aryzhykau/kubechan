@@ -18,6 +18,9 @@ spec:
     - jsonPath: .status.state
       name: State
       type: string
+    - jsonPath: .status.analysisState
+      name: Analysis
+      type: string
     - jsonPath: .spec.problemCaseRef
       name: Problem Case
       type: string
@@ -74,6 +77,20 @@ spec:
           status:
             description: DiagnosticRunStatus defines the observed state of DiagnosticRun.
             properties:
+              analysisResultRef:
+                description: AnalysisResultRef is the analysis_results.id for the
+                  completed LLM analysis.
+                type: string
+              analysisState:
+                default: not_queued
+                description: AnalysisState is the current state of the LLM analysis
+                  phase for this run.
+                enum:
+                - not_queued
+                - in_progress
+                - completed
+                - failed
+                type: string
               collectedAt:
                 description: CollectedAt is when evidence collection completed.
                 format: date-time

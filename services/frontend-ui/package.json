@@ -13,8 +13,12 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.0.0",
     "@mui/material": "^9.0.0",
+    "@reduxjs/toolkit": "^2.11.2",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-redux": "^9.2.0",
+    "react-router-dom": "^7.15.0",
+    "reconnecting-websocket": "^4.4.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
