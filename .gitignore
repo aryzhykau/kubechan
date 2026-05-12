@@ -48,8 +48,4 @@ helm/kubechan/charts/
 *.out
 coverage.txt
 coverage.html
-coverage.xml
-coverage.out
-.coverage
-.coverage.*
 .data/
