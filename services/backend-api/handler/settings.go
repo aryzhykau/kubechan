@@ -106,10 +106,6 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 
 // IdleMessage handles GET /api/v1/persona/idle-message — stubbed until Phase 3B.
 func (h *Settings) IdleMessage(w http.ResponseWriter, r *http.Request) {
-	if !h.PersonaAllowed {
-		writeError(w, http.StatusForbidden, "persona is disabled at the deployment level")
-		return
-	}
 	writeError(w, http.StatusNotImplemented, "llm-gateway not yet implemented (Phase 3B)")
 }
 
