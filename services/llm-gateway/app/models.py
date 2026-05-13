@@ -23,6 +23,7 @@ class AnalyzeRequest(BaseModel):
     userMessage: str = ""
     provider: str = "bedrock"
     credentials: dict[str, Any] = {}
+    personaEnabled: bool = True
     payload: dict[str, Any]
 
 
@@ -42,11 +43,11 @@ class ExclusionRuleProposal(BaseModel):
 class AnalyzeResponse(BaseModel):
     evidenceId: str
     model: str
-    openingRant: str
+    openingRant: str = ""
     likelyRootCause: str
     evidenceChain: str
     recommendation: str
-    closingInsult: str
+    closingInsult: str = ""
     confidence: float
     needsMoreInfo: bool = False
     suggestedResources: list[SuggestedResource] = []

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useAppDispatch } from '../../store/hooks'
+import { setSpeaking, setIdle } from '../../store/slices/kubechanSlice'
 import {
   Box, Typography, Button, Tab, Tabs, Chip,
   Table, TableHead, TableBody, TableRow, TableCell,
@@ -197,6 +199,7 @@ interface Props {
 export function DiagnosticRunDetail({ onResultLoaded, onAction }: Props) {
   const { id: runId } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const dispatch = useAppDispatch()
   const [activeTab, setActiveTab] = useState(0)
 
   const { data: evidence, isLoading: evidenceLoading } = useGetDiagnosticRunEvidenceQuery(runId!, { skip: !runId })
@@ -204,6 +207,11 @@ export function DiagnosticRunDetail({ onResultLoaded, onAction }: Props) {
 
   useEffect(() => {
     if (!evidenceLoading && !analysisLoading) {
+      if (analysisResult) {
+        dispatch(setSpeaking({ result: analysisResult, incidentName: analysisResult.incidentId || runId! }))
+      } else {
+        dispatch(setIdle())
+      }
       onResultLoaded?.(analysisResult ?? null, runId!)
       onAction?.('open-run')
     }

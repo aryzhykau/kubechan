@@ -114,11 +114,13 @@ func main() {
 
 	// ── Handlers ──────────────────────────────────────────────────────────────
 
+	personaAllowed := envOr("PERSONA_ALLOWED", "true") != "false"
+
 	incidents := &handler.Incidents{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	problemcases := &handler.ProblemCases{K8s: k8s, DefaultNamespace: defaultNS}
 	diagnosticruns := &handler.DiagnosticRuns{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	analysis := &handler.Analysis{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
-	settings := &handler.Settings{DB: database}
+	settings := &handler.Settings{DB: database, PersonaAllowed: personaAllowed}
 	kubechan := &handler.KubeChan{MoodSyncer: moodSyncer}
 	resources := &handler.Resources{K8s: k8s, Config: cfg}
 	manualIncident := &handler.ManualIncident{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
@@ -130,6 +132,7 @@ func main() {
 		LLMGatewayURL:    envOr("LLM_GATEWAY_URL", ""),
 		Hub:              hub,
 		MoodSyncer:       moodSyncer,
+		PersonaAllowed:   personaAllowed,
 		Logger:           logger,
 	}
 	authHandler := &handler.Auth{DB: database, Logger: logger}

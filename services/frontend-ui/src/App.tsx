@@ -26,6 +26,9 @@ import { closeManualModal, selectUI } from './store/slices/uiSlice'
 import { useMeQuery } from './store/api/authApi'
 import { incidentsApi } from './store/api/incidentsApi'
 import { useKubeChan } from './hooks/useKubeChan'
+import { waitForAnalysis } from './analysis/tracker'
+import { getToken } from './api/index'
+import type { AnalysisResult } from './api/index'
 import './app.css'
 
 // ── Auth bootstrap inside Provider ───────────────────────────────────────────
@@ -71,7 +74,7 @@ function AppShell() {
   const navigate    = useNavigate()
   const currentUser = useAppSelector(selectCurrentUser)
 
-  const { triggerChatter, handleAnalysisStart, handleRunResultLoaded, handleRate } = useKubeChan()
+  const { triggerChatter, handleAnalysisStart, handleAnalysisComplete, handleRunResultLoaded, handleRate, handlePoke } = useKubeChan()
 
   return (
     <div className="app">
@@ -150,6 +153,7 @@ function AppShell() {
         <KubeChanSidebar
           state={kubechan}
           moodLevel={moodLevel}
+          onPoke={handlePoke}
           onRate={handleRate}
         />
       </div>
@@ -160,7 +164,15 @@ function AppShell() {
           onCreated={(incidentId, diagnosticRunId) => {
             dispatch(closeManualModal())
             handleAnalysisStart(incidentId)
-            navigate(`/diagnostics/${encodeURIComponent(diagnosticRunId)}`)
+            waitForAnalysis(diagnosticRunId).then(ok => {
+              if (!ok) return
+              const token = getToken()
+              const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+              fetch(`/api/v1/diagnosticruns/${encodeURIComponent(diagnosticRunId)}/analysisresult`, { headers })
+                .then(r => r.ok ? r.json() as Promise<AnalysisResult> : null)
+                .then(result => { if (result) handleAnalysisComplete(result, incidentId) })
+                .catch(() => {})
+            })
           }}
         />
       )}

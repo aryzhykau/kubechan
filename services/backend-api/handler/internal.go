@@ -51,6 +51,7 @@ type Internal struct {
 	LLMGatewayURL    string
 	Hub              interface{ Broadcast(msg []byte) }
 	MoodSyncer       *k8s.MoodSyncer
+	PersonaAllowed   bool
 	Logger           *slog.Logger
 }
 
@@ -182,6 +183,7 @@ type llmAnalyzeRequest struct {
 	UserMessage     string           `json:"userMessage,omitempty"`
 	Provider        string           `json:"provider,omitempty"`
 	Credentials     map[string]any   `json:"credentials,omitempty"`
+	PersonaEnabled  bool             `json:"personaEnabled"`
 	Payload         map[string]any   `json:"payload"`
 }
 
@@ -309,6 +311,15 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		}
 	}
 
+	// Resolve effective persona.enabled: deployment flag AND per-installation DB setting.
+	personaEnabled := false
+	if h.PersonaAllowed {
+		var val string
+		if err := h.DB.QueryRow(`SELECT value FROM settings WHERE key = 'persona.enabled'`).Scan(&val); err == nil {
+			_ = json.Unmarshal([]byte(val), &personaEnabled)
+		}
+	}
+
 	body, err := json.Marshal(llmAnalyzeRequest{
 		EvidenceID:      evidenceID,
 		DiagnosticRunID: req.DiagnosticRunID,
@@ -320,6 +331,7 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		UserMessage:     userMessage,
 		Provider:        provider,
 		Credentials:     credentials,
+		PersonaEnabled:  personaEnabled,
 		Payload:         payloadMap,
 	})
 	if err != nil {

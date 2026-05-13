@@ -42,6 +42,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         [p.model_dump() for p in req.priorDiagnoses],
         req.userMessage,
         req.incidentSource,
+        req.personaEnabled,
     )
 
     logger.info("=== PROMPT TO MODEL ===\n%s\n=== END PROMPT ===", prompt)
@@ -95,11 +96,11 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     return AnalyzeResponse(
         evidenceId=req.evidenceId,
         model=provider.model_id(),
-        openingRant=_str(parsed.get("openingRant"), "..."),
+        openingRant=_str(parsed.get("openingRant")) if req.personaEnabled else "",
         likelyRootCause=_str(parsed.get("likelyRootCause"), "Unknown"),
         evidenceChain=_str(parsed.get("evidenceChain")),
         recommendation=_str(parsed.get("recommendation")),
-        closingInsult=_str(parsed.get("closingInsult"), "You're welcome."),
+        closingInsult=_str(parsed.get("closingInsult")) if req.personaEnabled else "",
         confidence=min(max(float(parsed.get("confidence", 0.5)), 0.0), 1.0),
         needsMoreInfo=needs_more_info,
         suggestedResources=suggested,
