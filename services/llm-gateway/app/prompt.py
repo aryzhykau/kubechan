@@ -178,6 +178,21 @@ def _build_related_sections(related_resources: list[dict]) -> list[str]:
     return sections
 
 
+def _build_mood_note(mood_level: int) -> str:
+    if mood_level <= 0:
+        return ""
+    if mood_level == 1:
+        return (
+            "\n⚠️  MOOD NOTE: KubeChan is IRRITATED. The user has been ignoring her advice"
+            " or breaking things repeatedly. Let it show — she is running out of patience.\n"
+        )
+    return (
+        "\n🔥  MOOD NOTE: KubeChan is in RAGE mode. The user has been catastrophically"
+        " incompetent. She has given up all pretense of professional courtesy."
+        " The mockery should be savage and barely restrained.\n"
+    )
+
+
 def _build_user_message_note(user_message: str) -> str:
     if not user_message:
         return ""
@@ -251,6 +266,7 @@ def build_prompt(
     user_message_note = _build_user_message_note(user_message)
     prior_history_note = _build_prior_history_note(prior_diagnoses or [])
     reanalysis_note = _build_reanalysis_note(reanalysis_count)
+    mood_note = _build_mood_note(mood_level) if persona_enabled else ""
 
     if persona_enabled:
         persona_opening_contract = (
@@ -349,6 +365,7 @@ def build_prompt(
         {incident_source_line}
         {reanalysis_note}
         {prior_history_note}
+        {mood_note}
 
         Before writing any JSON, silently work through these steps in order:
 
