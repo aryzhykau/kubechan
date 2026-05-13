@@ -97,6 +97,13 @@ backendApi:
       storageClass: ""
       accessMode: ReadWriteOnce
 
+  # Persona controls.
+  # Set persona.allowed: false to permanently disable the KubeChan persona at
+  # the deployment level (enterprise / professional mode). When false, the
+  # persona toggle in the UI is hidden and persona.enabled is ignored.
+  persona:
+    allowed: true
+
   retention:
     # Days to retain evidence payloads in SQLite.
     evidenceDays: 7

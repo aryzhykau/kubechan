@@ -55,6 +55,8 @@ spec:
                   key: secret
             - name: JWT_TTL_HOURS
               value: {{ .Values.auth.jwtTtlHours | default 24 | quote }}
+            - name: PERSONA_ALLOWED
+              value: {{ .Values.backendApi.persona.allowed | default true | quote }}
           ports:
             - name: http
               containerPort: {{ .Values.backendApi.service.port }}

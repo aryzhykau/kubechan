@@ -27,7 +27,8 @@ var allowedSettingKeys = map[string]bool{
 
 // Settings holds dependencies for settings handlers.
 type Settings struct {
-	DB *sql.DB
+	DB            *sql.DB
+	PersonaAllowed bool
 }
 
 // Get handles GET /api/v1/settings
@@ -56,6 +57,8 @@ func (h *Settings) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Expose persona.allowed as a read-only synthetic field.
+	result["persona.allowed"] = h.PersonaAllowed
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -71,6 +74,16 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 		if !allowedSettingKeys[k] {
 			writeError(w, http.StatusBadRequest, "unknown setting key: "+k)
 			return
+		}
+	}
+
+	// Block persona-related mutations when persona is disabled at deployment level.
+	if !h.PersonaAllowed {
+		for k := range body {
+			if k == "persona.enabled" || k == "persona.idle_chatter" {
+				writeError(w, http.StatusForbidden, "persona is disabled at the deployment level")
+				return
+			}
 		}
 	}
 

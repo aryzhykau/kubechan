@@ -6,6 +6,9 @@ interface AdminSettings {
   'detector.debounce_window_secs'?: number
   'detector.pending_threshold_secs'?: number
   'detector.unavailable_threshold_secs'?: number
+  'persona.enabled'?: boolean
+  'persona.idle_chatter'?: boolean
+  'persona.allowed'?: boolean
   [key: string]: unknown
 }
 

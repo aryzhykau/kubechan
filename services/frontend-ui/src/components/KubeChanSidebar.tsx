@@ -1,5 +1,24 @@
 import { useRef, useEffect, useState } from 'react'
+import { useGetAdminSettingsQuery } from '../store/api/adminApi'
+import { useAppSelector } from '../store/hooks'
+import { selectCurrentUser } from '../store/slices/authSlice'
 import type { AnalysisResult } from '../api/index'
+
+export type KubeChanPose = 'idle' | 'thinking' | 'speaking' | 'chatter'
+
+export interface KubeChanState {
+  pose: KubeChanPose
+  incidentName?: string
+  result?: AnalysisResult
+  chatterLine?: string
+  reactionLine?: string
+}
+
+function confidenceColor(c: number): string {
+  if (c >= 0.8) return 'high'
+  if (c >= 0.5) return 'medium'
+  return 'low'
+}
 
 const THINKING_IMAGES = [
   '/kubechan-looking.png',
@@ -22,22 +41,6 @@ const THINKING_PHRASES = [
   "This better not be something obvious you could've googled yourself…",
 ]
 
-export type KubeChanPose = 'idle' | 'thinking' | 'speaking' | 'chatter'
-
-export interface KubeChanState {
-  pose: KubeChanPose
-  incidentName?: string
-  result?: AnalysisResult
-  chatterLine?: string
-  reactionLine?: string
-}
-
-function confidenceColor(c: number): string {
-  if (c >= 0.8) return 'high'
-  if (c >= 0.5) return 'medium'
-  return 'low'
-}
-
 export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
   state: KubeChanState
   onPoke?: () => void
@@ -46,6 +49,9 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
 }) {
   const { pose, result, incidentName, reactionLine } = state
   const contentRef = useRef<HTMLDivElement>(null)
+  const currentUser = useAppSelector(selectCurrentUser)
+  const { data: adminSettings } = useGetAdminSettingsQuery(undefined, { skip: !currentUser })
+  const personaOn = adminSettings?.['persona.allowed'] !== false && adminSettings?.['persona.enabled'] === true
   const [shaking, setShaking] = useState(false)
   const [reacting, setReacting] = useState<'up' | 'down' | null>(null)
   const [thinkingImg, setThinkingImg] = useState(THINKING_IMAGES[0])
@@ -126,7 +132,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
     <aside className="kubechan-sidebar">
       {/* scrollable top zone */}
       <div className="kubechan-scroll-zone">
-        {pose !== 'idle' && (
+        {(pose === 'thinking' || pose === 'speaking' || result || (pose === 'chatter' && personaOn)) && (
           <div className="sidebar-bubble-wrap">
             <div className="speech-bubble">
               {/* scrollable content */}
@@ -135,11 +141,11 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
                   <span className="speech-thinking">
                     <span className="spinner" />
                     <span key={thinkingPhrase} className="speech-thinking-text">
-                      {thinkingPhrase}
+                      {personaOn ? thinkingPhrase : 'Analyzing your cluster…'}
                     </span>
                   </span>
                 )}
-                {pose === 'chatter' && (
+                {pose === 'chatter' && personaOn && (
                   <p className="speech-chatter">{state.chatterLine}</p>
                 )}
                 {pose === 'speaking' && (
@@ -147,7 +153,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
                     {incidentName && (
                       <p className="speech-incident-label">{incidentName}</p>
                     )}
-                    {openingRant && (
+                    {openingRant && personaOn && (
                       <p className="speech-opening-rant">{openingRant}</p>
                     )}
                     <p className="speech-root-label">Root cause</p>
@@ -164,7 +170,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
                         <p className="speech-rec">{recommendation}</p>
                       </>
                     )}
-                    {closingInsult && (
+                    {closingInsult && personaOn && (
                       <p className="speech-closing-insult">{closingInsult}</p>
                     )}
                     {result && (
@@ -208,8 +214,8 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
           </div>
         )}
       </div>
-      {/* fixed character zone — always visible */}
-      <div className="kubechan-char-zone">
+      {/* fixed character zone — only visible when persona is on */}
+      {personaOn && <div className="kubechan-char-zone">
         {pose === 'idle' && (
           <p className="kubechan-idle-hint">click an incident<br />to ask me for help</p>
         )}
@@ -235,7 +241,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
           {moodLevel === 1 && <span>· irritated</span>}
           {moodLevel >= 2 && <span>· RAGE</span>}
         </div>
-      </div>
+      </div>}
     </aside>
   )
 }

@@ -680,6 +680,13 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   border-left: 2px solid #f472b6;
   padding-left: 0.5rem;
 }
+/* chatter line shown inside bubble when pose=chatter (no analysis result) */
+.speech-chatter-line {
+  font-size: 0.82rem;
+  color: var(--text);
+  font-style: italic;
+  line-height: 1.55;
+}
 /* section labels */
 .speech-root-label,
 .speech-section-label {

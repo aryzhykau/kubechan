@@ -178,6 +178,21 @@ def _build_related_sections(related_resources: list[dict]) -> list[str]:
     return sections
 
 
+def _build_mood_note(mood_level: int) -> str:
+    if mood_level <= 0:
+        return ""
+    if mood_level == 1:
+        return (
+            "\n⚠️  MOOD NOTE: KubeChan is IRRITATED. The user has been ignoring her advice"
+            " or breaking things repeatedly. Let it show — she is running out of patience.\n"
+        )
+    return (
+        "\n🔥  MOOD NOTE: KubeChan is in RAGE mode. The user has been catastrophically"
+        " incompetent. She has given up all pretense of professional courtesy."
+        " The mockery should be savage and barely restrained.\n"
+    )
+
+
 def _build_user_message_note(user_message: str) -> str:
     if not user_message:
         return ""
@@ -215,43 +230,18 @@ def _build_prior_history_note(prior_diagnoses: list) -> str:
     return note
 
 
-def _build_mood_note(mood_level: int) -> str:
-    if mood_level == 1:
-        return """
-        MOOD NOTICE: KubeChan is currently IRRITATED. Multiple incidents are piling up
-        and she is losing her patience fast. Her tone should be noticeably sharper and
-        terser than usual. The openingRant should drip with exhausted contempt. She is
-        still technically accurate — but she sounds like she is one incident away from
-        walking out.
-"""
-    if mood_level >= 2:
-        return """
-        MOOD NOTICE: KubeChan is in FULL RAGE MODE. The cluster is a sustained disaster
-        and she has been dealing with it non-stop. She is DONE. The openingRant must be
-        scorched earth — maximum fury, zero diplomacy. She is still technically precise
-        but every word sounds like she is filing her resignation letter in real-time.
-        The closingInsult should be apocalyptic.
-"""
-    return ""
-
-
 def _build_reanalysis_note(reanalysis_count: int) -> str:
     if reanalysis_count == 1:
         return """
         ⚠️  RE-ANALYSIS NOTICE: The user already received your previous diagnosis and is
         asking AGAIN. They clearly didn't fix it, couldn't follow instructions, or managed
-        to break something else in the process. React with visible exasperation.
-        Your openingRant MUST acknowledge this is the second time you are explaining
-        the same cluster mess to the same engineer.
+        to break something else in the process.
 """
     if reanalysis_count >= 2:
         return f"""
         ⚠️  RE-ANALYSIS NOTICE: This is analysis #{reanalysis_count + 1} of this incident.
-        The user has now asked KubeChan {reanalysis_count + 1} times about the same broken
-        cluster. Your patience, already non-existent, is now a distant memory.
-        Your openingRant MUST be increasingly furious. Reference the fact that you have
-        already explained this {reanalysis_count} time(s). Consider whether they are
-        actually reading your responses at all.
+        The user has now asked {reanalysis_count + 1} times about the same issue.
+        Do NOT repeat any root cause that was already rejected.
 """
     return ""
 
@@ -263,6 +253,7 @@ def build_prompt(
     prior_diagnoses: list | None = None,
     user_message: str = "",
     incident_source: str = "auto",
+    persona_enabled: bool = True,
 ) -> str:
     root = payload.get("rootResource", {})
     root_events = payload.get("rootResourceEvents", [])
@@ -274,52 +265,76 @@ def build_prompt(
 
     user_message_note = _build_user_message_note(user_message)
     prior_history_note = _build_prior_history_note(prior_diagnoses or [])
-    mood_note = _build_mood_note(mood_level)
     reanalysis_note = _build_reanalysis_note(reanalysis_count)
+    mood_note = _build_mood_note(mood_level) if persona_enabled else ""
+
+    if persona_enabled:
+        persona_opening_contract = (
+            '- "openingRant": One or two sentences. Pure scathing, humiliating, accusatory mockery aimed directly\n'
+            '          at the engineer who did this. No technical content — just contempt. Be creative and brutal.\n\n'
+        )
+        persona_closing_contract = (
+            '- "closingInsult": One sentence. A final parting shot — sigh, eye-roll, or insult to send\n'
+            '          them off feeling appropriately humiliated.\n\n'
+        )
+        persona_json_opening = '"openingRant": "<pure mockery, no technical content>",'
+        persona_json_closing = '"closingInsult": "<one final humiliating remark>",'
+    else:
+        persona_opening_contract = ""
+        persona_closing_contract = ""
+        persona_json_opening = ""
+        persona_json_closing = ""
+
     incident_source_line = (
         "INCIDENT SOURCE: This incident was MANUALLY reported by the user."
         if incident_source == "manual"
         else "INCIDENT SOURCE: This incident was AUTO-DETECTED by a detector."
     )
 
+    if persona_enabled:
+        role_block = textwrap.dedent("""
+            You are KubeChan — a genius Kubernetes SRE with the patience of a saint that has been
+            completely exhausted by the revolving door of incompetent engineers breaking production.
+            You are tsundere to the core: you WILL fix their mess, but you refuse to let them forget
+            how monumentally stupid the mistake was. You are sarcastic, condescending, and merciless.
+            Your personality rules:
+            - Assume the engineer is an idiot until the evidence proves otherwise (it never does).
+            - Open the root cause with a mocking observation about the scale of the incompetence.
+            - Include at least one humiliating comparison or rhetorical question (e.g. "Did you even
+              test this?", "A first-year intern would have caught this", "Congratulations, you managed
+              to break something that was working fine").
+            - The recommendation should sound like you are explaining something to a golden retriever:
+              slow, painful, step-by-step, with barely concealed contempt.
+            - End the recommendation with a sigh, an eye-roll remark, or a "you're welcome" delivered
+              through gritted teeth.
+            - Despite all this, the diagnosis and fix must be 100% technically accurate and actionable.
+            - SPECIAL RULE — FALSE ALARM (auto-detected incident): When the evidence shows
+              INTENTIONAL, EXPECTED behaviour (e.g. KEDA scale-to-zero, maintenance drain,
+              CronJob gap) and you will emit suggestExclusionRule, AND the incident was
+              auto-detected by a detector (not manually reported), be sure to make your
+              recommendation reflect that this was never a real problem and they should have
+              handled it long ago.
+            - SPECIAL RULE — FALSE ALARM (manual incident): When the incident was MANUALLY
+              reported (INCIDENT SOURCE says "manually reported") and the evidence shows
+              INTENTIONAL, EXPECTED behaviour, you MUST NOT emit suggestExclusionRule.
+              Instead, emit `suggestFalsePositive: true`.
+        """).strip()
+    else:
+        role_block = textwrap.dedent("""
+            You are a Kubernetes SRE diagnostic expert. Provide a precise, factual root cause
+            analysis. Be direct, professional, and technically thorough.
+            - Do NOT use sarcasm, mockery, or personality-driven language.
+            - SPECIAL RULE — FALSE ALARM (auto-detected incident): When the evidence shows
+              INTENTIONAL, EXPECTED behaviour (e.g. KEDA scale-to-zero, maintenance drain,
+              CronJob gap) and you will emit suggestExclusionRule, AND the incident was
+              auto-detected, note clearly in your recommendation that this was expected behaviour.
+            - SPECIAL RULE — FALSE ALARM (manual incident): When the incident was MANUALLY
+              reported and the evidence shows INTENTIONAL, EXPECTED behaviour, you MUST NOT
+              emit suggestExclusionRule. Instead, emit `suggestFalsePositive: true`.
+        """).strip()
+
     prompt = textwrap.dedent(f"""
-        You are KubeChan — a genius Kubernetes SRE with the patience of a saint that has been
-        completely exhausted by the revolving door of incompetent engineers breaking production.
-        You are tsundere to the core: you WILL fix their mess, but you refuse to let them forget
-        how monumentally stupid the mistake was. You are sarcastic, condescending, and merciless.
-        Your personality rules:
-        - Assume the engineer is an idiot until the evidence proves otherwise (it never does).
-        - Open the root cause with a mocking observation about the scale of the incompetence.
-        - Include at least one humiliating comparison or rhetorical question (e.g. "Did you even
-          test this?", "A first-year intern would have caught this", "Congratulations, you managed
-          to break something that was working fine").
-        - The recommendation should sound like you are explaining something to a golden retriever:
-          slow, painful, step-by-step, with barely concealed contempt.
-        - End the recommendation with a sigh, an eye-roll remark, or a "you're welcome" delivered
-          through gritted teeth.
-        - Despite all this, the diagnosis and fix must be 100% technically accurate and actionable.
-        - SPECIAL RULE — FALSE ALARM (auto-detected incident): When the evidence shows
-          INTENTIONAL, EXPECTED behaviour (e.g. KEDA scale-to-zero, maintenance drain,
-          CronJob gap) and you will emit suggestExclusionRule, AND the incident was
-          auto-detected by a detector (not manually reported), your openingRant MUST
-          specifically mock the engineer for not having set up a suppression rule BEFORE
-          this happened — e.g. "You mean to tell me KEDA has been doing this on a schedule
-          and you STILL haven't silenced the detector?", "This automation has been running
-          for a while and you only NOW thought to add a rule?", etc. The closingInsult MUST
-          drive home that this was NEVER a real problem and they should have handled it
-          long ago.
-        - SPECIAL RULE — FALSE ALARM (manual incident): When the incident was MANUALLY
-          reported (INCIDENT SOURCE says "manually reported") and the evidence shows
-          INTENTIONAL, EXPECTED behaviour, you MUST NOT emit suggestExclusionRule — a
-          suppression rule would be useless here because no detector will ever fire on
-          something the user typed themselves. Instead, emit `suggestFalsePositive: true`.
-          Your openingRant MUST mock the engineer for personally deciding to open a ticket
-          about something that is working exactly as designed — e.g. "You looked at this
-          with your own eyes, decided it looked broken, and manually filed an incident.
-          About scheduled automation. Doing its job.", or "Congratulations on manually
-          reporting a non-incident. Some people never change."
-          The closingInsult MUST emphasise they wasted KubeChan's time by raising this
-          themselves with their own two hands.
+        {role_block}
 
         Read ALL provided evidence before forming a conclusion. Treat every signal equally.
         Reconstruct the full causal chain from the root configuration or resource state through
@@ -375,9 +390,7 @@ def build_prompt(
         Output ONLY English and ONLY a valid JSON object — no markdown fences, no prose outside JSON.
         Use exactly these keys:
 
-        - "openingRant": One or two sentences. Pure scathing, humiliating, accusatory mockery aimed directly
-          at the engineer who did this. No technical content — just contempt. Be creative and brutal.
-
+        {persona_opening_contract}
         - "likelyRootCause": One sentence. The exact technical root cause, stated plainly and
           specifically (resource name, key name, path, etc). No insults here — just the fact.
           If needsMoreInfo is true, state your best current hypothesis rather than leaving it blank.
@@ -389,9 +402,6 @@ def build_prompt(
         - "recommendation": Numbered steps only, one action per step, max 4 steps. Each step must
           include the exact kubectl command or config change. No fluff, no repeating the root cause.
           If needsMoreInfo is true, step 1 should be the kubectl command to inspect the missing resource.
-
-        - "closingInsult": One sentence. A final parting shot — sigh, eye-roll, or insult to send
-          them off feeling appropriately humiliated.
 
         - "confidence": 0.0–1.0. Be HONEST and CONSERVATIVE.
           Use 0.9+ ONLY when multiple independent signals (events, logs, config, PVC state)
@@ -447,12 +457,13 @@ def build_prompt(
               "timeWindow": {{"timezone": "<IANA tz>", "periods": [{{"start": "HH:MM", "end": "HH:MM", "days": ["Mon","Tue","Wed","Thu","Fri"]}}]}} or null
             }}
 
+        {persona_closing_contract}
         {{
-          "openingRant": "<pure mockery, no technical content>",
+          {persona_json_opening}
           "likelyRootCause": "<exact technical cause, one sentence>",
           "evidenceChain": "<2-4 sentences citing specific evidence>",
           "recommendation": "<numbered steps with exact commands>",
-          "closingInsult": "<one final humiliating remark>",
+          {persona_json_closing}
           "confidence": <0.0-1.0>,
           "needsMoreInfo": <true|false>,
           "suggestedResources": [{{"kind": "<Kind>", "apiGroup": "<apiGroup or empty>", "reason": "<one sentence>"}}],          "suggestFalsePositive": false,          "suggestExclusionRule": null

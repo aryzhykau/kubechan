@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Box, Typography, Alert, TextField, Button, CircularProgress, Paper, Divider } from '@mui/material'
+import { Box, Typography, Alert, TextField, Button, CircularProgress, Paper, Divider, FormControlLabel, Switch } from '@mui/material'
 import { useGetAdminSettingsQuery, useUpdateAdminSettingsMutation } from '../../store/api/adminApi'
 
 export function AdminSettingsPage() {
@@ -14,6 +14,8 @@ export function AdminSettingsPage() {
     unavailable: '',
   })
   const [fieldsInit, setFieldsInit] = useState(false)
+
+  const personaAllowed = settings?.['persona.allowed'] !== false
 
   if (settings && !fieldsInit) {
     setFields({
@@ -32,6 +34,16 @@ export function AdminSettingsPage() {
         'detector.pending_threshold_secs':     Number(fields.pending),
         'detector.unavailable_threshold_secs': Number(fields.unavailable),
       }).unwrap()
+      setSuccess('Settings saved.')
+    } catch (e) {
+      setSaveErr(String(e))
+    }
+  }
+
+  async function handlePersonaToggle(key: 'persona.enabled' | 'persona.idle_chatter', value: boolean) {
+    setSaveErr(''); setSuccess('')
+    try {
+      await updateSettings({ [key]: value }).unwrap()
       setSuccess('Settings saved.')
     } catch (e) {
       setSaveErr(String(e))
@@ -91,6 +103,40 @@ export function AdminSettingsPage() {
             {saving ? 'Saving…' : 'Save Settings'}
           </Button>
         </Box>
+      </Paper>
+
+      <Paper sx={{ p: 3, mt: 3, bgcolor: 'background.paper' }}>
+        <Typography variant="subtitle2" gutterBottom sx={{ color: 'text.secondary' }}>Persona</Typography>
+        <Divider sx={{ mb: 2 }} />
+        {!personaAllowed ? (
+          <Alert severity="info">
+            Persona is disabled at the deployment level (<code>backendApi.persona.allowed: false</code>).
+            Contact your cluster administrator to enable it.
+          </Alert>
+        ) : (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={!!settings?.['persona.enabled']}
+                  onChange={(e) => handlePersonaToggle('persona.enabled', e.target.checked)}
+                  disabled={saving || isLoading}
+                />
+              }
+              label="Enable persona mode"
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={!!settings?.['persona.idle_chatter']}
+                  onChange={(e) => handlePersonaToggle('persona.idle_chatter', e.target.checked)}
+                  disabled={saving || isLoading || !settings?.['persona.enabled']}
+                />
+              }
+              label="Idle chatter"
+            />
+          </Box>
+        )}
       </Paper>
     </Box>
   )
