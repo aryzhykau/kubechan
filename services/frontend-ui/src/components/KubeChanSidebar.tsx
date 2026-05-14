@@ -20,25 +20,15 @@ function confidenceColor(c: number): string {
   return 'low'
 }
 
-const THINKING_IMAGES = [
-  '/kubechan-looking.png',
-  '/kubechan-looking-2.png',
-  '/kubechan-looking-3.png',
-  '/kubechan-pray-calm.png',
-  '/kubechan-rolleye.png',
-  '/kubechan-sigh-angry.png',
-  '/kubechan-sigh-calm.png',
-  '/kubechan-tired-1.png',
-]
-
-const THINKING_PHRASES = [
-  "H-hmph… give me a second, I'm checking your dumb cluster…",
-  "Fine, fine, I'm looking into it. Don't rush me!",
-  "Y-you're lucky I'm even helping… scanning now…",
-  "Ugh, another mess to clean up. Just give me a moment…",
-  "I'm not doing this because I care! I'm just… running diagnostics…",
-  "Don't stare at me while I'm working, it's distracting!",
-  "This better not be something obvious you could've googled yourself…",
+const THINKING_FRAMES: { image: string; phrase: string }[] = [
+  { image: '/kubechan-looking.png',    phrase: "H-hmph… give me a second, I'm scanning your dumb cluster…" },
+  { image: '/kubechan-looking-2.png',  phrase: "Something's not adding up here… let me look more carefully." },
+  { image: '/kubechan-looking-3.png',  phrase: "Wait — that doesn't look right. Hold on." },
+  { image: '/kubechan-pray-calm.png',  phrase: "I'm not doing this because I care! I'm just… running diagnostics…" },
+  { image: '/kubechan-rolleye.png',    phrase: "This better not be something obvious you could've googled yourself…" },
+  { image: '/kubechan-sigh-angry.png', phrase: "Ugh, another disaster to clean up. Give me a moment." },
+  { image: '/kubechan-sigh-calm.png',  phrase: "Fine. I'm looking into it. You're welcome in advance." },
+  { image: '/kubechan-tired-1.png',    phrase: "Y-you're lucky I'm even helping… scanning now…" },
 ]
 
 export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
@@ -54,8 +44,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
   const personaOn = adminSettings?.['persona.allowed'] !== false && adminSettings?.['persona.enabled'] === true
   const [shaking, setShaking] = useState(false)
   const [reacting, setReacting] = useState<'up' | 'down' | null>(null)
-  const [thinkingImg, setThinkingImg] = useState(THINKING_IMAGES[0])
-  const [thinkingPhrase, setThinkingPhrase] = useState(THINKING_PHRASES[0])
+  const [thinkingFrameIdx, setThinkingFrameIdx] = useState(0)
   const [imgVisible, setImgVisible] = useState(true)
 
   useEffect(() => {
@@ -63,31 +52,22 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
       setImgVisible(true)
       return
     }
-    setThinkingImg(THINKING_IMAGES[Math.floor(Math.random() * THINKING_IMAGES.length)])
-    setThinkingPhrase(THINKING_PHRASES[Math.floor(Math.random() * THINKING_PHRASES.length)])
+    setThinkingFrameIdx(Math.floor(Math.random() * THINKING_FRAMES.length))
 
     let swapTimer: ReturnType<typeof setTimeout> | null = null
-    const imgInterval = setInterval(() => {
+    const interval = setInterval(() => {
       setImgVisible(false)
       swapTimer = setTimeout(() => {
-        setThinkingImg(prev => {
-          const others = THINKING_IMAGES.filter(i => i !== prev)
+        setThinkingFrameIdx(prev => {
+          const others = THINKING_FRAMES.map((_, i) => i).filter(i => i !== prev)
           return others[Math.floor(Math.random() * others.length)]
         })
         setImgVisible(true)
       }, 200)
     }, 2500)
 
-    const phraseInterval = setInterval(() => {
-      setThinkingPhrase(prev => {
-        const others = THINKING_PHRASES.filter(p => p !== prev)
-        return others[Math.floor(Math.random() * others.length)]
-      })
-    }, 5000)
-
     return () => {
-      clearInterval(imgInterval)
-      clearInterval(phraseInterval)
+      clearInterval(interval)
       if (swapTimer) clearTimeout(swapTimer)
     }
   }, [pose])
@@ -97,7 +77,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
     Math.random() < 0.5 ? '/kubechan-facepalm-angry.png' : '/kubechan-facepalm-calm.png'
   )
   const imgSrc = pose === 'thinking'
-    ? thinkingImg
+    ? THINKING_FRAMES[thinkingFrameIdx].image
     : hasFalseAlarm
       ? falseAlarmImg
       : '/kubechan-idle-1.png'
@@ -140,8 +120,8 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
                 {pose === 'thinking' && (
                   <span className="speech-thinking">
                     <span className="spinner" />
-                    <span key={thinkingPhrase} className="speech-thinking-text">
-                      {personaOn ? thinkingPhrase : 'Analyzing your cluster…'}
+                    <span key={thinkingFrameIdx} className="speech-thinking-text">
+                      {personaOn ? THINKING_FRAMES[thinkingFrameIdx].phrase : 'Analyzing your cluster…'}
                     </span>
                   </span>
                 )}
