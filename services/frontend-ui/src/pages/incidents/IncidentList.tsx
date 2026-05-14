@@ -395,7 +395,7 @@ function IncidentCard({
       {/* Details accordion */}
       <IncidentDetails incident={incident} previousRun={previousRun} />
       {previousRun?.analysisResultId && (
-        <IncidentAnalysis previousRun={previousRun} onRate={handleRate} />
+        <IncidentAnalysis key={previousRun.diagnosticRunId} previousRun={previousRun} onRate={handleRate} />
       )}
 
       {/* Actions row */}
