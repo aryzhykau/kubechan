@@ -42,6 +42,21 @@ function incidentLabel(incident: Incident): { title: string; sub: string } {
 
 // ── IncidentDetails accordion ─────────────────────────────────────────────────
 
+const sectionAccordionSx = {
+  background: 'rgba(255,255,255,0.02)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: '8px !important',
+  mt: 1,
+  '&:before': { display: 'none' },
+}
+const sectionSummarySx = {
+  px: 1.5,
+  minHeight: 40,
+  '.MuiAccordionSummary-content': { my: 0 },
+  '&:hover': { background: 'rgba(255,255,255,0.03)' },
+  borderRadius: '8px',
+}
+
 function IncidentDetails({ incident, previousRun }: {
   incident: Incident
   previousRun?: DiagnosticRunSummary
@@ -53,14 +68,14 @@ function IncidentDetails({ incident, previousRun }: {
   const needsMoreInfo = !!previousRun?.needsMoreInfo && suggestions.length > 0
 
   return (
-    <Accordion disableGutters elevation={0} sx={{ background: 'transparent', border: 'none', '&:before': { display: 'none' } }}>
+    <Accordion disableGutters elevation={0} sx={sectionAccordionSx}>
       <AccordionSummary
         expandIcon={<ExpandMoreIcon sx={{ fontSize: '0.9rem', color: 'text.secondary' }} />}
-        sx={{ px: 0, minHeight: 32, '.MuiAccordionSummary-content': { my: 0 } }}
+        sx={sectionSummarySx}
       >
-        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Details</Typography>
+        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>Details</Typography>
       </AccordionSummary>
-      <AccordionDetails sx={{ px: 0, pt: 0, pb: 1 }}>
+      <AccordionDetails sx={{ px: 1.5, pt: 0.5, pb: 1.5 }}>
         <Stack spacing={1.5}>
           <Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Root resource</Typography>
@@ -121,6 +136,130 @@ function IncidentDetails({ incident, previousRun }: {
   )
 }
 
+function IncidentAnalysis({ previousRun, onRate }: {
+  previousRun: DiagnosticRunSummary
+  onRate?: (runId: string, rating: 'up' | 'down', confidence: number) => void
+}) {
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
+  const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [localRating, setLocalRating] = useState<'up' | 'down' | null>(null)
+
+  async function fetchAnalysis() {
+    if (analysisResult || analysisLoading) return
+    setAnalysisLoading(true)
+    try {
+      const { getToken } = await import('../../api/index')
+      const token = getToken()
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+      const res = await fetch(
+        `/api/v1/diagnosticruns/${encodeURIComponent(previousRun.diagnosticRunId)}/analysisresult`,
+        { headers },
+      )
+      if (res.ok) setAnalysisResult(await res.json() as AnalysisResult)
+    } catch { /* ignore */ } finally {
+      setAnalysisLoading(false)
+    }
+  }
+
+  function handleRate(rating: 'up' | 'down') {
+    if (!analysisResult?.id || localRating || analysisResult.userRating) return
+    setLocalRating(rating)
+    const confidence = analysisResult.confidence ?? analysisResult.payload?.confidence ?? 0
+    onRate?.(analysisResult.id, rating, confidence)
+  }
+
+  const effectiveRating = localRating ?? analysisResult?.userRating
+  const confidence = analysisResult
+    ? (analysisResult.confidence ?? analysisResult.payload?.confidence ?? 0)
+    : (previousRun.confidence ?? 0)
+  const pct = Math.round(confidence * 100)
+  const confColor = confidence >= 0.8 ? '#4ade80' : confidence >= 0.5 ? '#fbbf24' : '#f87171'
+
+  return (
+    <Accordion
+      disableGutters elevation={0}
+      onChange={(_, expanded) => { if (expanded) fetchAnalysis() }}
+      sx={{ ...sectionAccordionSx, borderColor: 'rgba(99,102,241,0.25)', background: 'rgba(99,102,241,0.04)' }}
+    >
+      <AccordionSummary
+        expandIcon={<ExpandMoreIcon sx={{ fontSize: '0.9rem', color: 'primary.light' }} />}
+        sx={sectionSummarySx}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem', color: 'primary.light' }}>
+            Analysis result
+          </Typography>
+          {previousRun.confidence != null && (
+            <Typography variant="caption" sx={{ color: confColor, fontWeight: 700, fontSize: '0.75rem' }}>
+              {pct}%
+            </Typography>
+          )}
+        </Box>
+      </AccordionSummary>
+      <AccordionDetails sx={{ px: 1.5, pt: 0.5, pb: 1.5 }}>
+        {analysisLoading && (
+          <Stack spacing={0.75}>
+            <Skeleton variant="text" width="80%" />
+            <Skeleton variant="text" width="60%" />
+            <Skeleton variant="text" width="70%" />
+          </Stack>
+        )}
+        {!analysisLoading && analysisResult && (
+          <Stack spacing={1.5}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+              <Typography variant="caption" sx={{ px: 1, py: 0.25, borderRadius: '4px', background: `${confColor}22`, color: confColor, fontWeight: 700, fontSize: '0.7rem' }}>
+                {pct}% confidence
+              </Typography>
+              <Typography variant="caption" color="text.disabled" sx={{ fontFamily: 'monospace', fontSize: '0.7rem' }}>{analysisResult.model}</Typography>
+            </Box>
+
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>Root cause</Typography>
+              <Typography variant="body2" sx={{ fontSize: '0.82rem', lineHeight: 1.5 }}>
+                {analysisResult.likelyRootCause || analysisResult.payload?.likelyRootCause}
+              </Typography>
+            </Box>
+
+            {analysisResult.payload?.evidenceChain && (
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>Evidence</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.82rem', lineHeight: 1.5, color: 'text.secondary' }}>
+                  {analysisResult.payload.evidenceChain}
+                </Typography>
+              </Box>
+            )}
+
+            {analysisResult.payload?.recommendation && (
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>Fix it</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.82rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                  {analysisResult.payload.recommendation}
+                </Typography>
+              </Box>
+            )}
+
+            {onRate && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, pt: 0.5, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+                  {effectiveRating ? 'Feedback recorded.' : 'Was this correct?'}
+                </Typography>
+                <Button size="small" variant={effectiveRating === 'up' ? 'contained' : 'outlined'} color="success"
+                  disabled={!!effectiveRating} onClick={() => handleRate('up')} sx={{ minWidth: 0, px: 1, fontSize: '0.75rem' }}>
+                  👍 Correct
+                </Button>
+                <Button size="small" variant={effectiveRating === 'down' ? 'contained' : 'outlined'} color="error"
+                  disabled={!!effectiveRating} onClick={() => handleRate('down')} sx={{ minWidth: 0, px: 1, fontSize: '0.75rem' }}>
+                  👎 Wrong
+                </Button>
+              </Box>
+            )}
+          </Stack>
+        )}
+      </AccordionDetails>
+    </Accordion>
+  )
+}
+
 // ── IncidentCard ──────────────────────────────────────────────────────────────
 
 interface IncidentCardProps {
@@ -137,11 +276,12 @@ function IncidentCard({
   incident, previousRun,
   onAction, onResolved, onSuggestRule, onMarkFalsePositive, onRefresh,
 }: IncidentCardProps) {
-  const [analyze, { isLoading: analyzing }] = useAnalyzeMutation()
+  const [analyze] = useAnalyzeMutation()
   const [resolveApi] = useResolveIncidentMutation()
   const [fpApi] = useMarkFalsePositiveMutation()
-  const { handleAnalysisStart, handleAnalysisComplete } = useKubeChan()
+  const { handleAnalysisStart, handleAnalysisComplete, handleRate } = useKubeChan()
 
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [resolveStep, setResolveStep] = useState<'idle' | 'confirm'>('idle')
   const [fpStep, setFpStep] = useState<'idle' | 'confirm'>('idle')
   const [augmentOpen, setAugmentOpen] = useState(false)
@@ -155,6 +295,7 @@ function IncidentCard({
   const rootNS = incident.spec.rootResource.namespace || incident.metadata.namespace || ''
 
   async function handleAnalyze() {
+    setIsAnalyzing(true)
     handleAnalysisStart(title)
     onAction?.()
     try {
@@ -167,6 +308,8 @@ function IncidentCard({
       onRefresh()
     } catch {
       // error handled below
+    } finally {
+      setIsAnalyzing(false)
     }
   }
 
@@ -199,6 +342,7 @@ function IncidentCard({
 
   function handleAugmented(runId: string) {
     setAugmentOpen(false)
+    setIsAnalyzing(true)
     handleAnalysisStart(title)
     waitForAnalysis(runId).then(ok => {
       if (ok) {
@@ -209,7 +353,7 @@ function IncidentCard({
       } else {
         onRefresh()
       }
-    })
+    }).finally(() => setIsAnalyzing(false))
   }
 
   return (
@@ -250,22 +394,25 @@ function IncidentCard({
 
       {/* Details accordion */}
       <IncidentDetails incident={incident} previousRun={previousRun} />
+      {previousRun?.analysisResultId && (
+        <IncidentAnalysis previousRun={previousRun} onRate={handleRate} />
+      )}
 
       {/* Actions row */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 1 }}>
-        {analyzing && (
+        {isAnalyzing && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <CircularProgress size={14} />
             <Typography variant="caption" color="warning.main">KubeChan is on it…</Typography>
           </Box>
         )}
-        {alreadyAnalyzed && !analyzing && (
+        {alreadyAnalyzed && !isAnalyzing && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
             <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>✓ analyzed</Typography>
             <ConfidenceBadge confidence={previousRun?.confidence} />
           </Box>
         )}
-        {!isResolved && !analyzing && (
+        {!isResolved && !isAnalyzing && (
           <Button
             size="small"
             variant={alreadyAnalyzed ? 'text' : 'contained'}
@@ -275,7 +422,7 @@ function IncidentCard({
             {alreadyAnalyzed ? 'Ask again' : 'Ask KubeChan to help'}
           </Button>
         )}
-        {!isResolved && isManual && resolveStep === 'idle' && !analyzing && (
+        {!isResolved && isManual && resolveStep === 'idle' && !isAnalyzing && (
           <Button size="small" variant="outlined" color="success" onClick={() => setResolveStep('confirm')} sx={{ fontSize: '0.78rem' }}>
             Resolve
           </Button>

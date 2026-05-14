@@ -74,7 +74,7 @@ function AppShell() {
   const navigate    = useNavigate()
   const currentUser = useAppSelector(selectCurrentUser)
 
-  const { triggerChatter, handleAnalysisStart, handleAnalysisComplete, handleRunResultLoaded, handleRate, handlePoke } = useKubeChan()
+  const { triggerChatter, handleAnalysisStart, handleAnalysisComplete, handleRunResultLoaded, handleRate, handlePoke, handleDismiss } = useKubeChan()
 
   return (
     <div className="app">
@@ -154,7 +154,7 @@ function AppShell() {
           state={kubechan}
           moodLevel={moodLevel}
           onPoke={handlePoke}
-          onRate={handleRate}
+          onDismiss={handleDismiss}
         />
       </div>
 

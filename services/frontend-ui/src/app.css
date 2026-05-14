@@ -723,6 +723,24 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   margin-top: 0.55rem;
   opacity: 0.8;
 }
+/* dismiss button — top-right corner of speech bubble */
+.bubble-dismiss {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.45rem;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1rem 0.25rem;
+  border-radius: 4px;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+  z-index: 1;
+}
+.bubble-dismiss:hover { opacity: 1; color: var(--text); }
 .speech-exclusion-banner {
   margin-top: 0.75rem;
   padding: 0.65rem 0.85rem;

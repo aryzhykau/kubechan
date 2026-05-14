@@ -1,24 +1,5 @@
 import { useRef, useEffect, useState } from 'react'
-import { useGetAdminSettingsQuery } from '../store/api/adminApi'
-import { useAppSelector } from '../store/hooks'
-import { selectCurrentUser } from '../store/slices/authSlice'
 import type { AnalysisResult } from '../api/index'
-
-export type KubeChanPose = 'idle' | 'thinking' | 'speaking' | 'chatter'
-
-export interface KubeChanState {
-  pose: KubeChanPose
-  incidentName?: string
-  result?: AnalysisResult
-  chatterLine?: string
-  reactionLine?: string
-}
-
-function confidenceColor(c: number): string {
-  if (c >= 0.8) return 'high'
-  if (c >= 0.5) return 'medium'
-  return 'low'
-}
 
 const THINKING_FRAMES: { image: string; phrase: string }[] = [
   { image: '/kubechan-looking.png',    phrase: "H-hmph… give me a second, I'm scanning your dumb cluster…" },
@@ -31,19 +12,26 @@ const THINKING_FRAMES: { image: string; phrase: string }[] = [
   { image: '/kubechan-tired-1.png',    phrase: "Y-you're lucky I'm even helping… scanning now…" },
 ]
 
-export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
+export type KubeChanPose = 'idle' | 'thinking' | 'speaking' | 'chatter'
+
+export interface KubeChanState {
+  pose: KubeChanPose
+  incidentName?: string
+  result?: AnalysisResult
+  chatterLine?: string
+  chatterImage?: string
+  reactionLine?: string
+}
+
+export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onDismiss }: {
   state: KubeChanState
   onPoke?: () => void
   moodLevel?: number
-  onRate?: (resultId: string, rating: 'up' | 'down', confidence: number) => void
+  onDismiss?: () => void
 }) {
-  const { pose, result, incidentName, reactionLine } = state
+  const { pose, result, incidentName, reactionLine, chatterImage } = state
   const contentRef = useRef<HTMLDivElement>(null)
-  const currentUser = useAppSelector(selectCurrentUser)
-  const { data: adminSettings } = useGetAdminSettingsQuery(undefined, { skip: !currentUser })
-  const personaOn = adminSettings?.['persona.allowed'] !== false && adminSettings?.['persona.enabled'] === true
   const [shaking, setShaking] = useState(false)
-  const [reacting, setReacting] = useState<'up' | 'down' | null>(null)
   const [thinkingFrameIdx, setThinkingFrameIdx] = useState(0)
   const [imgVisible, setImgVisible] = useState(true)
 
@@ -78,9 +66,11 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
   )
   const imgSrc = pose === 'thinking'
     ? THINKING_FRAMES[thinkingFrameIdx].image
-    : hasFalseAlarm
-      ? falseAlarmImg
-      : '/kubechan-idle-1.png'
+    : pose === 'chatter' && chatterImage
+      ? chatterImage
+      : hasFalseAlarm
+        ? falseAlarmImg
+        : '/kubechan-idle-1.png'
 
   useEffect(() => {
     if (contentRef.current) contentRef.current.scrollTop = 0
@@ -92,27 +82,14 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
     onPoke?.()
   }
 
-  function handleRate(rating: 'up' | 'down') {
-    if (!result?.id || result.userRating) return
-    setReacting(rating)
-    setTimeout(() => setReacting(null), 700)
-    onRate?.(result.id, rating, result.confidence ?? 0)
-  }
-
-  const confidence = result ? (result.confidence ?? result.payload?.confidence ?? 0) : 0
-  const openingRant    = result?.payload?.openingRant   || ''
-  const rootCause      = result ? (result.likelyRootCause || result.payload?.likelyRootCause || '—') : ''
-  const evidenceChain  = result?.payload?.evidenceChain  || ''
-  const recommendation = result?.payload?.recommendation || ''
-  const closingInsult  = result?.payload?.closingInsult  || ''
-  const pct = Math.round(confidence * 100)
-  const level = confidenceColor(confidence)
+  const openingRant   = result?.payload?.openingRant   || ''
+  const closingInsult = result?.payload?.closingInsult || ''
 
   return (
     <aside className="kubechan-sidebar">
       {/* scrollable top zone */}
       <div className="kubechan-scroll-zone">
-        {(pose === 'thinking' || pose === 'speaking' || result || (pose === 'chatter' && personaOn)) && (
+        {pose !== 'idle' && (
           <div className="sidebar-bubble-wrap">
             <div className="speech-bubble">
               {/* scrollable content */}
@@ -121,11 +98,11 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
                   <span className="speech-thinking">
                     <span className="spinner" />
                     <span key={thinkingFrameIdx} className="speech-thinking-text">
-                      {personaOn ? THINKING_FRAMES[thinkingFrameIdx].phrase : 'Analyzing your cluster…'}
+                      {THINKING_FRAMES[thinkingFrameIdx].phrase}
                     </span>
                   </span>
                 )}
-                {pose === 'chatter' && personaOn && (
+                {pose === 'chatter' && (
                   <p className="speech-chatter">{state.chatterLine}</p>
                 )}
                 {pose === 'speaking' && (
@@ -133,69 +110,25 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
                     {incidentName && (
                       <p className="speech-incident-label">{incidentName}</p>
                     )}
-                    {openingRant && personaOn && (
-                      <p className="speech-opening-rant">{openingRant}</p>
-                    )}
-                    <p className="speech-root-label">Root cause</p>
-                    <p className="speech-root">{rootCause}</p>
-                    {evidenceChain && (
-                      <>
-                        <p className="speech-section-label">Evidence</p>
-                        <p className="speech-evidence">{evidenceChain}</p>
-                      </>
-                    )}
-                    {recommendation && (
-                      <>
-                        <p className="speech-section-label">Fix it</p>
-                        <p className="speech-rec">{recommendation}</p>
-                      </>
-                    )}
-                    {closingInsult && personaOn && (
+                    {openingRant
+                      ? <p className="speech-opening-rant">{openingRant}</p>
+                      : <p className="speech-neutral">Analysis complete. Check the incident card.</p>
+                    }
+                    {closingInsult && (
                       <p className="speech-closing-insult">{closingInsult}</p>
-                    )}
-                    {result && (
-                      <div className="speech-meta">
-                        <span className={`confidence-badge confidence-${level}`}>{pct}% confidence</span>
-                        <span className="analysis-model">{result.model}</span>
-                      </div>
                     )}
                   </>
                 )}
               </div>
-              {/* rating panel — always pinned to bubble bottom */}
-              {pose === 'speaking' && result?.id && onRate && (
-                <div className="speech-rating-panel">
-                  <span className="speech-rating-label">
-                    {result.userRating ? 'Feedback recorded.' : 'Was this correct?'}
-                  </span>
-                  <div className="speech-rating-btns">
-                    <button
-                      className={`rating-btn rating-btn-up${result.userRating === 'up' ? ' active' : ''}${result.userRating && result.userRating !== 'up' ? ' dimmed' : ''}`}
-                      onClick={() => handleRate('up')}
-                      disabled={!!result.userRating}
-                      title="Correct diagnosis"
-                    >
-                      <span className="rating-icon">👍</span>
-                      <span className="rating-label">Correct</span>
-                    </button>
-                    <button
-                      className={`rating-btn rating-btn-down${result.userRating === 'down' ? ' active' : ''}${result.userRating && result.userRating !== 'down' ? ' dimmed' : ''}`}
-                      onClick={() => handleRate('down')}
-                      disabled={!!result.userRating}
-                      title="Wrong diagnosis"
-                    >
-                      <span className="rating-icon">👎</span>
-                      <span className="rating-label">Wrong</span>
-                    </button>
-                  </div>
-                </div>
+              {pose === 'speaking' && (
+                <button className="bubble-dismiss" onClick={onDismiss} aria-label="Dismiss">×</button>
               )}
             </div>
           </div>
         )}
       </div>
-      {/* fixed character zone — only visible when persona is on */}
-      {personaOn && <div className="kubechan-char-zone">
+      {/* fixed character zone — always visible */}
+      <div className="kubechan-char-zone">
         {pose === 'idle' && (
           <p className="kubechan-idle-hint">click an incident<br />to ask me for help</p>
         )}
@@ -210,8 +143,6 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
           className={[
             'kubechan-sidebar-char',
             shaking ? 'kubechan-shake' : '',
-            reacting === 'up' ? 'kubechan-react-up' : '',
-            reacting === 'down' ? 'kubechan-react-down' : '',
           ].filter(Boolean).join(' ')}
           onClick={handlePoke}
           style={{ cursor: 'pointer', opacity: imgVisible ? 1 : 0, transition: 'opacity 0.2s ease' }}
@@ -221,7 +152,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onRate }: {
           {moodLevel === 1 && <span>· irritated</span>}
           {moodLevel >= 2 && <span>· RAGE</span>}
         </div>
-      </div>}
+      </div>
     </aside>
   )
 }

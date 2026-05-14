@@ -11,8 +11,7 @@ backendApi:
     port: 8080
     nodePort: 30080
   storage:
-    pvc:
-      size: 1Gi
+    hostPath: /Users/andrei.ryzhykau/kubechan-data
   resources:
     requests:
       cpu: 50m
