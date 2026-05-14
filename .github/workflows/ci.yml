@@ -126,10 +126,6 @@ jobs:
           thresholdNew: 0.70
           thresholdModified: 0.70
 
-      - name: Create badge output directory
-        if: github.ref == 'refs/heads/main'
-        run: mkdir -p .badges
-
       - name: Generate Python coverage badge
         if: github.ref == 'refs/heads/main'
         uses: tj-actions/coverage-badge-py@v2

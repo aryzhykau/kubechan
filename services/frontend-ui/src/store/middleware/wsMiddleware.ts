@@ -4,7 +4,7 @@ import { getToken } from '../../api/index'
 import { setMoodLevel, setChatter } from '../slices/kubechanSlice'
 import { incidentsApi } from '../api/incidentsApi'
 import { analysisApi } from '../api/analysisApi'
-import { pickChatterLine } from '../../persona/chatter'
+import { pickChatterLine, pickChatterExpression } from '../../persona/chatter'
 import { notifyAnalysisDone } from '../../analysis/tracker'
 import { clearUser } from '../slices/authSlice'
 
@@ -46,7 +46,7 @@ export const wsMiddleware: Middleware<object, any> = (store) => {
 
         if (event.type === 'Incident.Created') {
           store.dispatch(incidentsApi.util.invalidateTags([{ type: 'Incident', id: 'LIST' }]))
-          store.dispatch(setChatter(pickChatterLine('new-incident', moodLevel)))
+          store.dispatch(setChatter({ line: pickChatterLine('new-incident', moodLevel), image: pickChatterExpression('new-incident') }))
         } else if (event.type === 'KubeChanState.Updated') {
           if (typeof event.moodLevel === 'number') {
             store.dispatch(setMoodLevel(event.moodLevel))

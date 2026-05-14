@@ -11,6 +11,7 @@ interface KubeChanState {
   incidentName?: string
   result?: AnalysisResult
   chatterLine?: string
+  chatterImage?: string
   reactionLine?: string
 }
 
@@ -38,13 +39,15 @@ export const kubechanSlice = createSlice({
       state.result = action.payload.result
       state.incidentName = action.payload.incidentName
     },
-    setChatter: (state, action: PayloadAction<string>) => {
+    setChatter: (state, action: PayloadAction<{ line: string; image?: string }>) => {
       state.pose = 'chatter'
-      state.chatterLine = action.payload
+      state.chatterLine = action.payload.line
+      state.chatterImage = action.payload.image
     },
     clearChatter: (state) => {
       if (state.pose === 'chatter') state.pose = 'idle'
       state.chatterLine = undefined
+      state.chatterImage = undefined
     },
     setReaction: (state, action: PayloadAction<string>) => {
       state.reactionLine = action.payload
@@ -78,5 +81,6 @@ export const {
 export const selectKubeChan = (state: RootState) => state.kubechan
 export const selectMoodLevel = (state: RootState) => state.kubechan.moodLevel
 export const selectPose = (state: RootState) => state.kubechan.pose
+export const selectChatterImage = (state: RootState) => state.kubechan.chatterImage
 
 export default kubechanSlice.reducer

@@ -15,7 +15,7 @@ import {
 import { selectCurrentUser } from '../store/slices/authSlice'
 import { useGetKubeChanStateQuery, usePokeMutation } from '../store/api/kubechanApi'
 import { useRateAnalysisResultMutation } from '../store/api/analysisApi'
-import { pickChatterLine, type ChatterEvent } from '../persona/chatter'
+import { pickChatterLine, pickChatterExpression, type ChatterEvent } from '../persona/chatter'
 import type { AnalysisResult } from '../api/index'
 
 export type { ChatterEvent }
@@ -33,6 +33,7 @@ export function useKubeChan() {
   useEffect(() => { poseRef.current = pose }, [pose])
 
   const chatterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const rantTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pokeCountRef = useRef(0)
   const pokeResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -47,9 +48,9 @@ export function useKubeChan() {
     skip: !currentUser,
   })
 
-  const showChatter = useCallback((line: string) => {
+  const showChatter = useCallback((line: string, image?: string) => {
     if (chatterTimerRef.current) clearTimeout(chatterTimerRef.current)
-    dispatch(setChatter(line))
+    dispatch(setChatter({ line, image }))
     chatterTimerRef.current = setTimeout(() => {
       chatterTimerRef.current = null
       dispatch(clearChatter())
@@ -65,7 +66,7 @@ export function useKubeChan() {
       lastInteractionRef.current = Date.now()
       silenceStageRef.current = 0
     }
-    showChatter(pickChatterLine(event, moodLevelRef.current))
+    showChatter(pickChatterLine(event, moodLevelRef.current), pickChatterExpression(event))
   }, [showChatter])
 
   const handlePoke = useCallback(() => {
@@ -82,11 +83,20 @@ export function useKubeChan() {
   }, [triggerChatter, pokeApi])
 
   const handleAnalysisStart = useCallback((incidentName: string) => {
+    if (rantTimerRef.current) {
+      clearTimeout(rantTimerRef.current)
+      rantTimerRef.current = null
+    }
     dispatch(setThinking(incidentName))
   }, [dispatch])
 
   const handleAnalysisComplete = useCallback((result: AnalysisResult, incidentName: string) => {
     dispatch(setSpeaking({ result, incidentName }))
+    if (rantTimerRef.current) clearTimeout(rantTimerRef.current)
+    rantTimerRef.current = setTimeout(() => {
+      rantTimerRef.current = null
+      dispatch(setIdle())
+    }, 8_000)
     if (result.payload?.suggestExclusionRule) {
       const line = pickChatterLine('false-alarm', moodLevelRef.current)
       dispatch(setReaction(line))
@@ -122,10 +132,10 @@ export function useKubeChan() {
   }, [dispatch, rateApi])
 
   const handleIncidentResolved = useCallback(() => {
-    showChatter(pickChatterLine('incident-resolved', moodLevelRef.current))
+    triggerChatter('incident-resolved')
     lastInteractionRef.current = Date.now()
     silenceStageRef.current = 0
-  }, [showChatter])
+  }, [triggerChatter])
 
   // Idle chatter every 60s
   useEffect(() => {
@@ -159,5 +169,12 @@ export function useKubeChan() {
     handleRunResultLoaded,
     handleRate,
     handleIncidentResolved,
+    handleDismiss: useCallback(() => {
+      if (rantTimerRef.current) {
+        clearTimeout(rantTimerRef.current)
+        rantTimerRef.current = null
+      }
+      dispatch(setIdle())
+    }, [dispatch]),
   }
 }

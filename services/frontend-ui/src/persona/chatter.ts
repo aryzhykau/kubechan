@@ -261,3 +261,32 @@ export function pickChatterLine(event: ChatterEvent, mood: number = 0): string {
   }
   return pool[Math.floor(Math.random() * pool.length)]
 }
+
+const EXPRESSIONS: Partial<Record<ChatterEvent, string>> = {
+  'poke':                    '/kubechan-rolleye.png',
+  'poke-annoyed':            '/kubechan-sigh-angry.png',
+  'poke-rage':               '/kubechan-sigh-angry.png',
+  'new-incident':            '/kubechan-looking-3.png',
+  'incident-resolved':       '/kubechan-pray-calm.png',
+  'silence-hint':            '/kubechan-looking.png',
+  'silence-paranoid':        '/kubechan-looking-2.png',
+  'idle':                    '/kubechan-idle-1.png',
+  'nav-incidents':           '/kubechan-idle-1.png',
+  'nav-diagnostics':         '/kubechan-looking.png',
+  'open-run':                '/kubechan-looking-2.png',
+  'many-incidents':          '/kubechan-sigh-angry.png',
+  'no-incidents':            '/kubechan-pray-calm.png',
+  'false-alarm':             '/kubechan-facepalm-calm.png',
+  'exclusionRuleCreated':    '/kubechan-rolleye.png',
+  'exclusionRulesEmpty':     '/kubechan-idle-1.png',
+  'dismissed-analysis':      '/kubechan-sigh-calm.png',
+  'delete-run':              '/kubechan-facepalm-calm.png',
+  'rating-up':               '/kubechan-pray-calm.png',
+  'rating-up-flustered':     '/kubechan-pray-cry.png',
+  'rating-down-high-conf':   '/kubechan-sigh-angry.png',
+  'rating-down-low-conf':    '/kubechan-sigh-calm.png',
+}
+
+export function pickChatterExpression(event: ChatterEvent): string {
+  return EXPRESSIONS[event] ?? '/kubechan-idle-1.png'
+}
