@@ -91,12 +91,32 @@ class TestBedrockProviderInit:
         assert call_kwargs["aws_access_key_id"] == "AKIA"
         assert call_kwargs["aws_secret_access_key"] == "secret"
 
-    def test_bearer_token_set_and_cleared(self, mock_boto3_client):
-        import os
+    def test_bearer_token_uses_unsigned_client_and_injects_auth_header(self, mock_boto3_client):
+        from botocore import UNSIGNED
         from app.providers.bedrock import BedrockProvider
         BedrockProvider({"bearerToken": "tok123"})
-        # After __init__ the env var should be cleaned up
-        assert os.environ.get("AWS_BEARER_TOKEN_BEDROCK") is None
+
+        call_kwargs = mock_boto3_client.call_args.kwargs
+        assert call_kwargs["config"].signature_version == UNSIGNED
+
+        register = mock_boto3_client.return_value.meta.events.register
+        register.assert_called_once()
+        event_name, handler = register.call_args.args
+        assert event_name == "before-sign.bedrock-runtime"
+
+        request = MagicMock()
+        request.headers = {}
+        handler(request)
+        assert request.headers["Authorization"] == "Bearer tok123"
+
+    def test_iam_client_keeps_sigv4_auth(self, mock_boto3_client):
+        from botocore import UNSIGNED
+        from app.providers.bedrock import BedrockProvider
+        BedrockProvider({"accessKeyId": "AKIA", "secretAccessKey": "secret"})
+
+        call_kwargs = mock_boto3_client.call_args.kwargs
+        assert call_kwargs["config"].signature_version != UNSIGNED
+        mock_boto3_client.return_value.meta.events.register.assert_not_called()
 
     def test_model_id_resolves_alias(self, mock_boto3_client):
         from app.providers.bedrock import BedrockProvider

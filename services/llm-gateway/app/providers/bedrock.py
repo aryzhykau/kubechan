@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from typing import Any
 
 import boto3
+from botocore import UNSIGNED
 from botocore.config import Config
 
 from app.config import resolve_model_id
@@ -31,27 +31,31 @@ class BedrockProvider(LLMProvider):
         self._temperature = float(credentials.get("temperature") or _DEFAULT_TEMPERATURE)
         self._thinking_budget = int(credentials.get("thinkingBudget") or _DEFAULT_THINKING_BUDGET)
 
+        config_kwargs: dict[str, Any] = {
+            "retries": {"max_attempts": 3, "mode": "adaptive"},
+        }
+        if bearer_token:
+            # Bedrock API keys use Authorization: Bearer, not SigV4.  Keep the
+            # token on this client rather than in the process environment: the
+            # gateway can serve several users with different stored keys.
+            config_kwargs["signature_version"] = UNSIGNED
+
         kwargs: dict[str, Any] = {
             "region_name": region,
-            "config": Config(retries={"max_attempts": 3, "mode": "adaptive"}),
+            "config": Config(**config_kwargs),
         }
         if access_key and secret_key:
             kwargs["aws_access_key_id"] = access_key
             kwargs["aws_secret_access_key"] = secret_key
 
-        # Bearer token (Bedrock API key) is read by botocore from AWS_BEARER_TOKEN_BEDROCK.
-        # Inject it around client creation so it doesn't bleed into other sessions.
-        old_token = os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
+        self._bedrock = boto3.client("bedrock-runtime", **kwargs)
         if bearer_token:
-            os.environ["AWS_BEARER_TOKEN_BEDROCK"] = bearer_token
-        try:
-            self._bedrock = boto3.client("bedrock-runtime", **kwargs)
-        finally:
-            if bearer_token:
-                if old_token is None:
-                    os.environ.pop("AWS_BEARER_TOKEN_BEDROCK", None)
-                else:
-                    os.environ["AWS_BEARER_TOKEN_BEDROCK"] = old_token
+            def add_bearer_auth(request: Any, **_: Any) -> None:
+                request.headers["Authorization"] = f"Bearer {bearer_token}"
+
+            self._bedrock.meta.events.register(
+                "before-sign.bedrock-runtime", add_bearer_auth
+            )
 
     def model_id(self) -> str:
         return resolve_model_id(self._model)
