@@ -10,6 +10,7 @@ EVIDENCE_TOKEN_BUDGET: int = int(os.getenv("EVIDENCE_TOKEN_BUDGET", "120000"))
 _INFERENCE_PROFILES: dict[str, str] = {
     "qwen3-32b": "qwen.qwen3-32b-v1:0",
     "qwen3-235b": "qwen.qwen3-235b-a22b-2507-v1:0",
+    "claude-sonnet-6": "anthropic.claude-sonnet-4-6",
 }
 
 

@@ -40,6 +40,7 @@ var llmModels = llmModelsResponse{
 		"bedrock": {
 			{ID: "qwen3-32b", Label: "Qwen3 32B"},
 			{ID: "qwen3-235b", Label: "Qwen3 235B"},
+			{ID: "claude-sonnet-6", Label: "Claude Sonnet 4.6"},
 		},
 	},
 }

@@ -32,4 +32,14 @@ func TestGetLLMModels(t *testing.T) {
 	if _, ok := resp.Providers["bedrock"]; !ok {
 		t.Error("expected 'bedrock' provider in response")
 	}
+	foundClaudeSonnet := false
+	for _, model := range resp.Providers["bedrock"] {
+		if model.ID == "claude-sonnet-6" && model.Label == "Claude Sonnet 4.6" {
+			foundClaudeSonnet = true
+			break
+		}
+	}
+	if !foundClaudeSonnet {
+		t.Error("expected Claude Sonnet 4.6 in Bedrock models")
+	}
 }
