@@ -12,7 +12,7 @@ class TestResolveModelId:
         assert resolve_model_id("qwen3-235b") == "qwen.qwen3-235b-a22b-2507-v1:0"
 
     def test_known_alias_claude_sonnet_6(self):
-        assert resolve_model_id("claude-sonnet-6") == "anthropic.claude-sonnet-4-6"
+        assert resolve_model_id("claude-sonnet-6") == "us.anthropic.claude-sonnet-4-6"
 
     def test_unknown_id_returned_as_is(self):
         assert resolve_model_id("anthropic.claude-3-5-sonnet") == "anthropic.claude-3-5-sonnet"
