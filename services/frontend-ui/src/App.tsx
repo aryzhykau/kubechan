@@ -58,12 +58,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 // ── Shell layout ──────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { to: '/',                 label: 'Incidents',       icon: <ListAltIcon sx={{ fontSize: '1rem' }} />,        end: true  },
-  { to: '/diagnostics',      label: 'Diagnostics',     icon: <BugReportOutlinedIcon sx={{ fontSize: '1rem' }} />, end: false },
-  { to: '/admin/exclusions', label: 'Exclusion Rules', icon: <ShieldOutlinedIcon sx={{ fontSize: '1rem' }} />,  end: false },
-  { to: '/admin/users',      label: 'Users',           icon: <PeopleOutlinedIcon sx={{ fontSize: '1rem' }} />,  end: false },
-  { to: '/admin/settings',   label: 'Settings',        icon: <TuneIcon sx={{ fontSize: '1rem' }} />,            end: false },
-  { to: '/llm-settings',     label: 'LLM',             icon: <SmartToyOutlinedIcon sx={{ fontSize: '1rem' }} />,end: false },
+  { to: '/',                 label: 'Incidents',       section: 'Workspace', icon: <ListAltIcon sx={{ fontSize: '1.05rem' }} />,          end: true  },
+  { to: '/diagnostics',      label: 'Diagnostics',     section: 'Workspace', icon: <BugReportOutlinedIcon sx={{ fontSize: '1.05rem' }} />, end: false },
+  { to: '/admin/exclusions', label: 'Exclusion Rules', section: 'Manage',    icon: <ShieldOutlinedIcon sx={{ fontSize: '1.05rem' }} />,   end: false },
+  { to: '/admin/users',      label: 'Users',           section: 'Manage',    icon: <PeopleOutlinedIcon sx={{ fontSize: '1.05rem' }} />,   end: false },
+  { to: '/admin/settings',   label: 'Settings',        section: 'Manage',    icon: <TuneIcon sx={{ fontSize: '1.05rem' }} />,             end: false },
+  { to: '/llm-settings',     label: 'LLM',             section: 'Manage',    icon: <SmartToyOutlinedIcon sx={{ fontSize: '1.05rem' }} />, end: false },
 ]
 
 function AppShell() {
@@ -78,45 +78,43 @@ function AppShell() {
 
   return (
     <div className="app">
-      {/* ── Top header ── */}
-      <header className="app-header">
-        <img src="/kubechan-idle-1.png" alt="KubeChan" className="app-logo" />
-        <h1>KubeChan</h1>
+      {/* ── Primary navigation sidebar ── */}
+      <aside className="app-navigation">
+        <div className="app-brand">
+          <img src="/kubechan-idle-1.png" alt="" className="app-logo" />
+          <div>
+            <h1>KubeChan</h1>
+            <span>Cluster operations</span>
+          </div>
+        </div>
 
-        {/* Nav links */}
-        <Box component="nav" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 3 }}>
-          {NAV_ITEMS.map(({ to, label, icon, end }) => (
-            <NavLink key={to} to={to} end={end} style={{ textDecoration: 'none' }}>
-              {({ isActive }) => (
-                <Button
-                  size="small"
-                  startIcon={icon}
-                  sx={{
-                    fontSize: '0.78rem',
-                    fontWeight: isActive ? 700 : 400,
-                    color: isActive ? 'primary.light' : 'text.secondary',
-                    bgcolor: isActive ? 'rgba(99,102,241,0.12)' : 'transparent',
-                    borderBottom: isActive ? '2px solid' : '2px solid transparent',
-                    borderColor: isActive ? 'primary.main' : 'transparent',
-                    borderRadius: '6px 6px 0 0',
-                    px: 1.5, py: 0.5,
-                    minWidth: 0,
-                    '&:hover': { bgcolor: 'rgba(255,255,255,0.05)', color: 'text.primary' },
-                  }}
-                >
-                  {label}
-                </Button>
-              )}
-            </NavLink>
+        <nav className="app-nav-list" aria-label="Primary navigation">
+          {['Workspace', 'Manage'].map(section => (
+            <div className="app-nav-section" key={section}>
+              <div className="app-nav-section-label">{section}</div>
+              {NAV_ITEMS.filter(item => item.section === section).map(({ to, label, icon, end }) => (
+                <NavLink key={to} to={to} end={end} className="app-nav-link">
+                  {({ isActive }) => (
+                    <Tooltip title={label} placement="right" arrow>
+                      <Button
+                        fullWidth
+                        size="small"
+                        startIcon={icon}
+                        className={isActive ? 'active' : ''}
+                        sx={{ justifyContent: 'flex-start' }}
+                      >
+                        {label}
+                      </Button>
+                    </Tooltip>
+                  )}
+                </NavLink>
+              ))}
+            </div>
           ))}
-        </Box>
+        </nav>
 
-        {/* Spacer */}
-        <Box sx={{ flex: 1 }} />
-
-        {/* User chip + logout */}
         {currentUser && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <div className="app-user">
             <Chip
               avatar={<Avatar sx={{ bgcolor: 'primary.dark', fontSize: '0.65rem !important' }}>{currentUser.username[0].toUpperCase()}</Avatar>}
               label={currentUser.username}
@@ -139,23 +137,24 @@ function AppShell() {
                 <LogoutIcon sx={{ fontSize: '0.9rem' }} />
               </Box>
             </Tooltip>
-          </Box>
+          </div>
         )}
-      </header>
+      </aside>
 
-      {/* ── Body: main + right sidebar ── */}
-      <div className="app-body">
-        <main className="app-main">
-          <Outlet context={{ triggerChatter, handleAnalysisStart, handleRunResultLoaded, handleRate }} />
-        </main>
+      <div className="app-workspace">
+        {/* ── Body: main + KubeChan assistant ── */}
+        <div className="app-body">
+          <main className="app-main">
+            <Outlet context={{ triggerChatter, handleAnalysisStart, handleRunResultLoaded, handleRate }} />
+          </main>
 
-        {/* KubeChan character sidebar — right side */}
-        <KubeChanSidebar
-          state={kubechan}
-          moodLevel={moodLevel}
-          onPoke={handlePoke}
-          onDismiss={handleDismiss}
-        />
+          <KubeChanSidebar
+            state={kubechan}
+            moodLevel={moodLevel}
+            onPoke={handlePoke}
+            onDismiss={handleDismiss}
+          />
+        </div>
       </div>
 
       {ui.showManualModal && (

@@ -1,13 +1,17 @@
 import { useState } from 'react'
 import {
   Box, Typography, Button, IconButton, Alert, Chip, Stack,
-  CircularProgress, Skeleton, Accordion, AccordionSummary, AccordionDetails,
+  CircularProgress, Skeleton, Accordion, AccordionSummary, AccordionDetails, Tooltip,
+  TextField, InputAdornment, ToggleButton, ToggleButtonGroup, FormControl, Select, MenuItem,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import AddCommentIcon from '@mui/icons-material/AddComment'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
+import HistoryIcon from '@mui/icons-material/History'
+import LinkIcon from '@mui/icons-material/Link'
+import SearchIcon from '@mui/icons-material/Search'
 import {
   useListIncidentsQuery,
   useListProblemCasesQuery,
@@ -34,7 +38,7 @@ function incidentLabel(incident: Incident): { title: string; sub: string } {
   const affected = incident.status.activeProblemCases ?? 0
   const title = `${rootResource.kind} ${rootResource.name} in ${ns}`
   const sub = affected > 0
-    ? `${affected} resource${affected !== 1 ? 's' : ''} also affected`
+    ? `${affected} active symptom${affected !== 1 ? 's' : ''}`
     : incident.spec.source === 'manual' && incident.spec.userMessage
       ? incident.spec.userMessage.slice(0, 80) + (incident.spec.userMessage.length > 80 ? '…' : '')
       : ''
@@ -73,29 +77,102 @@ function IncidentDetails({ incident, previousRun, problemCases, runs }: {
   const incidentPCs = pcs.map(name => pcByName.get(name)).filter((pc): pc is ProblemCase => !!pc)
   const activePCs = incidentPCs.filter(pc => pc.status.state !== 'resolved')
   const previousPCs = incidentPCs.filter(pc => pc.status.state === 'resolved')
+  const occurrenceCount = incident.status.occurrenceCount ?? 1
+
+  function isRootResource(pc: ProblemCase) {
+    const affected = pc.spec.affectedResource
+    const root = incident.spec.rootResource
+    return affected.kind.toLowerCase() === root.kind.toLowerCase()
+      && affected.name === root.name
+      && (affected.namespace || incident.metadata.namespace) === (root.namespace || incident.metadata.namespace)
+  }
 
   function renderProblemCase(pc: ProblemCase) {
     const runCount = runs.filter(run => run.problemCaseRef === pc.metadata.name).length
+    const isResolved = pc.status.state === 'resolved'
+    const correlated = !isRootResource(pc)
     return (
-      <Box key={pc.metadata.name} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-        <Chip label={pc.spec.detector} size="small" color={pc.status.state === 'resolved' ? 'default' : 'warning'} variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
-        <ResourcePill kind={pc.spec.affectedResource.kind} name={pc.spec.affectedResource.name} namespace={pc.spec.affectedResource.namespace} />
-        {runCount > 0 && <Typography variant="caption" color="text.secondary">{runCount} diagnostic{runCount === 1 ? '' : 's'}</Typography>}
-        <Typography variant="caption" color="text.disabled">{timeAgo(pc.status.lastSeen ?? pc.status.firstSeen)}</Typography>
+      <Box
+        key={pc.metadata.name}
+        sx={{
+          p: 1.25,
+          borderRadius: 1.5,
+          border: '1px solid',
+          borderColor: isResolved ? 'rgba(255,255,255,0.07)' : 'rgba(245,158,11,0.2)',
+          background: isResolved ? 'rgba(255,255,255,0.015)' : 'rgba(245,158,11,0.035)',
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+          <Chip label={pc.spec.detector} size="small" color={isResolved ? 'default' : 'warning'} variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
+          <Chip label={pc.spec.severity} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20, textTransform: 'uppercase', opacity: 0.8 }} />
+          <Box sx={{ flex: 1 }} />
+          <Typography variant="caption" color="text.disabled">{timeAgo(pc.status.lastSeen ?? pc.status.firstSeen)}</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', mt: 1 }}>
+          <ResourcePill kind={pc.spec.affectedResource.kind} name={pc.spec.affectedResource.name} namespace={pc.spec.affectedResource.namespace} />
+          {correlated && (
+            <Tooltip title={`This ${pc.spec.affectedResource.kind} was grouped under ${incident.spec.rootResource.kind} ${incident.spec.rootResource.name} because they belong to the same workload path.`} arrow>
+              <Chip
+                icon={<LinkIcon sx={{ fontSize: '0.8rem !important' }} />}
+                label="part of this workload"
+                size="small"
+                variant="outlined"
+                sx={{ fontSize: '0.65rem', height: 21, color: 'text.secondary' }}
+              />
+            </Tooltip>
+          )}
+          {runCount > 0 && <Typography variant="caption" color="text.secondary">{runCount} diagnostic{runCount === 1 ? '' : 's'}</Typography>}
+        </Box>
+        {(pc.spec.symptoms?.length ?? 0) > 0 && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, lineHeight: 1.45 }}>
+            {pc.spec.symptoms!.join(' · ')}
+          </Typography>
+        )}
       </Box>
     )
   }
 
   return (
-    <Accordion disableGutters elevation={0} sx={sectionAccordionSx}>
+    <Accordion defaultExpanded={incident.status.state !== 'resolved'} disableGutters elevation={0} sx={sectionAccordionSx}>
       <AccordionSummary
         expandIcon={<ExpandMoreIcon sx={{ fontSize: '0.9rem', color: 'text.secondary' }} />}
         sx={sectionSummarySx}
       >
-        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>Details</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, width: '100%', pr: 1 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>Incident details</Typography>
+          {activePCs.length > 0 && <Chip label={`${activePCs.length} active`} size="small" color="warning" variant="outlined" sx={{ height: 19, fontSize: '0.62rem' }} />}
+          {previousPCs.length > 0 && <Chip label={`${previousPCs.length} previous`} size="small" variant="outlined" sx={{ height: 19, fontSize: '0.62rem', opacity: 0.7 }} />}
+        </Box>
       </AccordionSummary>
       <AccordionDetails sx={{ px: 1.5, pt: 0.5, pb: 1.5 }}>
         <Stack spacing={1.5}>
+          {occurrenceCount > 1 && (
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: 'auto 1fr 1fr' },
+                alignItems: 'center',
+                gap: 1.25,
+                p: 1.25,
+                borderRadius: 1.5,
+                background: 'rgba(245,158,11,0.06)',
+                border: '1px solid rgba(245,158,11,0.16)',
+              }}
+            >
+              <HistoryIcon sx={{ color: 'warning.main', fontSize: '1.15rem' }} />
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>First detected</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.78rem', fontWeight: 600 }}>{timeAgo(incident.status.openedAt)}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Latest occurrence</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.78rem', fontWeight: 600 }}>
+                  {timeAgo(incident.status.lastOccurrenceAt)} · occurrence #{occurrenceCount}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+
           <Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Root resource</Typography>
             <ResourcePill
@@ -127,16 +204,40 @@ function IncidentDetails({ incident, previousRun, problemCases, runs }: {
 
           {!isManual && activePCs.length > 0 && (
             <Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Active symptoms</Typography>
+              <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 0.75, fontWeight: 700 }}>Active symptoms</Typography>
               <Stack spacing={0.75}>{activePCs.map(renderProblemCase)}</Stack>
             </Box>
           )}
 
           {!isManual && previousPCs.length > 0 && (
-            <Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Previous manifestations</Typography>
-              <Stack spacing={0.75}>{previousPCs.map(renderProblemCase)}</Stack>
-            </Box>
+            <Accordion
+              disableGutters
+              elevation={0}
+              sx={{
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.07)',
+                borderRadius: '8px !important',
+                '&:before': { display: 'none' },
+              }}
+            >
+              <AccordionSummary
+                expandIcon={<ExpandMoreIcon sx={{ fontSize: '0.9rem', color: 'text.secondary' }} />}
+                sx={{
+                  minHeight: 38,
+                  px: 1.25,
+                  '.MuiAccordionSummary-content': { my: 0.5, alignItems: 'center', gap: 0.75 },
+                }}
+              >
+                <HistoryIcon sx={{ fontSize: '0.95rem', color: 'text.secondary' }} />
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                  History
+                </Typography>
+                <Chip label={`${previousPCs.length} previous`} size="small" variant="outlined" sx={{ height: 19, fontSize: '0.62rem', opacity: 0.7 }} />
+              </AccordionSummary>
+              <AccordionDetails sx={{ px: 1.25, pt: 0.25, pb: 1.25 }}>
+                <Stack spacing={0.75}>{previousPCs.map(renderProblemCase)}</Stack>
+              </AccordionDetails>
+            </Accordion>
           )}
 
           {needsMoreInfo && (
@@ -541,6 +642,65 @@ function IncidentCard({
 
 // ── IncidentList page ─────────────────────────────────────────────────────────
 
+type InboxView = 'active' | 'resolved' | 'all'
+
+const severityRank: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 }
+
+function incidentSeverity(incident: Incident, problemCases: ProblemCase[]): string {
+  const names = new Set(incident.spec.problemCases ?? [])
+  return problemCases
+    .filter(pc => names.has(pc.metadata.name))
+    .map(pc => pc.spec.severity.toLowerCase())
+    .sort((a, b) => (severityRank[b] ?? 0) - (severityRank[a] ?? 0))[0] ?? 'unknown'
+}
+
+function IncidentInboxRow({ incident, severity, selected, onClick }: {
+  incident: Incident
+  severity: string
+  selected: boolean
+  onClick: () => void
+}) {
+  const { rootResource } = incident.spec
+  const isResolved = incident.status.state === 'resolved'
+  const occurrences = incident.status.occurrenceCount ?? 1
+  return (
+    <Box
+      component="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      sx={{
+        width: '100%', textAlign: 'left', color: 'inherit', cursor: 'pointer',
+        p: 1.25, borderRadius: 1.5, border: '1px solid',
+        borderColor: selected ? 'primary.main' : 'divider',
+        background: selected ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.015)',
+        '&:hover': { borderColor: selected ? 'primary.light' : 'rgba(99,102,241,0.45)', background: 'rgba(99,102,241,0.06)' },
+      }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.65 }}>
+        <Chip
+          label={severity === 'unknown' ? (isResolved ? 'resolved' : 'unknown') : severity}
+          size="small"
+          color={severity === 'critical' || severity === 'high' ? 'warning' : isResolved && severity === 'unknown' ? 'success' : 'default'}
+          variant="outlined"
+          sx={{ height: 19, fontSize: '0.6rem', textTransform: 'uppercase' }}
+        />
+        {isResolved && severity !== 'unknown' && <Typography variant="caption" color="success.main">resolved</Typography>}
+        {occurrences > 1 && <Typography variant="caption" color="warning.main">{occurrences} occurrences</Typography>}
+        <Box sx={{ flex: 1 }} />
+        <Typography variant="caption" color="text.disabled">
+          {timeAgo(incident.status.lastOccurrenceAt ?? incident.status.resolvedAt ?? incident.status.openedAt)}
+        </Typography>
+      </Box>
+      <Typography sx={{ fontWeight: 700, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {rootResource.name}
+      </Typography>
+      <Typography variant="caption" color="text.secondary">
+        {rootResource.namespace ?? incident.metadata.namespace} · {rootResource.kind} · {incident.status.activeProblemCases ?? 0} active
+      </Typography>
+    </Box>
+  )
+}
+
 export interface IncidentListProps {
   onAction?: () => void
   onResolved?: () => void
@@ -549,6 +709,12 @@ export interface IncidentListProps {
 
 export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: IncidentListProps = {}) {
   const dispatch = useAppDispatch()
+  const [view, setView] = useState<InboxView>('active')
+  const [search, setSearch] = useState('')
+  const [namespace, setNamespace] = useState('all')
+  const [severity, setSeverity] = useState('all')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [visibleCount, setVisibleCount] = useState(20)
 
   const { data: incidents = [], isLoading, isError, error, refetch } = useListIncidentsQuery()
   const { data: problemCases = [] } = useListProblemCasesQuery()
@@ -568,6 +734,47 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
     .sort((a, b) => (b.status.openedAt ?? '').localeCompare(a.status.openedAt ?? ''))
   const resolved = (incidents as Incident[]).filter(i => i.status.state === 'resolved')
     .sort((a, b) => (b.status.resolvedAt ?? '').localeCompare(a.status.resolvedAt ?? ''))
+  const allIncidents = [...open, ...resolved]
+  const namespaces = Array.from(new Set(allIncidents.map(i => i.spec.rootResource.namespace || i.metadata.namespace))).sort()
+  const normalizedSearch = search.trim().toLowerCase()
+  const filtered = allIncidents.filter(incident => {
+    if (view === 'active' && incident.status.state === 'resolved') return false
+    if (view === 'resolved' && incident.status.state !== 'resolved') return false
+    const ns = incident.spec.rootResource.namespace || incident.metadata.namespace
+    if (namespace !== 'all' && ns !== namespace) return false
+    const currentSeverity = incidentSeverity(incident, problemCases)
+    if (severity !== 'all' && currentSeverity !== severity) return false
+    if (normalizedSearch) {
+      const haystack = [incident.metadata.name, incident.spec.rootResource.kind, incident.spec.rootResource.name, ns].join(' ').toLowerCase()
+      if (!haystack.includes(normalizedSearch)) return false
+    }
+    return true
+  })
+  const selected = filtered.find(i => i.metadata.name === selectedId) ?? filtered[0]
+  const visibleIncidents = filtered.slice(0, visibleCount)
+
+  function changeView(next: InboxView) {
+    setView(next)
+    setSelectedId(null)
+    setVisibleCount(20)
+  }
+
+  function renderIncidentCard(incident: Incident) {
+    return (
+      <IncidentCard
+        key={incident.metadata.name}
+        incident={incident}
+        previousRun={priorRuns[incident.metadata.name]}
+        problemCases={problemCases}
+        runs={runs.filter(run => run.incidentId === incident.metadata.name)}
+        onAction={onAction}
+        onResolved={onResolved}
+        onSuggestRule={(p) => dispatch(setExclusionProposal(p))}
+        onMarkFalsePositive={onMarkFalsePositive}
+        onRefresh={refetchAll}
+      />
+    )
+  }
 
   if (isLoading) {
     return (
@@ -590,7 +797,7 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
         <Typography variant="h6" sx={{ flex: 1 }}>Incidents</Typography>
         <IconButton size="small" onClick={refetch} title="Refresh">
           <RefreshIcon fontSize="small" />
@@ -606,56 +813,76 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
         </Button>
       </Box>
 
-      {open.length === 0 && !isLoading && (
-        <Box sx={{ textAlign: 'center', py: 8 }}>
-          <Typography sx={{ fontSize: '2rem', mb: 1 }}>🎉</Typography>
-          <Typography color="text.secondary">No open incidents</Typography>
-        </Box>
-      )}
-
-      <Stack spacing={1.5}>
-        {open.map(inc => (
-          <IncidentCard
-            key={inc.metadata.name}
-            incident={inc}
-            previousRun={priorRuns[inc.metadata.name]}
-            problemCases={problemCases}
-            runs={runs.filter(run => run.incidentId === inc.metadata.name)}
-            onAction={onAction}
-            onResolved={onResolved}
-            onSuggestRule={(p) => dispatch(setExclusionProposal(p))}
-            onMarkFalsePositive={onMarkFalsePositive}
-            onRefresh={refetchAll}
+      <Box sx={{ p: 1.25, mb: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, background: 'rgba(255,255,255,0.015)' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <ToggleButtonGroup exclusive size="small" value={view} onChange={(_, value: InboxView | null) => value && changeView(value)}>
+            <ToggleButton value="active">Active {open.length}</ToggleButton>
+            <ToggleButton value="resolved">Resolved {resolved.length}</ToggleButton>
+            <ToggleButton value="all">All {allIncidents.length}</ToggleButton>
+          </ToggleButtonGroup>
+          <TextField
+            size="small"
+            value={search}
+            onChange={event => { setSearch(event.target.value); setSelectedId(null); setVisibleCount(20) }}
+            placeholder="Search incidents"
+            sx={{ flex: '1 1 180px', minWidth: 0 }}
+            slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: '1rem' }} /></InputAdornment> } }}
           />
-        ))}
-      </Stack>
+          <FormControl size="small" sx={{ minWidth: 130 }}>
+            <Select value={namespace} onChange={event => { setNamespace(event.target.value); setSelectedId(null); setVisibleCount(20) }} displayEmpty>
+              <MenuItem value="all">All namespaces</MenuItem>
+              {namespaces.map(ns => <MenuItem key={ns} value={ns}>{ns}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 110 }}>
+            <Select value={severity} onChange={event => { setSeverity(event.target.value); setSelectedId(null); setVisibleCount(20) }} displayEmpty>
+              <MenuItem value="all">All severity</MenuItem>
+              {['critical', 'high', 'medium', 'low'].map(level => <MenuItem key={level} value={level}>{level}</MenuItem>)}
+            </Select>
+          </FormControl>
+        </Box>
+      </Box>
 
-      {resolved.length > 0 && (
-        <Accordion sx={{ mt: 2 }}>
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography variant="body2" color="text.secondary">
-              {resolved.length} resolved incident{resolved.length > 1 ? 's' : ''}
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails sx={{ p: 0 }}>
-            <Stack spacing={1.5} sx={{ p: 2 }}>
-              {resolved.map(inc => (
-                <IncidentCard
-                  key={inc.metadata.name}
-                  incident={inc}
-                  previousRun={priorRuns[inc.metadata.name]}
-              problemCases={problemCases}
-              runs={runs.filter(run => run.incidentId === inc.metadata.name)}
-                  onAction={onAction}
-                  onResolved={onResolved}
-                  onSuggestRule={(p) => dispatch(setExclusionProposal(p))}
-                  onMarkFalsePositive={onMarkFalsePositive}
-                  onRefresh={refetchAll}
+      {filtered.length === 0 ? (
+        <Box sx={{ textAlign: 'center', py: 7, border: '1px dashed', borderColor: 'divider', borderRadius: 2 }}>
+          <Typography sx={{ fontSize: '1.6rem', mb: 0.75 }}>{view === 'active' ? '🎉' : '⌕'}</Typography>
+          <Typography color="text.secondary">No incidents match this view</Typography>
+        </Box>
+      ) : (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(240px, 0.7fr) minmax(420px, 1.3fr)' }, gap: 2, alignItems: 'start' }}>
+          <Stack spacing={0.75} sx={{ maxHeight: { xl: 'calc(100vh - 220px)' }, overflowY: { xl: 'auto' }, pr: { xl: 0.5 } }}>
+            {visibleIncidents.map(incident => (
+              <Box key={incident.metadata.name}>
+                <IncidentInboxRow
+                  incident={incident}
+                  severity={incidentSeverity(incident, problemCases)}
+                  selected={incident.metadata.name === selected?.metadata.name}
+                  onClick={() => setSelectedId(incident.metadata.name)}
                 />
-              ))}
-            </Stack>
-          </AccordionDetails>
-        </Accordion>
+                {incident.metadata.name === selected?.metadata.name && (
+                  <Box sx={{ display: { xs: 'block', xl: 'none' }, mt: 1.25 }}>
+                    {renderIncidentCard(incident)}
+                  </Box>
+                )}
+              </Box>
+            ))}
+            {visibleCount < filtered.length && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setVisibleCount(count => count + 20)}
+                sx={{ mt: 0.5 }}
+              >
+                Load 20 more · {filtered.length - visibleCount} remaining
+              </Button>
+            )}
+          </Stack>
+          {selected && (
+            <Box sx={{ display: { xs: 'none', xl: 'block' }, position: 'sticky', top: 16 }}>
+              {renderIncidentCard(selected)}
+            </Box>
+          )}
+        </Box>
       )}
     </Box>
   )
