@@ -10,16 +10,32 @@ env:
   OWNER: aryzhykau
 
 jobs:
-  build-push-images:
-    name: Build & Push Docker Images
-    runs-on: ubuntu-latest
+  build-architecture-images:
+    name: Build ${{ matrix.service }} (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
 
     strategy:
+      fail-fast: false
       matrix:
+        service:
+          - cluster-watcher
+          - diagnostics-worker
+          - backend-api
+          - llm-gateway
+          - frontend-ui
+        architecture:
+          - amd64
+          - arm64
         include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
           - service: cluster-watcher
             context: .
             dockerfile: services/cluster-watcher/Dockerfile
@@ -58,18 +74,66 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.OWNER }}/kubechan-${{ matrix.service }}:${{ steps.version.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.OWNER }}/kubechan-${{ matrix.service }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER }}/kubechan-${{ matrix.service }}:${{ steps.version.outputs.version }}-${{ matrix.architecture }}
+          cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.architecture }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ matrix.architecture }}
+
+  merge-images:
+    name: Merge ${{ matrix.service }} manifest
+    runs-on: ubuntu-24.04
+    needs: build-architecture-images
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - cluster-watcher
+          - diagnostics-worker
+          - backend-api
+          - llm-gateway
+          - frontend-ui
+
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-architecture manifest
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.OWNER }}/kubechan-${{ matrix.service }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${VERSION}" \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}:${VERSION}-amd64" \
+            "${IMAGE}:${VERSION}-arm64"
+
+      - name: Verify manifest architectures
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.OWNER }}/kubechan-${{ matrix.service }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}" | tee manifest.txt
+          grep -q 'linux/amd64' manifest.txt
+          grep -q 'linux/arm64' manifest.txt
 
   publish-chart:
     name: Publish Helm Chart (OCI)
     runs-on: ubuntu-latest
-    needs: build-push-images
+    needs: merge-images
     permissions:
       contents: read
       packages: write
