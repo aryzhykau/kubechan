@@ -56,8 +56,8 @@ type DiagnosticRunSpec struct {
 	// +optional
 	IncidentRef string `json:"incidentRef,omitempty"`
 
-	// ProblemCaseRef is the name of the ProblemCase this diagnostic run belongs to.
-	// Deprecated: prefer IncidentRef.
+	// ProblemCaseRef is the active ProblemCase that triggered this diagnostic run.
+	// When IncidentRef is also set, collection includes all active ProblemCases in the incident.
 	// +optional
 	ProblemCaseRef string `json:"problemCaseRef,omitempty"`
 

@@ -40,6 +40,7 @@ func main() {
 	initDebounce := envDuration("DEBOUNCE_WINDOW_SECS", 30) * time.Second
 	initPending := envDuration("PENDING_THRESHOLD_SECS", 300) * time.Second
 	initUnavailable := envDuration("UNAVAILABLE_THRESHOLD_SECS", 300) * time.Second
+	recurrenceWindow := envDuration("INCIDENT_RECURRENCE_WINDOW_SECS", 86400) * time.Second
 
 	// Live-reloadable config — overridden by backend-api settings when available.
 	wcfg := watcherconfig.New(initDebounce, initPending, initUnavailable)
@@ -153,6 +154,7 @@ func main() {
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		ControlNamespace: controlNamespace,
+		RecurrenceWindow: recurrenceWindow,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to set up CorrelationReconciler")
 		os.Exit(1)
@@ -171,6 +173,7 @@ func main() {
 		"debounceWindow", wcfg.DebounceWindow(),
 		"pendingThreshold", wcfg.PendingThreshold(),
 		"unavailableThreshold", wcfg.UnavailableThreshold(),
+		"incidentRecurrenceWindow", recurrenceWindow,
 		"controlNamespace", controlNamespace,
 	)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

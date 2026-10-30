@@ -65,6 +65,14 @@ type IncidentStatus struct {
 	// ActiveProblemCases is the count of non-resolved ProblemCases in this incident.
 	// +optional
 	ActiveProblemCases int `json:"activeProblemCases,omitempty"`
+
+	// OccurrenceCount is incremented when the incident is first opened or reopened.
+	// +optional
+	OccurrenceCount int `json:"occurrenceCount,omitempty"`
+
+	// LastOccurrenceAt is when the current or most recent occurrence began.
+	// +optional
+	LastOccurrenceAt *metav1.Time `json:"lastOccurrenceAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true

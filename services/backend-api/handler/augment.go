@@ -87,8 +87,9 @@ func (h *Augment) Augment(w http.ResponseWriter, r *http.Request) {
 			Namespace:    ns,
 		},
 		Spec: v1alpha1.DiagnosticRunSpec{
-			IncidentRef: name,
-			RequestedAt: &now,
+			IncidentRef:    name,
+			ProblemCaseRef: latestActiveProblemCase(r.Context(), h.K8s, inc),
+			RequestedAt:    &now,
 		},
 	}
 	if err := h.K8s.Create(r.Context(), dr); err != nil {

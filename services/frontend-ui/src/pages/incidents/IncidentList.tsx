@@ -10,6 +10,7 @@ import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import {
   useListIncidentsQuery,
+  useListProblemCasesQuery,
   useAnalyzeMutation,
   useResolveIncidentMutation,
   useMarkFalsePositiveMutation,
@@ -23,7 +24,7 @@ import { ResourcePill } from '../../components/shared/ResourcePill'
 import { timeAgo } from '../../components/shared/utils'
 import { AugmentIncidentModal } from './AugmentIncidentModal'
 import { waitForAnalysis } from '../../analysis/tracker'
-import type { Incident, DiagnosticRunSummary, ExclusionRuleProposal, AnalysisResult } from '../../api/index'
+import type { Incident, ProblemCase, DiagnosticRunSummary, ExclusionRuleProposal, AnalysisResult } from '../../api/index'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -57,15 +58,33 @@ const sectionSummarySx = {
   borderRadius: '8px',
 }
 
-function IncidentDetails({ incident, previousRun }: {
+function IncidentDetails({ incident, previousRun, problemCases, runs }: {
   incident: Incident
   previousRun?: DiagnosticRunSummary
+  problemCases: ProblemCase[]
+  runs: DiagnosticRunSummary[]
 }) {
   const isManual = incident.spec.source === 'manual'
   const related = incident.spec.relatedResources ?? []
   const pcs = incident.spec.problemCases ?? []
   const suggestions = previousRun?.suggestedResources ?? []
   const needsMoreInfo = !!previousRun?.needsMoreInfo && suggestions.length > 0
+  const pcByName = new Map(problemCases.map(pc => [pc.metadata.name, pc]))
+  const incidentPCs = pcs.map(name => pcByName.get(name)).filter((pc): pc is ProblemCase => !!pc)
+  const activePCs = incidentPCs.filter(pc => pc.status.state !== 'resolved')
+  const previousPCs = incidentPCs.filter(pc => pc.status.state === 'resolved')
+
+  function renderProblemCase(pc: ProblemCase) {
+    const runCount = runs.filter(run => run.problemCaseRef === pc.metadata.name).length
+    return (
+      <Box key={pc.metadata.name} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+        <Chip label={pc.spec.detector} size="small" color={pc.status.state === 'resolved' ? 'default' : 'warning'} variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
+        <ResourcePill kind={pc.spec.affectedResource.kind} name={pc.spec.affectedResource.name} namespace={pc.spec.affectedResource.namespace} />
+        {runCount > 0 && <Typography variant="caption" color="text.secondary">{runCount} diagnostic{runCount === 1 ? '' : 's'}</Typography>}
+        <Typography variant="caption" color="text.disabled">{timeAgo(pc.status.lastSeen ?? pc.status.firstSeen)}</Typography>
+      </Box>
+    )
+  }
 
   return (
     <Accordion disableGutters elevation={0} sx={sectionAccordionSx}>
@@ -106,14 +125,17 @@ function IncidentDetails({ incident, previousRun }: {
             </Box>
           )}
 
-          {!isManual && pcs.length > 0 && (
+          {!isManual && activePCs.length > 0 && (
             <Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Problem cases</Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                {pcs.map(pc => (
-                  <Chip key={pc} label={pc} size="small" variant="outlined" sx={{ fontSize: '0.7rem', height: 20, fontFamily: 'monospace' }} />
-                ))}
-              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Active symptoms</Typography>
+              <Stack spacing={0.75}>{activePCs.map(renderProblemCase)}</Stack>
+            </Box>
+          )}
+
+          {!isManual && previousPCs.length > 0 && (
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Previous manifestations</Typography>
+              <Stack spacing={0.75}>{previousPCs.map(renderProblemCase)}</Stack>
             </Box>
           )}
 
@@ -265,6 +287,8 @@ function IncidentAnalysis({ previousRun, onRate }: {
 interface IncidentCardProps {
   incident: Incident
   previousRun?: DiagnosticRunSummary
+  problemCases: ProblemCase[]
+  runs: DiagnosticRunSummary[]
   onAction?: () => void
   onResolved?: () => void
   onSuggestRule?: (p: ExclusionRuleProposal) => void
@@ -273,7 +297,7 @@ interface IncidentCardProps {
 }
 
 function IncidentCard({
-  incident, previousRun,
+  incident, previousRun, problemCases, runs,
   onAction, onResolved, onSuggestRule, onMarkFalsePositive, onRefresh,
 }: IncidentCardProps) {
   const [analyze] = useAnalyzeMutation()
@@ -382,8 +406,20 @@ function IncidentCard({
         {isManual && incident.ownerUsername && (
           <Typography variant="caption" color="text.secondary">by {incident.ownerUsername}</Typography>
         )}
+        {(incident.status.occurrenceCount ?? 1) > 1 && (
+          <Chip
+            label={`Repeated ${incident.status.occurrenceCount} times`}
+            size="small"
+            variant="outlined"
+            color="warning"
+            sx={{ fontSize: '0.65rem', height: 20 }}
+          />
+        )}
         <Box sx={{ flex: 1 }} />
-        <Typography variant="caption" color="text.secondary">{timeAgo(incident.status.openedAt)}</Typography>
+        <Typography variant="caption" color="text.secondary">
+          {(incident.status.occurrenceCount ?? 1) > 1 ? 'Last occurrence ' : ''}
+          {timeAgo(incident.status.lastOccurrenceAt ?? incident.status.openedAt)}
+        </Typography>
       </Box>
 
       {/* Title */}
@@ -393,7 +429,7 @@ function IncidentCard({
       {sub && <Typography variant="caption" color="text.secondary">{sub}</Typography>}
 
       {/* Details accordion */}
-      <IncidentDetails incident={incident} previousRun={previousRun} />
+      <IncidentDetails incident={incident} previousRun={previousRun} problemCases={problemCases} runs={runs} />
       {previousRun?.analysisResultId && (
         <IncidentAnalysis key={previousRun.diagnosticRunId} previousRun={previousRun} onRate={handleRate} />
       )}
@@ -515,6 +551,7 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
   const dispatch = useAppDispatch()
 
   const { data: incidents = [], isLoading, isError, error, refetch } = useListIncidentsQuery()
+  const { data: problemCases = [] } = useListProblemCasesQuery()
   const { data: runs = [], refetch: refetchRuns } = useListDiagnosticRunsQuery()
 
   function refetchAll() { refetch(); refetchRuns() }
@@ -582,6 +619,8 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
             key={inc.metadata.name}
             incident={inc}
             previousRun={priorRuns[inc.metadata.name]}
+            problemCases={problemCases}
+            runs={runs.filter(run => run.incidentId === inc.metadata.name)}
             onAction={onAction}
             onResolved={onResolved}
             onSuggestRule={(p) => dispatch(setExclusionProposal(p))}
@@ -605,6 +644,8 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
                   key={inc.metadata.name}
                   incident={inc}
                   previousRun={priorRuns[inc.metadata.name]}
+              problemCases={problemCases}
+              runs={runs.filter(run => run.incidentId === inc.metadata.name)}
                   onAction={onAction}
                   onResolved={onResolved}
                   onSuggestRule={(p) => dispatch(setExclusionProposal(p))}

@@ -25,6 +25,9 @@ clusterWatcher:
   # Seconds a Deployment must have unavailable replicas before triggering DeploymentUnavailable detector.
   unavailableThresholdSecs: 300
 
+  # Reopen a resolved incident when the same root workload fails again within this window.
+  incidentRecurrenceWindowSecs: 86400
+
   # Kubernetes namespace this watcher manages (defaults to the release namespace).
   controlNamespace: ""
 

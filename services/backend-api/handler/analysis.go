@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -59,14 +60,16 @@ func (h *Analysis) Analyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := metav1.Now()
+	problemCaseRef := latestActiveProblemCase(r.Context(), h.K8s, inc)
 	dr := &v1alpha1.DiagnosticRun{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("dr-%s-", name),
 			Namespace:    ns,
 		},
 		Spec: v1alpha1.DiagnosticRunSpec{
-			IncidentRef: name,
-			RequestedAt: &now,
+			IncidentRef:    name,
+			ProblemCaseRef: problemCaseRef,
+			RequestedAt:    &now,
 		},
 	}
 	if err := h.K8s.Create(r.Context(), dr); err != nil {
@@ -100,6 +103,23 @@ func (h *Analysis) Analyze(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func latestActiveProblemCase(ctx context.Context, k8s client.Client, inc *v1alpha1.Incident) string {
+	var latest *v1alpha1.ProblemCase
+	for _, name := range inc.Spec.ProblemCases {
+		pc := &v1alpha1.ProblemCase{}
+		if err := k8s.Get(ctx, client.ObjectKey{Namespace: inc.Namespace, Name: name}, pc); err != nil || pc.Status.State == v1alpha1.ProblemCaseStateResolved {
+			continue
+		}
+		if latest == nil || (pc.Status.LastSeen != nil && (latest.Status.LastSeen == nil || pc.Status.LastSeen.After(latest.Status.LastSeen.Time))) {
+			latest = pc
+		}
+	}
+	if latest == nil {
+		return ""
+	}
+	return latest.Name
+}
+
 // GetAnalysisResult handles GET /api/v1/analysisresults/{id}
 func (h *Analysis) GetAnalysisResult(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -110,8 +130,8 @@ func (h *Analysis) GetAnalysisResult(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		resultID, diagnosticRunID, model, status, payload, createdAt, userRating string
-		incidentID, likelyRootCause                                               sql.NullString
-		confidence                                                                 sql.NullFloat64
+		incidentID, likelyRootCause                                              sql.NullString
+		confidence                                                               sql.NullFloat64
 	)
 	if err := row.Scan(&resultID, &incidentID, &diagnosticRunID, &model, &status,
 		&likelyRootCause, &confidence, &payload, &createdAt, &userRating); err != nil {
@@ -206,7 +226,7 @@ func (h *Analysis) RateAnalysisResult(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, incident_id, likely_root_cause, confidence, user_rating
 		 FROM analysis_results WHERE id = ?`, id)
 	var (
-		resultID, userRating       string
+		resultID, userRating        string
 		incidentID, likelyRootCause sql.NullString
 		confidence                  sql.NullFloat64
 	)

@@ -64,8 +64,8 @@ spec:
                 type: string
               problemCaseRef:
                 description: |-
-                  ProblemCaseRef is the name of the ProblemCase this diagnostic run belongs to.
-                  Deprecated: prefer IncidentRef.
+                  ProblemCaseRef is the active ProblemCase that triggered this diagnostic run.
+                  When IncidentRef is also set, collection includes all active ProblemCases in the incident.
                 type: string
               requestedAt:
                 description: RequestedAt is when this diagnostic run was requested.

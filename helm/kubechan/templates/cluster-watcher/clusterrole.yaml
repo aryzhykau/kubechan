@@ -35,7 +35,7 @@ rules:
   # Additional owner-reference walks for correlation
   - apiGroups: ["apps"]
     resources: ["statefulsets", "daemonsets"]
-    verbs: ["get"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get"]

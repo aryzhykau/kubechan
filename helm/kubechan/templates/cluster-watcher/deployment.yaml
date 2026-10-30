@@ -40,6 +40,8 @@ spec:
               value: {{ .Values.clusterWatcher.pendingTooLongThresholdSecs | quote }}
             - name: UNAVAILABLE_THRESHOLD_SECS
               value: {{ .Values.clusterWatcher.unavailableThresholdSecs | quote }}
+            - name: INCIDENT_RECURRENCE_WINDOW_SECS
+              value: {{ .Values.clusterWatcher.incidentRecurrenceWindowSecs | quote }}
             - name: CONTROL_NAMESPACE
               value: {{ .Values.clusterWatcher.controlNamespace | default .Release.Namespace | quote }}
             - name: BACKEND_API_URL

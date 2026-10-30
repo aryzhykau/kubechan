@@ -38,19 +38,26 @@ export interface Incident {
     userMessage?: string
     relatedResources?: ResourceRef[]
   }
-  status: { state: 'open' | 'resolved'; openedAt?: string; resolvedAt?: string; activeProblemCases?: number }
+  status: {
+    state: 'open' | 'resolved'
+    openedAt?: string
+    resolvedAt?: string
+    activeProblemCases?: number
+    occurrenceCount?: number
+    lastOccurrenceAt?: string
+  }
   ownerUsername?: string
 }
 
 export interface ProblemCase {
   metadata: { name: string; namespace: string }
   spec: { affectedResource: ResourceRef; detector: string; severity: string; symptoms?: string[] }
-  status: { state: string; firstSeen?: string; lastSeen?: string }
+  status: { state: string; firstSeen?: string; lastSeen?: string; resolvedAt?: string }
 }
 
 export interface DiagnosticRun {
   metadata: { name: string; namespace: string }
-  spec: { incidentRef?: string; requestedAt?: string }
+  spec: { incidentRef?: string; problemCaseRef?: string; requestedAt?: string }
   status: { state: string; evidenceRef?: string; collectionErrors?: string[] }
 }
 
@@ -62,6 +69,7 @@ export interface DiagnosticRunDetail {
 export interface DiagnosticRunSummary {
   diagnosticRunId: string
   incidentId: string
+  problemCaseRef?: string
   requestedAt: string
   status: string
   analysisResultId?: string
@@ -109,11 +117,19 @@ export interface PVCInfo {
   events: K8sEvent[]
 }
 
+export interface RelatedResourceEvidence {
+  resource: { kind: string; name: string; namespace?: string; apiGroup?: string }
+  events?: K8sEvent[]
+  logs?: string
+  spec?: Record<string, unknown>
+}
+
 export interface EvidencePayload {
   rootResource?: { kind: string; name: string; namespace?: string }
   rootResourceEvents?: K8sEvent[]
   workloadPodLogs?: PodLog[]
   pvcInfos?: PVCInfo[]
+  relatedResourceEvidence?: RelatedResourceEvidence[]
 }
 
 export interface Evidence {

@@ -66,6 +66,7 @@ func (h *DiagnosticRuns) Get(w http.ResponseWriter, r *http.Request) {
 type runSummary struct {
 	DiagnosticRunID      string          `json:"diagnosticRunId"`
 	IncidentID           string          `json:"incidentId"`
+	ProblemCaseRef       string          `json:"problemCaseRef,omitempty"`
 	RequestedAt          string          `json:"requestedAt"`
 	Status               string          `json:"status"`
 	AnalysisResultID     *string         `json:"analysisResultId"`
@@ -115,13 +116,13 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 	summaries := []runSummary{}
 	for rows.Next() {
 		var (
-			s                                                   runSummary
-			incidentNullStr, requestedAt, status               sql.NullString
-			analysisID, rootCause, model, analysisCreatedAt    sql.NullString
-			suggestedResources, suggestExclusionRule            sql.NullString
-			suggestFalsePositiveInt                             sql.NullInt64
-			confidence                                          sql.NullFloat64
-			needsMoreInfoInt                                    sql.NullInt64
+			s                                               runSummary
+			incidentNullStr, requestedAt, status            sql.NullString
+			analysisID, rootCause, model, analysisCreatedAt sql.NullString
+			suggestedResources, suggestExclusionRule        sql.NullString
+			suggestFalsePositiveInt                         sql.NullInt64
+			confidence                                      sql.NullFloat64
+			needsMoreInfoInt                                sql.NullInt64
 		)
 		if err := rows.Scan(
 			&s.DiagnosticRunID, &incidentNullStr, &requestedAt, &status,
@@ -132,6 +133,10 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.IncidentID = incidentNullStr.String
+		dr := &v1alpha1.DiagnosticRun{}
+		if err := h.K8s.Get(r.Context(), client.ObjectKey{Namespace: h.DefaultNamespace, Name: s.DiagnosticRunID}, dr); err == nil {
+			s.ProblemCaseRef = dr.Spec.ProblemCaseRef
+		}
 		s.RequestedAt = requestedAt.String
 		s.Status = status.String
 		if analysisID.Valid {
@@ -178,7 +183,7 @@ func (h *DiagnosticRuns) GetEvidence(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		evidenceID, diagnosticRunID, collectedAt, collectorVersion, payload, createdAt string
-		incidentID, collectionErrors                                                    sql.NullString
+		incidentID, collectionErrors                                                   sql.NullString
 	)
 	if err := row.Scan(&evidenceID, &diagnosticRunID, &incidentID, &collectedAt,
 		&collectorVersion, &payload, &collectionErrors, &createdAt); err != nil {
@@ -214,8 +219,8 @@ func (h *DiagnosticRuns) GetAnalysisResult(w http.ResponseWriter, r *http.Reques
 
 	var (
 		resultID, diagnosticRunID, model, status, payload, createdAt, userRating string
-		incidentID, likelyRootCause                                               sql.NullString
-		confidence                                                                 sql.NullFloat64
+		incidentID, likelyRootCause                                              sql.NullString
+		confidence                                                               sql.NullFloat64
 	)
 	if err := row.Scan(&resultID, &incidentID, &diagnosticRunID, &model, &status,
 		&likelyRootCause, &confidence, &payload, &createdAt, &userRating); err != nil {

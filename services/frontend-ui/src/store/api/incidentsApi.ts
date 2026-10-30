@@ -1,6 +1,6 @@
 import { createApi } from '@reduxjs/toolkit/query/react'
 import { baseQuery } from './baseQuery'
-import type { Incident, AnalyzeResponse, ManualIncidentResponse } from '../../api/index'
+import type { Incident, ProblemCase, AnalyzeResponse, ManualIncidentResponse } from '../../api/index'
 
 export const incidentsApi = createApi({
   reducerPath: 'incidentsApi',
@@ -13,6 +13,9 @@ export const incidentsApi = createApi({
         result
           ? [...result.map(({ metadata }) => ({ type: 'Incident' as const, id: metadata.name })), { type: 'Incident', id: 'LIST' }]
           : [{ type: 'Incident', id: 'LIST' }],
+    }),
+    listProblemCases: build.query<ProblemCase[], string | void>({
+      query: (ns = 'kubechan') => `/problemcases?namespace=${ns}`,
     }),
     getIncident: build.query<Incident, string>({
       query: (id) => `/incidents/${encodeURIComponent(id)}`,
@@ -54,6 +57,7 @@ export const incidentsApi = createApi({
 
 export const {
   useListIncidentsQuery,
+  useListProblemCasesQuery,
   useGetIncidentQuery,
   useAnalyzeMutation,
   useResolveIncidentMutation,

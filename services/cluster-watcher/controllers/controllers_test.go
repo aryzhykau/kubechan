@@ -225,7 +225,7 @@ func TestIncidentMatchesRule(t *testing.T) {
 		{
 			"non-matching namespace on rule",
 			&v1alpha1.KubechanExclusionRule{Spec: v1alpha1.ExclusionRuleSpec{
-				Namespace: "other",
+				Namespace:       "other",
 				TargetResources: []v1alpha1.ResourceRef{{Kind: "Deployment"}},
 			}},
 			false,
@@ -233,7 +233,7 @@ func TestIncidentMatchesRule(t *testing.T) {
 		{
 			"matching namespace and target",
 			&v1alpha1.KubechanExclusionRule{Spec: v1alpha1.ExclusionRuleSpec{
-				Namespace: "default",
+				Namespace:       "default",
 				TargetResources: []v1alpha1.ResourceRef{{Kind: "Deployment"}},
 			}},
 			true,
@@ -600,6 +600,67 @@ func TestCorrelationReconciler_FindRootResource_UnknownKind(t *testing.T) {
 	}
 	if root.Kind != "CustomResource" {
 		t.Errorf("expected passthrough for unknown kind, got %q", root.Kind)
+	}
+}
+
+func TestCorrelationReconciler_ServiceResolvesSingleDeployment(t *testing.T) {
+	t.Parallel()
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"}, Spec: corev1.ServiceSpec{Selector: map[string]string{"app": "api"}}}
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"}, Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}}}}
+	c := fake.NewClientBuilder().WithScheme(newCtrlTestScheme()).WithObjects(svc, deploy).Build()
+	r := &CorrelationReconciler{Client: c}
+	root, err := r.findRootResource(context.Background(), v1alpha1.ResourceRef{Kind: "Service", Name: "api", Namespace: "default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Kind != "Deployment" || root.Name != "api" {
+		t.Fatalf("root = %#v, want Deployment/api", root)
+	}
+}
+
+func TestCorrelationReconciler_AmbiguousServiceRemainsServiceRoot(t *testing.T) {
+	t.Parallel()
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"}, Spec: corev1.ServiceSpec{Selector: map[string]string{"app": "api"}}}
+	deployA := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api-v1", Namespace: "default"}, Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}}}}
+	deployB := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api-v2", Namespace: "default"}, Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}}}}
+	c := fake.NewClientBuilder().WithScheme(newCtrlTestScheme()).WithObjects(svc, deployA, deployB).Build()
+	r := &CorrelationReconciler{Client: c}
+	root, err := r.findRootResource(context.Background(), v1alpha1.ResourceRef{Kind: "Service", Name: "api", Namespace: "default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Kind != "Service" || root.Name != "api" {
+		t.Fatalf("root = %#v, want Service/api", root)
+	}
+}
+
+func TestCorrelationReconciler_ReusesRecentlyResolvedIncident(t *testing.T) {
+	t.Parallel()
+	root := v1alpha1.ResourceRef{Kind: "Deployment", Name: "api", Namespace: "default"}
+	resolvedAt := metav1.NewTime(time.Now().Add(-time.Hour))
+	inc := &v1alpha1.Incident{
+		ObjectMeta: metav1.ObjectMeta{Name: "inc-api", Namespace: "kubechan", Labels: map[string]string{LabelIncidentFingerprint: incidentFingerprint(root)}},
+		Spec:       v1alpha1.IncidentSpec{RootResource: root, Source: "auto"},
+		Status:     v1alpha1.IncidentStatus{State: v1alpha1.IncidentStateResolved, ResolvedAt: &resolvedAt, OccurrenceCount: 1},
+	}
+	c := fake.NewClientBuilder().WithScheme(newCtrlTestScheme()).WithObjects(inc).WithStatusSubresource(&v1alpha1.Incident{}).Build()
+	r := &CorrelationReconciler{Client: c, RecurrenceWindow: 24 * time.Hour}
+	found, reopen, err := r.findReusableIncident(context.Background(), "kubechan", root, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || found.Name != inc.Name || !reopen {
+		t.Fatalf("found=%v reopen=%v", found, reopen)
+	}
+	if err := r.reopenIncident(context.Background(), found); err != nil {
+		t.Fatal(err)
+	}
+	updated := &v1alpha1.Incident{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(inc), updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status.State != v1alpha1.IncidentStateOpen || updated.Status.OccurrenceCount != 2 || updated.Status.ResolvedAt != nil {
+		t.Fatalf("unexpected reopened status: %#v", updated.Status)
 	}
 }
 
@@ -1938,4 +1999,3 @@ func TestRuleToDeploymentsMapper_NoDeploymentsReturnsEmpty(t *testing.T) {
 		t.Errorf("expected 0 requests, got %d", len(reqs))
 	}
 }
-

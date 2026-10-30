@@ -12,6 +12,7 @@ import (
 
 	v1alpha1 "github.com/org/kubechan/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -39,13 +40,18 @@ func TestAnalysis_Analyze_AutoIncident_CreatesRun(t *testing.T) {
 
 	db := openDB(t)
 	insertTestUser(t, db, "uid-1")
+	seen := metav1.Now()
+	pc := &v1alpha1.ProblemCase{
+		ObjectMeta: metav1.ObjectMeta{Name: "pc-active", Namespace: "kubechan"},
+		Status:     v1alpha1.ProblemCaseStatus{State: v1alpha1.ProblemCaseStateOpen, LastSeen: &seen},
+	}
 	inc := &v1alpha1.Incident{
 		ObjectMeta: metav1.ObjectMeta{Name: "inc-auto", Namespace: "kubechan"},
-		Spec:       v1alpha1.IncidentSpec{Source: "auto"},
+		Spec:       v1alpha1.IncidentSpec{Source: "auto", ProblemCases: []string{pc.Name}},
 	}
 	c := fake.NewClientBuilder().
 		WithScheme(newTestScheme()).
-		WithObjects(inc).
+		WithObjects(inc, pc).
 		WithStatusSubresource(&v1alpha1.DiagnosticRun{}).
 		Build()
 	h := &Analysis{K8s: c, DB: db, DefaultNamespace: "kubechan"}
@@ -79,6 +85,13 @@ func TestAnalysis_Analyze_AutoIncident_CreatesRun(t *testing.T) {
 	}
 	if resp.AnalysisRequestID == "" {
 		t.Error("expected non-empty analysisRequestId")
+	}
+	dr := &v1alpha1.DiagnosticRun{}
+	if err := c.Get(capturedR.Context(), client.ObjectKey{Namespace: "kubechan", Name: resp.DiagnosticRunID}, dr); err != nil {
+		t.Fatal(err)
+	}
+	if dr.Spec.ProblemCaseRef != pc.Name {
+		t.Fatalf("problemCaseRef = %q, want %q", dr.Spec.ProblemCaseRef, pc.Name)
 	}
 }
 

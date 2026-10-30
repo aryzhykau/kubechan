@@ -457,7 +457,7 @@ func TestCollect_IncidentNotFound(t *testing.T) {
 	t.Parallel()
 	c := fake.NewClientBuilder().WithScheme(newDWTestScheme()).Build()
 	r := &DiagnosticRunReconciler{Client: c, Logger: newSlogDiscard(), CollectorVersion: "test"}
-	ev, errs := r.collect(context.Background(), "default", "nonexistent-inc", "dr-1")
+	ev, errs := r.collect(context.Background(), "default", "nonexistent-inc", "", "dr-1")
 	if len(errs) == 0 {
 		t.Error("expected error when incident not found")
 	}
@@ -477,7 +477,7 @@ func TestCollect_WithIncidentNoProblemCases(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(newDWTestScheme()).WithObjects(inc).Build()
 	r := &DiagnosticRunReconciler{Client: c, Logger: newSlogDiscard(), CollectorVersion: "test"}
-	ev, errs := r.collect(context.Background(), "default", "inc-1", "dr-1")
+	ev, errs := r.collect(context.Background(), "default", "inc-1", "", "dr-1")
 	var nonLogErrs []string
 	for _, e := range errs {
 		if !strings.Contains(e, "pod logs") {
@@ -511,7 +511,7 @@ func TestCollect_WithIncidentAndProblemCase(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(newDWTestScheme()).WithObjects(inc, pc).Build()
 	r := &DiagnosticRunReconciler{Client: c, Logger: newSlogDiscard(), CollectorVersion: "test"}
-	ev, errs := r.collect(context.Background(), "default", "inc-2", "dr-2")
+	ev, errs := r.collect(context.Background(), "default", "inc-2", "", "dr-2")
 	var nonLogErrs2 []string
 	for _, e := range errs {
 		if !strings.Contains(e, "pod logs") {
@@ -523,6 +523,19 @@ func TestCollect_WithIncidentAndProblemCase(t *testing.T) {
 	}
 	if len(ev.ProblemCases) != 1 {
 		t.Errorf("expected 1 problem case, got %d", len(ev.ProblemCases))
+	}
+}
+
+func TestCollect_OccurrenceScopeExcludesResolvedHistory(t *testing.T) {
+	t.Parallel()
+	active := &v1alpha1.ProblemCase{ObjectMeta: metav1.ObjectMeta{Name: "pc-active", Namespace: "default"}, Spec: v1alpha1.ProblemCaseSpec{AffectedResource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "app", Namespace: "default"}, Detector: "DeploymentUnavailable", Severity: "high"}, Status: v1alpha1.ProblemCaseStatus{State: v1alpha1.ProblemCaseStateOpen}}
+	resolved := &v1alpha1.ProblemCase{ObjectMeta: metav1.ObjectMeta{Name: "pc-old", Namespace: "default"}, Spec: v1alpha1.ProblemCaseSpec{AffectedResource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "app", Namespace: "default"}, Detector: "CrashLoopBackOff", Severity: "critical"}, Status: v1alpha1.ProblemCaseStatus{State: v1alpha1.ProblemCaseStateResolved}}
+	inc := &v1alpha1.Incident{ObjectMeta: metav1.ObjectMeta{Name: "inc", Namespace: "default"}, Spec: v1alpha1.IncidentSpec{RootResource: v1alpha1.ResourceRef{Kind: "Deployment", Name: "app", Namespace: "default"}, ProblemCases: []string{active.Name, resolved.Name}}}
+	c := fake.NewClientBuilder().WithScheme(newDWTestScheme()).WithObjects(inc, active, resolved).Build()
+	r := &DiagnosticRunReconciler{Client: c, Logger: newSlogDiscard(), CollectorVersion: "test"}
+	ev, _ := r.collect(context.Background(), "default", "inc", active.Name, "dr")
+	if len(ev.ProblemCases) != 1 || ev.ProblemCases[0].Name != active.Name {
+		t.Fatalf("problem cases = %#v", ev.ProblemCases)
 	}
 }
 
@@ -751,7 +764,6 @@ func TestCollectResourceSpec_Ingress(t *testing.T) {
 	}
 }
 
-
 func TestCollectResourceSpec_PVC_Bound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -814,7 +826,7 @@ func TestCollect_WithRelatedResources(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newDWTestScheme()).WithObjects(inc, cm, ing).Build()
 	r := &DiagnosticRunReconciler{Client: c, Logger: newSlogDiscard(), CollectorVersion: "test"}
 
-	ev, _ := r.collect(context.Background(), "default", "inc-related", "dr-related")
+	ev, _ := r.collect(context.Background(), "default", "inc-related", "", "dr-related")
 	if len(ev.RelatedResourceEvidence) == 0 {
 		t.Error("expected related resource evidence")
 	}

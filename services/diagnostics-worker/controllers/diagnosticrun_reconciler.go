@@ -48,10 +48,10 @@ import (
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch
 type DiagnosticRunReconciler struct {
 	client.Client
-	Logger         *slog.Logger
-	BackendAPIURL  string
-	LogTailLines   int64
-	PrevLogLines   int64
+	Logger           *slog.Logger
+	BackendAPIURL    string
+	LogTailLines     int64
+	PrevLogLines     int64
 	CollectorVersion string
 }
 
@@ -87,7 +87,7 @@ func (r *DiagnosticRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		incidentName = dr.Spec.ProblemCaseRef
 	}
 
-	evidence, collectionErrors := r.collect(ctx, ns, incidentName, dr.Name)
+	evidence, collectionErrors := r.collect(ctx, ns, incidentName, dr.Spec.ProblemCaseRef, dr.Name)
 
 	// Patch state → completed (or failed if we have nothing at all).
 	now := metav1.Now()
@@ -119,7 +119,7 @@ func (r *DiagnosticRunReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 // collect gathers all evidence for the incident/problemcase and returns the payload.
 func (r *DiagnosticRunReconciler) collect(
 	ctx context.Context,
-	ns, incidentName, drName string,
+	ns, incidentName, problemCaseRef, drName string,
 ) (*collector.Evidence, []string) {
 	var errs []string
 	ev := &collector.Evidence{
@@ -140,7 +140,32 @@ func (r *DiagnosticRunReconciler) collect(
 		Namespace: inc.Spec.RootResource.Namespace,
 	}
 
-	for _, pcName := range inc.Spec.ProblemCases {
+	problemCaseNames := inc.Spec.ProblemCases
+	if problemCaseRef != "" {
+		found := false
+		problemCaseNames = nil
+		for _, pcName := range inc.Spec.ProblemCases {
+			pc := &v1alpha1.ProblemCase{}
+			if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: pcName}, pc); err != nil {
+				errs = append(errs, fmt.Sprintf("get problemcase %s: %s", pcName, err))
+				continue
+			}
+			if pcName == problemCaseRef {
+				found = true
+				problemCaseNames = append(problemCaseNames, pcName)
+				continue
+			}
+			if pc.Status.State != v1alpha1.ProblemCaseStateResolved {
+				problemCaseNames = append(problemCaseNames, pcName)
+			}
+		}
+		if !found {
+			errs = append(errs, fmt.Sprintf("trigger problemcase %s is not a member of incident %s", problemCaseRef, incidentName))
+			problemCaseNames = nil
+		}
+	}
+
+	for _, pcName := range problemCaseNames {
 		pc := &v1alpha1.ProblemCase{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: pcName}, pc); err != nil {
 			errs = append(errs, fmt.Sprintf("get problemcase %s: %s", pcName, err))
@@ -279,10 +304,10 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 			if rule.HTTP != nil {
 				for _, p := range rule.HTTP.Paths {
 					path := map[string]any{
-						"path":        p.Path,
-						"pathType":    string(*p.PathType),
+						"path":           p.Path,
+						"pathType":       string(*p.PathType),
 						"backendService": p.Backend.Service.Name,
-						"backendPort": p.Backend.Service.Port.Number,
+						"backendPort":    p.Backend.Service.Port.Number,
 					}
 					paths = append(paths, path)
 				}
@@ -367,9 +392,9 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 			return nil, err
 		}
 		return map[string]any{
-			"desiredNumberScheduled":  obj.Status.DesiredNumberScheduled,
-			"numberReady":             obj.Status.NumberReady,
-			"numberUnavailable":       obj.Status.NumberUnavailable,
+			"desiredNumberScheduled": obj.Status.DesiredNumberScheduled,
+			"numberReady":            obj.Status.NumberReady,
+			"numberUnavailable":      obj.Status.NumberUnavailable,
 		}, nil
 
 	case "CronJob":
@@ -402,11 +427,11 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 			return nil, err
 		}
 		return map[string]any{
-			"completions":  obj.Spec.Completions,
-			"succeeded":    obj.Status.Succeeded,
-			"failed":       obj.Status.Failed,
-			"active":       obj.Status.Active,
-			"startTime":    obj.Status.StartTime,
+			"completions":    obj.Spec.Completions,
+			"succeeded":      obj.Status.Succeeded,
+			"failed":         obj.Status.Failed,
+			"active":         obj.Status.Active,
+			"startTime":      obj.Status.StartTime,
 			"completionTime": obj.Status.CompletionTime,
 		}, nil
 
@@ -516,10 +541,10 @@ func (r *DiagnosticRunReconciler) collectEvents(ctx context.Context, ns, kind, n
 	for _, e := range list.Items {
 		if e.InvolvedObject.Kind == kind && e.InvolvedObject.Name == name {
 			out = append(out, collector.K8sEvent{
-				Type:    e.Type,
-				Reason:  e.Reason,
-				Message: e.Message,
-				Count:   e.Count,
+				Type:      e.Type,
+				Reason:    e.Reason,
+				Message:   e.Message,
+				Count:     e.Count,
 				FirstTime: e.FirstTimestamp.Time,
 				LastTime:  e.LastTimestamp.Time,
 			})

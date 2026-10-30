@@ -186,6 +186,15 @@ spec:
                 description: ActiveProblemCases is the count of non-resolved ProblemCases
                   in this incident.
                 type: integer
+              lastOccurrenceAt:
+                description: LastOccurrenceAt is when the current or most recent occurrence
+                  began.
+                format: date-time
+                type: string
+              occurrenceCount:
+                description: OccurrenceCount is incremented when the incident is first
+                  opened or reopened.
+                type: integer
               openedAt:
                 description: OpenedAt is when this incident was first opened.
                 format: date-time
