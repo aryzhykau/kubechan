@@ -73,6 +73,21 @@ class MissingEvidence(BaseModel):
     reason: str = ""
 
 
+class CausalPathStep(BaseModel):
+    order: int
+    entityId: str
+    edgeId: str = ""
+    candidateId: str = ""
+    claimId: str = ""
+    role: Literal["root_cause", "failed_dependency", "supporting_evidence", "reported_impact", "context"] = "context"
+
+
+class CausalPath(BaseModel):
+    entryResourceId: str
+    rootCauseEntityId: str
+    steps: list[CausalPathStep] = []
+
+
 class AssessmentV2(BaseModel):
     version: Literal[2] = 2
     summary: str
@@ -81,6 +96,7 @@ class AssessmentV2(BaseModel):
     alternativeHypotheses: list[AssessmentClaim] = []
     missingEvidence: list[MissingEvidence] = []
     remediation: list[RemediationStep] = []
+    causalPath: CausalPath | None = None
 
     @model_validator(mode="before")
     @classmethod

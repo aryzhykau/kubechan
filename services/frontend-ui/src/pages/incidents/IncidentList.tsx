@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Box, Typography, Button, IconButton, Alert, Chip, Stack,
   CircularProgress, Skeleton, Accordion, AccordionSummary, AccordionDetails, Tooltip,
@@ -485,6 +486,7 @@ function IncidentCard({
   onAction, onResolved, onSuggestRule, onMarkFalsePositive, onRefresh,
 }: IncidentCardProps) {
   const [analyze] = useAnalyzeMutation()
+  const navigate = useNavigate()
   const [resolveApi] = useResolveIncidentMutation()
   const [fpApi] = useMarkFalsePositiveMutation()
   const { handleAnalysisStart, handleAnalysisComplete, handleRate } = useKubeChan()
@@ -611,7 +613,13 @@ function IncidentCard({
 
       <Tabs
         value={detailTab}
-        onChange={(_, value) => setDetailTab(value)}
+        onChange={(_, value) => {
+          if (value === 'assessment' && previousRun) {
+            navigate(`/incidents/${encodeURIComponent(id)}/assessments/${encodeURIComponent(previousRun.diagnosticRunId)}`)
+            return
+          }
+          setDetailTab(value)
+        }}
         aria-label="Incident detail sections"
         sx={{ mt: 1.5, mb: 1.25, minHeight: 34, borderBottom: '1px solid', borderColor: 'divider', '& .MuiTab-root': { minHeight: 34, px: 1.25, py: 0.5, fontSize: '0.7rem', letterSpacing: '0.04em' } }}
       >
@@ -625,9 +633,9 @@ function IncidentCard({
         <>
           <IncidentDetails incident={incident} previousRun={previousRun} problemCases={problemCases} runs={runs} />
           {previousRun?.analysisResultId && (
-            <Button fullWidth onClick={() => setDetailTab('assessment')} sx={{ mt: 1.25, justifyContent: 'space-between', border: '1px solid', borderColor: 'rgba(213,166,74,0.25)', borderRadius: 0, px: 1.5, py: 1.1 }}>
+            <Button fullWidth onClick={() => navigate(`/incidents/${encodeURIComponent(id)}/assessments/${encodeURIComponent(previousRun.diagnosticRunId)}`)} sx={{ mt: 1.25, justifyContent: 'space-between', border: '1px solid', borderColor: 'rgba(213,166,74,0.25)', borderRadius: 0, px: 1.5, py: 1.1 }}>
               <Box sx={{ textAlign: 'left' }}>
-                <Typography sx={{ fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'primary.main', fontWeight: 800 }}>Latest assessment</Typography>
+                <Typography sx={{ fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'primary.main', fontWeight: 800 }}>View assessment</Typography>
                 <Typography variant="body2" color="text.primary" sx={{ mt: 0.25 }}>{previousRun.likelyRootCause ?? 'Open structured diagnosis'}</Typography>
               </Box>
               <Typography sx={{ color: 'success.main', fontWeight: 750 }}>{Math.round((previousRun.confidence ?? 0) * 100)}%</Typography>

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from app.models import (
     AnalyzeRequest,
     AnalyzeResponse,
+    AssessmentCitation,
     AssessmentV2,
     CitationValidation,
     ExclusionRuleProposal,
@@ -108,6 +109,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
                 suffixes.setdefault(source_id.rsplit(":", 1)[-1], []).append(source_id)
             total = 0
             invalid_ids: list[str] = []
+            original_verdicts = {id(claim): claim.verdict for claim in [*assessment.claims, *assessment.alternativeHypotheses]}
             for claim in [*assessment.claims, *assessment.alternativeHypotheses]:
                 total += len(claim.citations)
                 accepted = []
@@ -137,6 +139,72 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
                     else:
                         invalid_ids.append(citation.sourceId)
                 step.citations = accepted
+
+            # The model may annotate the graph, but it cannot add topology.
+            # Drop any causal path that does not resolve completely against the
+            # immutable graph included in this request.
+            graph = req.payload.get("graph") or {}
+            if assessment.causalPath and graph:
+                node_ids = {str(n.get("id")) for n in graph.get("nodes", []) if isinstance(n, dict) and n.get("id")}
+                edge_ids = {str(e.get("id")) for e in graph.get("edges", []) if isinstance(e, dict) and e.get("id")}
+                candidate_ids = {str(c.get("id")) for c in graph.get("candidates", []) if isinstance(c, dict) and c.get("id")}
+                path = assessment.causalPath
+                valid_path = (
+                    path.entryResourceId == graph.get("entryResourceId")
+                    and path.rootCauseEntityId in node_ids
+                    and bool(path.steps)
+                )
+                for graph_step in path.steps:
+                    valid_path = valid_path and graph_step.entityId in node_ids
+                    valid_path = valid_path and (not graph_step.edgeId or graph_step.edgeId in edge_ids)
+                    valid_path = valid_path and (not graph_step.candidateId or graph_step.candidateId in candidate_ids)
+                if not valid_path:
+                    assessment.causalPath = None
+
+            # A causal-path step is itself constrained to deterministic graph
+            # entities. If the model mangled a citation ID, recover the exact
+            # source IDs attached to that entity/relationship instead of
+            # presenting a graph-backed root-cause claim as unsupported.
+            # This never invents evidence: recovered IDs must also exist in the
+            # immutable source catalog above.
+            if assessment.causalPath:
+                nodes_by_id = {
+                    str(node.get("id")): node
+                    for node in graph.get("nodes", [])
+                    if isinstance(node, dict) and node.get("id")
+                }
+                edges_by_id = {
+                    str(edge.get("id")): edge
+                    for edge in graph.get("edges", [])
+                    if isinstance(edge, dict) and edge.get("id")
+                }
+                candidates_by_id = {
+                    str(candidate.get("id")): candidate
+                    for candidate in graph.get("candidates", [])
+                    if isinstance(candidate, dict) and candidate.get("id")
+                }
+                claims_by_id = {claim.id: claim for claim in assessment.claims if claim.id}
+                for graph_step in assessment.causalPath.steps:
+                    claim = claims_by_id.get(graph_step.claimId)
+                    if not claim or claim.citations:
+                        continue
+                    recovered: list[str] = []
+                    node = nodes_by_id.get(graph_step.entityId, {})
+                    recovered.extend(node.get("sourceIds") or [])
+                    if graph_step.edgeId:
+                        recovered.extend(edges_by_id.get(graph_step.edgeId, {}).get("sourceIds") or [])
+                    if graph_step.candidateId:
+                        candidate = candidates_by_id.get(graph_step.candidateId, {})
+                        for reason in candidate.get("reasons") or []:
+                            if isinstance(reason, dict):
+                                recovered.extend(reason.get("sourceIds") or [])
+                    recovered = sorted({source_id for source_id in recovered if source_id in valid_ids})
+                    if recovered:
+                        claim.citations = [
+                            AssessmentCitation(sourceId=source_id, relevance="Deterministic graph evidence")
+                            for source_id in recovered
+                        ]
+                        claim.verdict = original_verdicts[id(claim)]
             citation_validation = CitationValidation(
                 valid=not invalid_ids,
                 total=total,

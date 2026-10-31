@@ -132,6 +132,45 @@ export interface EvidencePayload {
   pvcInfos?: PVCInfo[]
   relatedResourceEvidence?: RelatedResourceEvidence[]
   sources?: EvidenceSource[]
+  graph?: InvestigationGraph
+}
+
+export interface GraphNode {
+  id: string
+  type: 'resource' | 'reference'
+  resource: ResourceRef
+  state: 'present' | 'missing' | 'degraded' | 'healthy' | string
+  role?: string
+  attributes?: Record<string, unknown>
+  sourceIds?: string[]
+}
+
+export interface GraphEdge {
+  id: string
+  type: string
+  from: string
+  to: string
+  state: 'resolved' | 'broken' | 'empty' | string
+  attributes?: Record<string, unknown>
+  sourceIds?: string[]
+}
+
+export interface GraphCandidateReason { code: string; label: string; sourceIds?: string[] }
+export interface GraphCandidate {
+  id: string
+  referenceNodeId: string
+  candidateNodeId: string
+  score: number
+  strength: 'strong' | 'possible' | string
+  reasons: GraphCandidateReason[]
+}
+
+export interface InvestigationGraph {
+  schemaVersion: number
+  entryResourceId: string
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  candidates?: GraphCandidate[]
 }
 
 export interface EvidenceSource {
@@ -171,6 +210,18 @@ export interface AssessmentV2 {
   alternativeHypotheses: AssessmentClaim[]
   missingEvidence: Array<{ resource?: ResourceRef; description: string; reason?: string }>
   remediation: AssessmentRemediationStep[]
+  causalPath?: {
+    entryResourceId: string
+    rootCauseEntityId: string
+    steps: Array<{
+      order: number
+      entityId: string
+      edgeId?: string
+      candidateId?: string
+      claimId?: string
+      role: 'root_cause' | 'failed_dependency' | 'supporting_evidence' | 'reported_impact' | 'context'
+    }>
+  } | null
 }
 
 export interface Evidence {

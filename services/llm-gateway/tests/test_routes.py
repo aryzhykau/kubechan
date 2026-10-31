@@ -66,7 +66,13 @@ _VALID_LLM_JSON = json.dumps({
 class TestAnalyzeSuccess:
     def test_assessment_citations_are_validated(self, client):
         source = {"id": "field:valid", "type": "resource_field", "resource": {"kind": "Ingress", "namespace": "demo", "name": "web"}, "path": "/spec/backend", "value": "missing"}
-        body = {**_VALID_ANALYZE_BODY, "payload": {**_VALID_ANALYZE_BODY["payload"], "sources": [source]}}
+        graph = {
+            "entryResourceId": "resource:apps:Deployment:demo:web",
+            "nodes": [{"id": "resource:apps:Deployment:demo:web"}, {"id": "resource:networking.k8s.io:Ingress:demo:web"}],
+            "edges": [{"id": "edge:broken"}],
+            "candidates": [{"id": "candidate:service"}],
+        }
+        body = {**_VALID_ANALYZE_BODY, "payload": {**_VALID_ANALYZE_BODY["payload"], "sources": [source], "graph": graph}}
         assessment = {
             "version": 2, "summary": "Wrong backend", "confidence": 0.95,
             "claims": [{"id": "c1", "statement": "Backend is missing", "verdict": "supported", "citations": [
@@ -74,6 +80,11 @@ class TestAnalyzeSuccess:
                 {"sourceId": "field:invented", "relevance": "hallucinated"},
             ]}],
             "alternativeHypotheses": [], "missingEvidence": [], "remediation": [],
+            "causalPath": {
+                "entryResourceId": "resource:apps:Deployment:demo:web",
+                "rootCauseEntityId": "resource:networking.k8s.io:Ingress:demo:web",
+                "steps": [{"order": 1, "entityId": "resource:networking.k8s.io:Ingress:demo:web", "edgeId": "edge:broken", "candidateId": "candidate:service", "claimId": "c1", "role": "root_cause"}],
+            },
         }
         llm_json = json.dumps({**json.loads(_VALID_LLM_JSON), "assessmentVersion": 2, "assessment": assessment})
         mock_provider = MagicMock()
@@ -86,6 +97,63 @@ class TestAnalyzeSuccess:
         assert data["citationValidation"]["invalid"] == 1
         assert data["assessment"]["confidence"] == 0.69
         assert [c["sourceId"] for c in data["assessment"]["claims"][0]["citations"]] == ["field:valid"]
+        assert data["assessment"]["causalPath"]["rootCauseEntityId"] == "resource:networking.k8s.io:Ingress:demo:web"
+
+    def test_invalid_causal_path_is_removed(self, client):
+        source = {"id": "field:valid", "type": "resource_field", "value": "x"}
+        graph = {"entryResourceId": "resource:apps:Deployment:demo:web", "nodes": [{"id": "resource:apps:Deployment:demo:web"}], "edges": [], "candidates": []}
+        body = {**_VALID_ANALYZE_BODY, "payload": {**_VALID_ANALYZE_BODY["payload"], "sources": [source], "graph": graph}}
+        assessment = {
+            "version": 2, "summary": "Bad path", "confidence": 0.8, "claims": [],
+            "alternativeHypotheses": [], "missingEvidence": [], "remediation": [],
+            "causalPath": {"entryResourceId": graph["entryResourceId"], "rootCauseEntityId": "resource:invented", "steps": [{"order": 1, "entityId": "resource:invented", "role": "root_cause"}]},
+        }
+        llm_json = json.dumps({**json.loads(_VALID_LLM_JSON), "assessment": assessment})
+        mock_provider = MagicMock()
+        mock_provider.model_id.return_value = "test-model"
+        mock_provider.call = AsyncMock(return_value=(llm_json, 0))
+        with patch("app.routes.make_provider", return_value=mock_provider):
+            data = client.post("/analyze", json=body).json()
+        assert data["assessmentVersion"] == 2
+        assert data["assessment"]["causalPath"] is None
+
+    def test_causal_path_recovers_graph_backed_citation(self, client):
+        source = {"id": "field:ingress-backend", "type": "resource_field", "value": "missing-service"}
+        graph = {
+            "entryResourceId": "resource:apps:Deployment:demo:web",
+            "nodes": [
+                {"id": "resource:apps:Deployment:demo:web"},
+                {"id": "reference:core:Service:demo:missing-service"},
+            ],
+            "edges": [{
+                "id": "edge:routes-to",
+                "from": "resource:apps:Deployment:demo:web",
+                "to": "reference:core:Service:demo:missing-service",
+                "sourceIds": ["field:ingress-backend"],
+            }],
+            "candidates": [],
+        }
+        body = {**_VALID_ANALYZE_BODY, "payload": {**_VALID_ANALYZE_BODY["payload"], "sources": [source], "graph": graph}}
+        assessment = {
+            "version": 2, "summary": "Missing backend", "confidence": 0.9,
+            "claims": [{"id": "c1", "statement": "Backend does not exist", "verdict": "supported", "citations": [{"sourceId": "invented"}]}],
+            "alternativeHypotheses": [], "missingEvidence": [], "remediation": [],
+            "causalPath": {
+                "entryResourceId": graph["entryResourceId"],
+                "rootCauseEntityId": "reference:core:Service:demo:missing-service",
+                "steps": [{"order": 1, "entityId": "reference:core:Service:demo:missing-service", "edgeId": "edge:routes-to", "claimId": "c1", "role": "root_cause"}],
+            },
+        }
+        llm_json = json.dumps({**json.loads(_VALID_LLM_JSON), "assessment": assessment})
+        mock_provider = MagicMock()
+        mock_provider.model_id.return_value = "test-model"
+        mock_provider.call = AsyncMock(return_value=(llm_json, 0))
+        with patch("app.routes.make_provider", return_value=mock_provider):
+            data = client.post("/analyze", json=body).json()
+        assert data["assessment"]["claims"][0]["verdict"] == "supported"
+        assert data["assessment"]["claims"][0]["citations"] == [{
+            "sourceId": "field:ingress-backend", "quote": "", "relevance": "Deterministic graph evidence",
+        }]
 
     def test_assessment_accepts_alternative_hypothesis_without_id(self, client):
         source = {"id": "field:pod-phase", "type": "resource_field", "value": "Running"}

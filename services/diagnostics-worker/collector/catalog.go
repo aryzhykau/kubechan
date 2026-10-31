@@ -117,6 +117,13 @@ func flattenFields(out *[]EvidenceSource, ref ResourceRef, path string, value an
 		for i, item := range typed {
 			flattenFields(out, ref, path+"/"+strconv.Itoa(i), item, at)
 		}
+	case []map[string]any:
+		// Kind-specific collectors naturally build typed slices of maps. They
+		// are not assignable to []any in Go, so handle them explicitly to keep
+		// every nested Kubernetes field addressable by an atomic JSON pointer.
+		for i, item := range typed {
+			flattenFields(out, ref, path+"/"+strconv.Itoa(i), item, at)
+		}
 	default:
 		if path != "" {
 			*out = append(*out, fieldSource(ref, path, typed, at))

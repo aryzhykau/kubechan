@@ -28,6 +28,7 @@ import (
 
 	v1alpha1 "github.com/org/kubechan/api/v1alpha1"
 	"github.com/org/kubechan/services/diagnostics-worker/collector"
+	"github.com/org/kubechan/services/diagnostics-worker/graphengine"
 )
 
 // DiagnosticRunReconciler watches DiagnosticRun objects and runs evidence collection.
@@ -138,6 +139,7 @@ func (r *DiagnosticRunReconciler) collect(
 		Kind:      inc.Spec.RootResource.Kind,
 		Name:      inc.Spec.RootResource.Name,
 		Namespace: inc.Spec.RootResource.Namespace,
+		APIGroup:  inc.Spec.RootResource.APIGroup,
 	}
 
 	problemCaseNames := inc.Spec.ProblemCases
@@ -285,8 +287,9 @@ func (r *DiagnosticRunReconciler) collect(
 		ev.RelatedResourceEvidence = append(ev.RelatedResourceEvidence, rre)
 	}
 
-	ev.SchemaVersion = 2
+	ev.SchemaVersion = 3
 	ev.Sources = collector.BuildSourceCatalog(ev)
+	ev.Graph = graphengine.Build(ev)
 	return ev, errs
 }
 
@@ -610,7 +613,7 @@ func (r *DiagnosticRunReconciler) collectWorkloadPodLogs(ctx context.Context, ns
 			continue
 		}
 
-		pl := collector.PodLogs{PodName: pod.Name, Phase: string(pod.Status.Phase)}
+		pl := collector.PodLogs{PodName: pod.Name, Phase: string(pod.Status.Phase), Labels: pod.Labels}
 
 		// Collect pod logs.
 		tailLines := r.LogTailLines
@@ -639,6 +642,7 @@ func (r *DiagnosticRunReconciler) collectWorkloadPodLogs(ctx context.Context, ns
 				continue
 			}
 			claimName := vol.PersistentVolumeClaim.ClaimName
+			pl.PVCNames = appendUnique(pl.PVCNames, claimName)
 			if seenPVCs[claimName] {
 				continue
 			}
@@ -662,6 +666,9 @@ func (r *DiagnosticRunReconciler) collectWorkloadPodLogs(ctx context.Context, ns
 			pi.Events = pvcEvents
 			pvcOut = append(pvcOut, pi)
 		}
+		// PVC names are populated while walking volumes above, so append the pod
+		// only after dependency discovery is complete.
+		podOut[len(podOut)-1] = pl
 	}
 	return podOut, pvcOut, nil
 }

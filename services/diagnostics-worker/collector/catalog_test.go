@@ -51,3 +51,22 @@ func TestSecretSourceNeverContainsContent(t *testing.T) {
 		t.Fatalf("secret source must expose existence only: %#v", secret)
 	}
 }
+
+func TestBuildSourceCatalogFlattensTypedMapSlices(t *testing.T) {
+	ev := &Evidence{
+		RootResource: ResourceRef{Kind: "Deployment", Namespace: "demo", Name: "api"},
+		RelatedResourceEvidence: []RelatedResourceEvidence{{
+			Resource: ResourceRef{Kind: "Ingress", Namespace: "demo", Name: "api"},
+			Spec: map[string]any{"rules": []map[string]any{{
+				"paths": []map[string]any{{"backendService": "missing-service"}},
+			}}},
+		}},
+	}
+	sources := BuildSourceCatalog(ev)
+	if len(sources) != 1 {
+		t.Fatalf("expected one atomic source, got %#v", sources)
+	}
+	if got := sources[0].Path; got != "/rules/0/paths/0/backendService" {
+		t.Fatalf("unexpected JSON pointer %q", got)
+	}
+}

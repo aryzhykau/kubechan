@@ -14,6 +14,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import CircleNotificationsOutlinedIcon from '@mui/icons-material/CircleNotificationsOutlined'
 import { KubeChanSidebar } from './components/KubeChanSidebar'
 import { IncidentList } from './pages/incidents/IncidentList'
+import { AssessmentPage } from './pages/incidents/AssessmentPage'
 import { DiagnosticsPage } from './pages/diagnostics/DiagnosticsPage'
 import { DiagnosticRunDetail } from './pages/diagnostics/DiagnosticRunDetail'
 import { UsersPage } from './pages/admin/UsersPage'
@@ -260,6 +261,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true,              element: <IncidentList /> },
+      { path: 'incidents/:incidentId/assessments/:runId', element: <AssessmentPage /> },
       { path: 'diagnostics',      element: <DiagnosticsPage /> },
       { path: 'diagnostics/:id',  element: <DiagnosticRunDetail /> },
       { path: 'admin/users',      element: <UsersPage /> },
