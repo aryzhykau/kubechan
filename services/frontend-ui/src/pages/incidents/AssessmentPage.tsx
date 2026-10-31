@@ -91,12 +91,15 @@ function GraphCanvas({ graph, rootCauseId, selected, onSelect }: {
           </g>
         })}
         {candidates.map(candidate => {
-          const path = edgePath(candidate.referenceNodeId, candidate.candidateNodeId)
+          // New snapshots point the remediation hint from the resource whose
+          // configuration must change. Fall back for pre-contract snapshots.
+          const sourceNodeId = candidate.sourceNodeId ?? candidate.referenceNodeId
+          const path = edgePath(sourceNodeId, candidate.candidateNodeId)
           if (!path) return null
           return <g key={candidate.id} className={`graph-edge graph-edge--candidate ${selected?.type === 'candidate' && selected.value.id === candidate.id ? 'is-selected' : ''}`} role="button" tabIndex={0} onClick={() => onSelect({ type: 'candidate', value: candidate })} onKeyDown={event => event.key === 'Enter' && onSelect({ type: 'candidate', value: candidate })}>
             <path className="graph-edge__hit" d={path} />
             <path className="graph-edge__line" d={path} markerEnd="url(#arrow-candidate)" />
-            <text x={((byId.get(candidate.referenceNodeId)?.x ?? 0) + (byId.get(candidate.candidateNodeId)?.x ?? 0)) / 2 + 90} y={Math.min(byId.get(candidate.referenceNodeId)?.y ?? 0, byId.get(candidate.candidateNodeId)?.y ?? 0) + 70}>suggested target</text>
+            <text x={((byId.get(sourceNodeId)?.x ?? 0) + (byId.get(candidate.candidateNodeId)?.x ?? 0)) / 2 + 90} y={Math.min(byId.get(sourceNodeId)?.y ?? 0, byId.get(candidate.candidateNodeId)?.y ?? 0) + 70}>{candidate.strength === 'strong' ? 'should route to' : 'possible target'}</text>
           </g>
         })}
         {layout.nodes.map(node => {

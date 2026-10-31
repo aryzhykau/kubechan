@@ -158,6 +158,7 @@ export interface GraphEdge {
 export interface GraphCandidateReason { code: string; label: string; sourceIds?: string[] }
 export interface GraphCandidate {
   id: string
+  sourceNodeId?: string
   referenceNodeId: string
   candidateNodeId: string
   score: number

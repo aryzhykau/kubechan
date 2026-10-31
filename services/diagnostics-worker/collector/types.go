@@ -134,6 +134,7 @@ type GraphEdge struct {
 
 type GraphCandidate struct {
 	ID              string            `json:"id"`
+	SourceNodeID    string            `json:"sourceNodeId"`
 	ReferenceNodeID string            `json:"referenceNodeId"`
 	CandidateNodeID string            `json:"candidateNodeId"`
 	Score           int               `json:"score"`

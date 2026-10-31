@@ -167,14 +167,14 @@ func (b *builder) connectIngressesToServices() {
 				sourceIDs := b.sourceIDs(node.Resource, pathPointer)
 				b.addEdge("routes_to", ingressID, targetID, state, map[string]any{"path": path["path"], "port": path["backendPort"], "fieldPath": pathPointer}, sourceIDs)
 				if state == "broken" {
-					b.rankServiceCandidates(targetID, path, sourceIDs)
+					b.rankServiceCandidates(ingressID, targetID, path)
 				}
 			}
 		}
 	}
 }
 
-func (b *builder) rankServiceCandidates(referenceID string, ingressPath map[string]any, referenceSources []string) {
+func (b *builder) rankServiceCandidates(sourceID, referenceID string, ingressPath map[string]any) {
 	ref := b.nodes[referenceID].Resource
 	for candidateID, node := range b.nodes {
 		if node.Type != "resource" || node.Resource.Kind != "Service" || node.Resource.Namespace != ref.Namespace {
@@ -204,8 +204,7 @@ func (b *builder) rankServiceCandidates(referenceID string, ingressPath map[stri
 			strength = "strong"
 		}
 		id := stableID("candidate", referenceID, candidateID)
-		b.candidates[id] = collector.GraphCandidate{ID: id, ReferenceNodeID: referenceID, CandidateNodeID: candidateID, Score: score, Strength: strength, Reasons: reasons}
-		_ = referenceSources
+		b.candidates[id] = collector.GraphCandidate{ID: id, SourceNodeID: sourceID, ReferenceNodeID: referenceID, CandidateNodeID: candidateID, Score: score, Strength: strength, Reasons: reasons}
 	}
 }
 

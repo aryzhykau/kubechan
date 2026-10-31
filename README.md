@@ -76,6 +76,8 @@ diagnostics-worker reconciles DiagnosticRun:
   ├── collects PVC status and events
   ├── collects ConfigMap contents + mount paths
   ├── auto-discovers all Ingresses in the namespace
+  ├── normalizes observations into immutable, addressable evidence sources
+  ├── builds a deterministic resource graph from the same evidence snapshot
   └── POSTs structured evidence to backend-api /internal/evidence
      │
      ▼
@@ -85,14 +87,16 @@ backend-api stores evidence, dispatches async goroutine
 llm-gateway:
   ├── builds prompt from all collected evidence
   ├── calls AWS Bedrock (Qwen3-32B) via Converse API
-  ├── parses and validates structured JSON response
+  ├── parses and validates an evidence-backed assessment
+  ├── accepts only citations and graph IDs present in the evidence snapshot
   └── if LLM confidence < 0.65 → sets needsMoreInfo + suggestedResources
      │
      ▼
 backend-api stores analysis result, broadcasts WebSocket event
      │
      ▼  WebSocket "Analysis.Completed"
-frontend-ui → KubeChan renders 5-section analysis in speech bubble
+frontend-ui → dedicated Assessment page renders the diagnosis, graph,
+              evidence chain, source inspector, and remediation runbook
 ```
 
 ### Manual pipeline — user reports an issue
@@ -165,6 +169,15 @@ Reconciles **DiagnosticRun** CRDs. Collects structured diagnostic evidence for t
 - PVC phase and events
 - All Ingresses in the workload namespace — auto-discovered regardless of whether the user tagged them
 
+**Investigation graph:**
+
+- Built by `graphengine` from the exact resources included in the evidence snapshot; the LLM cannot add nodes or relationships
+- Represents ownership, Service selectors, Ingress backends, pod configuration dependencies, Secrets, and PVC mounts
+- Keeps unresolved references as explicit `missing` nodes instead of silently dropping them
+- Ranks replacement candidates using deterministic signals such as `renamed-from`, selector matches, and compatible ports
+- Separates observed and proposed topology: for example, `Ingress → missing Service` is `broken`, while `Ingress → candidate Service` is `should route to`
+- Attaches stable source IDs to nodes and edges so every UI claim can open the exact metadata, event, or log record behind it
+
 **Key env vars:**
 
 | Var | Default | Description |
@@ -235,7 +248,7 @@ Central API server and orchestration hub. Serves the frontend REST + WebSocket A
 
 ### `llm-gateway` — Python, FastAPI + boto3
 
-Receives a structured evidence payload, builds a detailed prompt, calls AWS Bedrock via the Converse API, and returns a structured JSON analysis.
+Receives a structured evidence payload, builds a detailed prompt, calls AWS Bedrock via the Converse API, and returns a structured evidence-first assessment. The model may annotate the deterministic graph with a causal path, but it cannot create topology or cite evidence outside the immutable source catalog.
 
 **Model:** `qwen.qwen3-32b-v1:0` (aliased as `qwen3-32b`). Also supports `qwen3-235b`.
 
@@ -252,6 +265,8 @@ Receives a structured evidence payload, builds a detailed prompt, calls AWS Bedr
 | `needsMoreInfo` | `true` if confidence < 0.65 and more evidence could help |
 | `suggestedResources` | List of `{kind, reason}` the LLM wants to see |
 | `prompt` | Full prompt sent to the model (stored for debugging) |
+| `assessment` | Versioned claims, citations, remediation steps, and causal-path annotations |
+| `citationValidation` | Count and IDs of citations rejected by the gateway |
 
 **Key env vars:**
 
@@ -270,7 +285,7 @@ Receives a structured evidence payload, builds a detailed prompt, calls AWS Bedr
 
 Single-page application served by nginx. Shows an incident list and the KubeChan sidebar character, and connects via WebSocket for live updates.
 
-**Incident list features:**
+**Incident operations features:**
 
 - Open and resolved incidents, sorted by `openedAt`
 - Manual badge on user-reported incidents
@@ -283,6 +298,10 @@ Single-page application served by nginx. Shows an incident list and the KubeChan
 - "Ask KubeChan to help" / "Ask KubeChan again" analyze button
 - **Needs-more-info banner** when LLM requested more evidence — lists suggestion chips with reasons, opens AugmentIncidentModal
 - **Resolve button** on open manual incidents — inline confirm → patches Incident CRD → KubeChan reacts immediately
+- Dedicated Assessment route for every DiagnosticRun
+- Interactive resource graph with broken relationships, proposed targets, zoom controls, and keyboard-accessible selection
+- Evidence inspector that resolves graph entities and claims to atomic JSON pointers, events, or individual log lines
+- Evidence-chain ledger and ordered remediation runbook
 
 **KubeChan sidebar:**
 
@@ -312,9 +331,11 @@ Both `Incident` and `ProblemCase` have status subresources. All CRDs live in the
 
 | Tool | Version | Notes |
 |---|---|---|
-| Docker Desktop | latest | Kubernetes must be enabled in settings |
+| Docker | latest | Runtime used by kind and Tilt image builds |
+| kind | ≥ 0.22 | A reachable kind cluster must be the active kubectl context |
+| ingress-nginx | current | Required in the kind cluster for `kubechan.local` |
 | Tilt | ≥ 0.33 | `brew install tilt` |
-| kubectl | ≥ 1.28 | bundled with Docker Desktop |
+| kubectl | ≥ 1.28 | Configured for the target kind cluster |
 | Go | 1.25+ | for local builds / codegen |
 | Python | 3.12+ | for llm-gateway local dev |
 | AWS account | — | with Bedrock access to `qwen.qwen3-32b-v1:0` in `us-east-1` |
@@ -334,14 +355,14 @@ kubectl create secret generic kubechan-bedrock-api-key \
 
 ---
 
-### 2. Create the data directory
+### 2. Select the kind cluster
 
 ```bash
-mkdir -p .data
-chmod 777 .data
+kubectl config use-context kind-<cluster-name>
+kubectl cluster-info
 ```
 
-> Defaults to `<workspace>/.data`. Update `helm/kubechan/values-dev.yaml` → `backendApi.storage.hostPath` if your workspace is elsewhere.
+Tilt refuses to start against a non-kind context. Development data is stored in the cluster's default StorageClass, so no host data directory is required.
 
 ---
 
@@ -350,13 +371,16 @@ chmod 777 .data
 ```bash
 make dev-up
 # or equivalently:
-kubectl config use-context docker-desktop
-kubectl create namespace kubechan --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f helm/kubechan/crds/ --server-side
 tilt up
 ```
 
-Tilt builds all five images, deploys the Helm chart with dev overrides, and sets up live-reload for every service.
+Run these commands from the repository root. Tilt builds all five images from the local checkout, loads them directly into kind, renders the Helm chart with `values-dev.yaml`, and waits for every workload to become healthy.
+
+For a non-interactive build suitable for a final verification run:
+
+```bash
+tilt ci
+```
 
 ---
 
@@ -364,15 +388,15 @@ Tilt builds all five images, deploys the Helm chart with dev overrides, and sets
 
 | Service | URL |
 |---|---|
-| Frontend UI | http://localhost:30081 |
-| Backend API | http://localhost:30080 |
+| Frontend UI | http://kubechan.local |
+| Frontend fallback | http://localhost:8080 |
 | Tilt dashboard | http://localhost:10350 |
 
 ---
 
 ### 5. Demo: trigger a broken Ingress incident
 
-`hack/demo-manual-incident.yaml` deploys a `demo` namespace with:
+`hack/demo-manual-incident.yaml` deploys the `kubechan-demo` namespace with:
 - `Deployment/nginx` + `Service/nginx-svc`
 - `Ingress/nginx` with a deliberately wrong backend service name (`nginx` instead of `nginx-svc`)
 
@@ -380,7 +404,7 @@ Tilt builds all five images, deploys the Helm chart with dev overrides, and sets
 kubectl apply -f hack/demo-manual-incident.yaml
 ```
 
-Then in the UI: **+ Report an issue** → select `Deployment/nginx` in namespace `demo` → describe the issue → add the `Ingress/nginx` as a related resource → submit. KubeChan will collect evidence including the Ingress backend mismatch and identify it as the root cause.
+Then in the UI: **Report an issue** → select `Deployment/nginx` → describe the issue → add `Ingress/nginx` as a related resource → submit. Open the completed assessment to inspect the broken `Ingress → Service/nginx` relationship, the proposed `Ingress → Service/nginx-svc` route, and the exact backend metadata used as evidence.
 
 ---
 
@@ -422,10 +446,10 @@ api/v1alpha1/          — CRD type definitions (Incident, ProblemCase, Diagnost
 helm/kubechan/         — Helm chart (CRDs, templates, dev + prod values)
 services/
   cluster-watcher/     — Detects cluster anomalies, creates ProblemCase + Incident CRDs
-  diagnostics-worker/  — Collects evidence for DiagnosticRuns (pods, events, Ingresses, PVCs)
+  diagnostics-worker/  — Collects evidence and builds deterministic investigation graphs
   backend-api/         — REST + WebSocket API, SQLite, orchestration, mood syncer
-  llm-gateway/         — Builds prompts, calls AWS Bedrock, returns structured analysis
-  frontend-ui/         — React SPA (Vite dev, nginx prod), KubeChan persona sidebar
+  llm-gateway/         — Builds prompts, validates citations/causal paths, calls the configured LLM
+  frontend-ui/         — React SPA with incident operations and assessment workspaces
 hack/                  — Demo manifests and test fixtures
 docs/                  — Architecture design docs and phase plans
 Tiltfile               — Local dev orchestration

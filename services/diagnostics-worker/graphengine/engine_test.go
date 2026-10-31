@@ -33,6 +33,9 @@ func TestBuildMissingIngressServiceAndCandidate(t *testing.T) {
 	if graph.Candidates[0].Strength != "strong" || graph.Candidates[0].Score < 100 {
 		t.Fatalf("candidate = %#v", graph.Candidates[0])
 	}
+	if graph.Candidates[0].SourceNodeID != "resource:networking.k8s.io:Ingress:demo:nginx" {
+		t.Fatalf("candidate source = %q", graph.Candidates[0].SourceNodeID)
+	}
 }
 
 func TestBuildIsDeterministic(t *testing.T) {
