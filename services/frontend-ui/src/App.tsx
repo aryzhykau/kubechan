@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createBrowserRouter, RouterProvider, Navigate, Outlet, useNavigate, NavLink } from 'react-router-dom'
-import { Box, CircularProgress, Button, Tooltip, Avatar, Chip } from '@mui/material'
+import { Box, CircularProgress, Button, Tooltip, Avatar, Chip, IconButton } from '@mui/material'
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined'
 import ListAltIcon from '@mui/icons-material/ListAlt'
 import PeopleOutlinedIcon from '@mui/icons-material/PeopleOutlined'
@@ -8,6 +8,10 @@ import TuneIcon from '@mui/icons-material/Tune'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined'
 import LogoutIcon from '@mui/icons-material/Logout'
+import SearchIcon from '@mui/icons-material/Search'
+import CloudQueueOutlinedIcon from '@mui/icons-material/CloudQueueOutlined'
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+import CircleNotificationsOutlinedIcon from '@mui/icons-material/CircleNotificationsOutlined'
 import { KubeChanSidebar } from './components/KubeChanSidebar'
 import { IncidentList } from './pages/incidents/IncidentList'
 import { DiagnosticsPage } from './pages/diagnostics/DiagnosticsPage'
@@ -73,6 +77,7 @@ function AppShell() {
   const ui          = useAppSelector(selectUI)
   const navigate    = useNavigate()
   const currentUser = useAppSelector(selectCurrentUser)
+  const [assistantOpen, setAssistantOpen] = useState(true)
 
   const { triggerChatter, handleAnalysisStart, handleAnalysisComplete, handleRunResultLoaded, handleRate, handlePoke, handleDismiss } = useKubeChan()
 
@@ -142,18 +147,66 @@ function AppShell() {
       </aside>
 
       <div className="app-workspace">
-        {/* ── Body: main + KubeChan assistant ── */}
+        <header className="app-context-bar">
+          <button className="context-scope context-scope--primary" type="button">
+            <span className="context-scope-icon"><CloudQueueOutlinedIcon /></span>
+            <span>
+              <small>Environment</small>
+              <strong>Local kind</strong>
+            </span>
+            <KeyboardArrowDownIcon className="context-chevron" />
+          </button>
+          <div className="context-separator" />
+          <button className="context-scope" type="button">
+            <span><small>Cluster</small><strong>argocd-course</strong></span>
+            <KeyboardArrowDownIcon className="context-chevron" />
+          </button>
+          <button className="context-scope" type="button">
+            <span><small>Namespace</small><strong>All namespaces</strong></span>
+            <KeyboardArrowDownIcon className="context-chevron" />
+          </button>
+          <button className="context-search" type="button">
+            <SearchIcon />
+            <span>Search resources, incidents, runs…</span>
+            <kbd>⌘ K</kbd>
+          </button>
+          <Tooltip title="Notifications">
+            <IconButton className="context-icon-button" size="small"><CircleNotificationsOutlinedIcon /></IconButton>
+          </Tooltip>
+          <Tooltip title={assistantOpen ? 'Close KubeChan assistant' : 'Open KubeChan assistant'}>
+            <IconButton
+              className={`context-icon-button assistant-toggle ${assistantOpen ? 'active' : ''}`}
+              size="small"
+              onClick={() => setAssistantOpen(open => !open)}
+            >
+              <SmartToyOutlinedIcon />
+            </IconButton>
+          </Tooltip>
+        </header>
+
+        {/* ── Body: main + optional KubeChan assistant ── */}
         <div className="app-body">
           <main className="app-main">
             <Outlet context={{ triggerChatter, handleAnalysisStart, handleRunResultLoaded, handleRate }} />
           </main>
 
-          <KubeChanSidebar
-            state={kubechan}
-            moodLevel={moodLevel}
-            onPoke={handlePoke}
-            onDismiss={handleDismiss}
-          />
+          {assistantOpen && (
+            <div className="assistant-panel">
+              <div className="assistant-panel-header">
+                <div>
+                  <span className="assistant-eyebrow">AI investigation</span>
+                  <strong>KubeChan Assistant</strong>
+                </div>
+                <button type="button" onClick={() => setAssistantOpen(false)} aria-label="Close assistant">×</button>
+              </div>
+              <KubeChanSidebar
+                state={kubechan}
+                moodLevel={moodLevel}
+                onPoke={handlePoke}
+                onDismiss={handleDismiss}
+              />
+            </div>
+          )}
         </div>
       </div>
 

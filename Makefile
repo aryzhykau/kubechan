@@ -1,4 +1,4 @@
-.PHONY: generate generate-objects generate-crds dev-up dev-down lint lint-go lint-python test test-go test-python build build-go build-python build-frontend e2e e2e-clean
+.PHONY: generate generate-objects generate-crds dev-check dev-up dev-down dev-clean lint lint-go lint-python test test-go test-python build build-go build-python build-frontend e2e e2e-clean
 
 # ─── Variables ────────────────────────────────────────────────────────────────
 
@@ -27,16 +27,28 @@ generate-crds:
 
 # ─── Local dev ───────────────────────────────────────────────────────────────
 
-## dev-up: Apply CRDs and start Tilt
-dev-up:
-	kubectl config use-context docker-desktop
-	kubectl create namespace kubechan --dry-run=client -o yaml | kubectl apply -f -
-	kubectl apply -f helm/kubechan/crds/ --server-side
+## dev-check: Verify that the active Kubernetes context is a reachable kind cluster
+dev-check:
+	@context=$$(kubectl config current-context); \
+	case "$$context" in \
+		kind-*) ;; \
+		*) echo "error: expected a kind context, got '$$context'"; exit 1 ;; \
+	esac; \
+	kubectl cluster-info >/dev/null; \
+	echo "Using $$context"
+
+## dev-up: Build local images and deploy the chart to the active kind cluster with Tilt
+dev-up: dev-check
 	tilt up
 
 ## dev-down: Stop Tilt
 dev-down:
 	tilt down
+
+## dev-clean: Remove Tilt resources and the dev namespace (including its PVC/data)
+dev-clean: dev-check
+	tilt down
+	kubectl delete namespace kubechan --ignore-not-found
 
 # ─── Linting ─────────────────────────────────────────────────────────────────
 

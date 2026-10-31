@@ -14,23 +14,23 @@ export function ResourcePill({ kind, name, namespace }: Props) {
         display: 'inline-flex',
         alignItems: 'center',
         gap: 0.5,
-        background: 'rgba(99,102,241,0.1)',
-        border: '1px solid rgba(99,102,241,0.25)',
-        borderRadius: '6px',
+        background: 'rgba(255,255,255,0.025)',
+        border: '1px solid #343b35',
+        borderRadius: '3px',
         px: 1,
         py: 0.25,
         fontFamily: 'monospace',
         fontSize: '0.75rem',
       }}
     >
-      <Typography component="span" sx={{ color: '#818cf8', fontFamily: 'monospace', fontSize: '0.7rem', fontWeight: 600 }}>
+      <Typography component="span" sx={{ color: '#d5a64a', fontFamily: 'monospace', fontSize: '0.7rem', fontWeight: 600 }}>
         {kind}
       </Typography>
-      <Typography component="span" sx={{ color: '#e2e8f0', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+      <Typography component="span" sx={{ color: '#d9ddd9', fontFamily: 'monospace', fontSize: '0.75rem' }}>
         {name}
       </Typography>
       {namespace && (
-        <Typography component="span" sx={{ color: '#64748b', fontFamily: 'monospace', fontSize: '0.7rem' }}>
+        <Typography component="span" sx={{ color: '#7f8981', fontFamily: 'monospace', fontSize: '0.7rem' }}>
           {namespace}
         </Typography>
       )}

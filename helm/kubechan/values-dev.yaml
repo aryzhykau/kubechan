@@ -1,5 +1,5 @@
-## values-dev.yaml — Docker Desktop Kubernetes overrides
-## Usage: helm install kubechan ./helm/kubechan -f helm/kubechan/values-dev.yaml
+## values-dev.yaml — Tilt + kind overrides
+## Images are built and injected by Tilt; do not use registry tags here.
 
 backendApi:
   image:
@@ -7,11 +7,14 @@ backendApi:
     tag: latest
     pullPolicy: Never
   service:
-    type: NodePort
+    type: ClusterIP
     port: 8080
-    nodePort: 30080
   storage:
-    hostPath: /Users/andrei.ryzhykau/kubechan-data
+    # macOS host paths are not visible inside a kind node. The default kind
+    # StorageClass keeps the development database across pod restarts.
+    hostPath: ""
+    pvc:
+      size: 1Gi
   resources:
     requests:
       cpu: 50m
@@ -75,10 +78,9 @@ frontendUi:
     port: 8080
   ingress:
     enabled: true
+    className: nginx
     annotations:
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-      nginx.ingress.kubernetes.io/whitelist-source-range: "0.0.0.0/0"
-    className: nginx
     hosts:
       - host: kubechan.local
         paths:

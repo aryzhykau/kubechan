@@ -1,38 +1,34 @@
-# KubeChan — Local dev with Tilt
-# Prerequisites: Docker Desktop Kubernetes enabled
-# Usage: tilt up
+# KubeChan — local development in kind
+#
+# Tilt builds every service from the local checkout, loads the resulting
+# images into the active kind cluster, and renders the production Helm chart
+# with development-only values.
 
-# Create namespace and install CRDs first (they must exist before Helm rendering)
+context = k8s_context()
+if not context.startswith('kind-'):
+    fail('KubeChan development requires a kind context; current context is %s' % context)
+
+allow_k8s_contexts(context)
+
 local_resource(
     'kubechan-namespace',
     cmd='kubectl create namespace kubechan --dry-run=client -o yaml | kubectl apply -f -',
     labels=['setup'],
 )
 
-k8s_resource(
-    objects=[
-        'problemcases.kubechan.io:CustomResourceDefinition:kubechan',
-        'diagnosticruns.kubechan.io:CustomResourceDefinition:kubechan',
-        'incidents.kubechan.io:CustomResourceDefinition:kubechan',
-        'kubechanstates.kubechan.io:CustomResourceDefinition:kubechan',
-        'kubechanexclusionrules.kubechan.io:CustomResourceDefinition:kubechan',
-    ],
-    new_name='kubechan-crds',
-    resource_deps=['kubechan-namespace'],
-    labels=['setup'],
+# Go services share the repository-level go.mod and api package.
+docker_build(
+    'kubechan/backend-api',
+    '.',
+    dockerfile='services/backend-api/Dockerfile',
+    only=['go.mod', 'go.sum', 'api/', 'services/backend-api/'],
 )
 
-# Go services use the repo root as build context (shared go.mod + api/ package)
 docker_build(
     'kubechan/cluster-watcher',
     '.',
     dockerfile='services/cluster-watcher/Dockerfile',
     only=['go.mod', 'go.sum', 'api/', 'services/cluster-watcher/'],
-    live_update=[
-        sync('api/', '/workspace/api/'),
-        sync('services/cluster-watcher/', '/workspace/services/cluster-watcher/'),
-        run('CGO_ENABLED=0 go build -o /cluster-watcher ./services/cluster-watcher/'),
-    ],
 )
 
 docker_build(
@@ -40,43 +36,32 @@ docker_build(
     '.',
     dockerfile='services/diagnostics-worker/Dockerfile',
     only=['go.mod', 'go.sum', 'api/', 'services/diagnostics-worker/'],
-    live_update=[
-        sync('api/', '/workspace/api/'),
-        sync('services/diagnostics-worker/', '/workspace/services/diagnostics-worker/'),
-        run('CGO_ENABLED=0 go build -o /diagnostics-worker ./services/diagnostics-worker/'),
-    ],
-)
-
-docker_build(
-    'kubechan/backend-api',
-    '.',
-    dockerfile='services/backend-api/Dockerfile',
-    only=['go.mod', 'go.sum', 'api/', 'services/backend-api/'],
-    live_update=[
-        sync('api/', '/workspace/api/'),
-        sync('services/backend-api/', '/workspace/services/backend-api/'),
-        run('CGO_ENABLED=0 go build -o /backend-api ./services/backend-api/'),
-    ],
 )
 
 docker_build(
     'kubechan/llm-gateway',
     'services/llm-gateway',
-    live_update=[
-        sync('services/llm-gateway/', '/app/'),
-        run('pip install -r /app/requirements.txt', trigger=['services/llm-gateway/requirements.txt']),
-    ],
+    only=['Dockerfile', 'pyproject.toml', 'uv.lock', 'main.py', 'app/', 'tests/'],
 )
 
 docker_build(
     'kubechan/frontend-ui',
     'services/frontend-ui',
-    live_update=[
-        sync('services/frontend-ui/src/', '/app/src/'),
+    only=[
+        'Dockerfile',
+        'package.json',
+        'package-lock.json',
+        'tsconfig.json',
+        'vite.config.ts',
+        'index.html',
+        'nginx.conf',
+        'public/',
+        'src/',
     ],
 )
 
-# Deploy via Helm with dev overrides
+# `helm()` renders manifests instead of creating a Helm release. This lets
+# Tilt own the lifecycle while exercising the same chart shipped to users.
 k8s_yaml(helm(
     'helm/kubechan',
     name='kubechan',
@@ -84,7 +69,16 @@ k8s_yaml(helm(
     values=['helm/kubechan/values-dev.yaml'],
 ))
 
-# Ensure CRDs exist before the Helm resources are applied
-for svc in ['kubechan-cluster-watcher', 'kubechan-diagnostics-worker', 'kubechan-backend-api', 'kubechan-llm-gateway', 'kubechan-frontend-ui']:
-    k8s_resource(svc, resource_deps=['kubechan-crds', 'kubechan-namespace'])
+for service in [
+    'kubechan-backend-api',
+    'kubechan-cluster-watcher',
+    'kubechan-diagnostics-worker',
+    'kubechan-frontend-ui',
+    'kubechan-llm-gateway',
+]:
+    k8s_resource(service, resource_deps=['kubechan-namespace'])
+
+# kubechan.local is served by ingress-nginx. Keep a port-forward as a direct
+# fallback for debugging the UI independently of ingress and local DNS.
+k8s_resource('kubechan-frontend-ui', port_forwards=['8080:8080'])
 
