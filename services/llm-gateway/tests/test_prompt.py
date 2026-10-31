@@ -14,7 +14,22 @@ from app.prompt import (
     _build_pvc_sections,
     _build_related_sections,
     build_prompt,
+    _fmt_sources,
 )
+
+
+class TestFmtSources:
+    def test_renders_exact_source_id(self):
+        result = _fmt_sources([{"id": "field:abc", "type": "resource_field", "resource": {"kind": "Ingress", "namespace": "demo", "name": "web"}, "path": "/spec/backend", "value": "svc"}], 1000)
+        assert 'id="field:abc"' in result
+        assert "/spec/backend" in result
+        assert "svc" in result
+
+    def test_budget_omits_whole_source(self):
+        sources = [{"id": f"log:{i}", "type": "log_line", "resource": {"kind": "Pod", "namespace": "demo", "name": "p"}, "line": {"number": i, "text": "x" * 100}} for i in range(5)]
+        result = _fmt_sources(sources, 300)
+        assert "omitted because of token budget" in result
+        assert result.count("<SOURCE") == result.count("</SOURCE>")
 
 
 # ---------------------------------------------------------------------------

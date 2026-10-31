@@ -172,18 +172,18 @@ func (r *DiagnosticRunReconciler) collect(
 			continue
 		}
 
+		// Use the actual namespace of the affected resource (may differ from control namespace).
+		resourceNS := pc.Spec.AffectedResource.Namespace
+		if resourceNS == "" {
+			resourceNS = ns
+		}
+
 		pce := collector.ProblemCaseEvidence{
 			Name:             pc.Name,
 			Detector:         pc.Spec.Detector,
 			Severity:         string(pc.Spec.Severity),
 			Symptoms:         pc.Spec.Symptoms,
-			AffectedResource: collector.ResourceRef{Kind: pc.Spec.AffectedResource.Kind, Name: pc.Spec.AffectedResource.Name},
-		}
-
-		// Use the actual namespace of the affected resource (may differ from control namespace).
-		resourceNS := pc.Spec.AffectedResource.Namespace
-		if resourceNS == "" {
-			resourceNS = ns
+			AffectedResource: collector.ResourceRef{Kind: pc.Spec.AffectedResource.Kind, Name: pc.Spec.AffectedResource.Name, Namespace: resourceNS, APIGroup: pc.Spec.AffectedResource.APIGroup},
 		}
 
 		// Collect events for the affected resource.
@@ -270,7 +270,7 @@ func (r *DiagnosticRunReconciler) collect(
 	// Collect events + spec for each related resource.
 	for _, rr := range toCollect {
 		rre := collector.RelatedResourceEvidence{
-			Resource: collector.ResourceRef{Kind: rr.kind, Name: rr.name, APIGroup: rr.apiGroup},
+			Resource: collector.ResourceRef{Kind: rr.kind, Name: rr.name, Namespace: rr.ns, APIGroup: rr.apiGroup},
 		}
 		events, err := r.collectEvents(ctx, rr.ns, rr.kind, rr.name)
 		if err != nil {
@@ -285,6 +285,8 @@ func (r *DiagnosticRunReconciler) collect(
 		ev.RelatedResourceEvidence = append(ev.RelatedResourceEvidence, rre)
 	}
 
+	ev.SchemaVersion = 2
+	ev.Sources = collector.BuildSourceCatalog(ev)
 	return ev, errs
 }
 

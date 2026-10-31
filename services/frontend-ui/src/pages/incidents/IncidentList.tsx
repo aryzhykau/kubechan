@@ -20,7 +20,7 @@ import {
   useResolveIncidentMutation,
   useMarkFalsePositiveMutation,
 } from '../../store/api/incidentsApi'
-import { useListDiagnosticRunsQuery } from '../../store/api/diagnosticsApi'
+import { useGetDiagnosticRunEvidenceQuery, useListDiagnosticRunsQuery } from '../../store/api/diagnosticsApi'
 import { useAppDispatch } from '../../store/hooks'
 import { useKubeChan } from '../../hooks/useKubeChan'
 import { openManualModal, setExclusionProposal } from '../../store/slices/uiSlice'
@@ -269,6 +269,7 @@ function IncidentAnalysis({ previousRun, onRate }: {
   const [localRating, setLocalRating] = useState<'up' | 'down' | null>(null)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [recommendationOpen, setRecommendationOpen] = useState(true)
+  const { data: evidence } = useGetDiagnosticRunEvidenceQuery(previousRun.diagnosticRunId)
 
   async function fetchAnalysis() {
     if (analysisResult || analysisLoading) return
@@ -306,6 +307,8 @@ function IncidentAnalysis({ previousRun, onRate }: {
     : (previousRun.confidence ?? 0)
   const pct = Math.round(confidence * 100)
   const confColor = confidence >= 0.8 ? '#4ade80' : confidence >= 0.5 ? '#fbbf24' : '#f87171'
+  const assessment = analysisResult?.payload?.assessment
+  const sourcesById = new Map((evidence?.payload.sources ?? []).map(source => [source.id, source]))
 
   return (
     <Box sx={{ mt: 1.25, border: '1px solid', borderColor: 'rgba(213,166,74,0.28)', background: 'rgba(213,166,74,0.025)' }}>
@@ -337,6 +340,65 @@ function IncidentAnalysis({ previousRun, onRate }: {
 
       {!analysisLoading && analysisResult && (
         <>
+          {assessment && (
+            <>
+              <Box sx={{ px: 1.5, py: 1.5 }}>
+                <Typography sx={{ fontSize: '0.62rem', color: 'text.disabled', fontWeight: 750, letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.6 }}>Diagnosis</Typography>
+                <Typography sx={{ fontSize: '0.84rem', lineHeight: 1.55, fontWeight: 600 }}>{assessment.summary}</Typography>
+              </Box>
+              <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+                {assessment.claims.map(claim => (
+                  <Box key={claim.id} sx={{ px: 1.5, py: 1.25, borderBottom: '1px solid', borderColor: 'divider' }}>
+                    <Typography sx={{ fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: claim.verdict === 'supported' ? 'success.main' : claim.verdict === 'partially_supported' ? 'warning.main' : 'error.main' }}>{claim.verdict.replace('_', ' ')}</Typography>
+                    <Typography variant="body2" sx={{ mt: 0.35, fontSize: '0.8rem', fontWeight: 550 }}>{claim.statement}</Typography>
+                    {claim.citations.map(citation => (
+                      <Box key={citation.sourceId} sx={{ mt: 0.75, pl: 1, borderLeft: '2px solid', borderColor: 'primary.dark' }}>
+                        {(() => {
+                          const source = sourcesById.get(citation.sourceId)
+                          if (!source) return <Typography sx={{ fontFamily: 'monospace', fontSize: '0.65rem', color: 'error.main' }}>Unavailable source: {citation.sourceId}</Typography>
+                          const observed = source.line?.text ?? source.event?.message ?? (typeof source.value === 'string' ? source.value : JSON.stringify(source.value))
+                          return (
+                            <>
+                              <Typography sx={{ fontSize: '0.68rem', color: 'primary.light', fontWeight: 700 }}>
+                                {source.resource.kind} · {source.resource.namespace}/{source.resource.name}
+                              </Typography>
+                              {source.path && <Typography sx={{ fontFamily: 'monospace', fontSize: '0.62rem', color: 'text.disabled' }}>{source.path}</Typography>}
+                              {observed && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.2, whiteSpace: 'pre-wrap' }}>{observed}</Typography>}
+                              {(source.truncated || source.redacted) && <Typography variant="caption" color="warning.main">{source.truncated ? 'truncated ' : ''}{source.redacted ? 'redacted' : ''}</Typography>}
+                            </>
+                          )
+                        })()}
+                        {citation.quote && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.2 }}>“{citation.quote}”</Typography>}
+                        {citation.relevance && <Typography variant="caption" color="text.disabled" sx={{ display: 'block' }}>{citation.relevance}</Typography>}
+                      </Box>
+                    ))}
+                  </Box>
+                ))}
+              </Box>
+              {assessment.remediation.length > 0 && (
+                <Box sx={{ px: 1.5, py: 1.25, borderTop: '1px solid', borderColor: 'divider' }}>
+                  <Typography sx={{ fontSize: '0.62rem', color: 'text.disabled', fontWeight: 750, letterSpacing: '0.08em', textTransform: 'uppercase', mb: 1 }}>Remediation runbook</Typography>
+                  {assessment.remediation.sort((a, b) => a.order - b.order).map(step => (
+                    <Box key={`${step.order}-${step.title}`} sx={{ display: 'grid', gridTemplateColumns: '22px 1fr', gap: 1, mb: 1.25 }}>
+                      <Typography sx={{ color: 'primary.main', fontWeight: 800 }}>{step.order}</Typography>
+                      <Box>
+                        <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 650 }}>{step.title}</Typography>
+                        {step.description && <Typography variant="caption" color="text.secondary">{step.description}</Typography>}
+                        {step.command && <Box component="code" sx={{ display: 'block', mt: 0.6, p: 0.75, overflowX: 'auto', background: '#101311', border: '1px solid', borderColor: 'divider', fontSize: '0.68rem', color: '#c9d2cb' }}>{step.command}</Box>}
+                        {step.verification && <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 0.5 }}>Verify: {step.verification}</Typography>}
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+              {analysisResult.payload.citationValidation && !analysisResult.payload.citationValidation.valid && (
+                <Alert severity="warning" sx={{ m: 1.5 }}>Some model citations were rejected because their source IDs were not present in the evidence snapshot.</Alert>
+              )}
+            </>
+          )}
+
+          {!assessment && (
+            <>
           <Box sx={{ px: 1.5, py: 1.5 }}>
             <Typography sx={{ fontSize: '0.62rem', color: 'text.disabled', fontWeight: 750, letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.6 }}>
               Likely root cause
@@ -382,6 +444,8 @@ function IncidentAnalysis({ previousRun, onRate }: {
                 </Typography>
               )}
             </Box>
+          )}
+            </>
           )}
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: 1, borderTop: '1px solid', borderColor: 'divider', background: 'rgba(0,0,0,0.12)' }}>
@@ -429,7 +493,7 @@ function IncidentCard({
   const [resolveStep, setResolveStep] = useState<'idle' | 'confirm'>('idle')
   const [fpStep, setFpStep] = useState<'idle' | 'confirm'>('idle')
   const [augmentOpen, setAugmentOpen] = useState(false)
-  const [detailTab, setDetailTab] = useState<'overview' | 'timeline' | 'diagnostics'>('overview')
+  const [detailTab, setDetailTab] = useState<'overview' | 'assessment' | 'timeline' | 'diagnostics'>('overview')
 
   const id = incident.metadata.name
   const isResolved = incident.status.state === 'resolved'
@@ -552,6 +616,7 @@ function IncidentCard({
         sx={{ mt: 1.5, mb: 1.25, minHeight: 34, borderBottom: '1px solid', borderColor: 'divider', '& .MuiTab-root': { minHeight: 34, px: 1.25, py: 0.5, fontSize: '0.7rem', letterSpacing: '0.04em' } }}
       >
         <Tab value="overview" label="Overview" />
+        {previousRun?.analysisResultId && <Tab value="assessment" label="Assessment" />}
         <Tab value="timeline" label={`Timeline ${timeline.length}`} />
         <Tab value="diagnostics" label={`Diagnostics ${incidentRuns.length}`} />
       </Tabs>
@@ -560,9 +625,19 @@ function IncidentCard({
         <>
           <IncidentDetails incident={incident} previousRun={previousRun} problemCases={problemCases} runs={runs} />
           {previousRun?.analysisResultId && (
-            <IncidentAnalysis key={previousRun.diagnosticRunId} previousRun={previousRun} onRate={handleRate} />
+            <Button fullWidth onClick={() => setDetailTab('assessment')} sx={{ mt: 1.25, justifyContent: 'space-between', border: '1px solid', borderColor: 'rgba(213,166,74,0.25)', borderRadius: 0, px: 1.5, py: 1.1 }}>
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography sx={{ fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'primary.main', fontWeight: 800 }}>Latest assessment</Typography>
+                <Typography variant="body2" color="text.primary" sx={{ mt: 0.25 }}>{previousRun.likelyRootCause ?? 'Open structured diagnosis'}</Typography>
+              </Box>
+              <Typography sx={{ color: 'success.main', fontWeight: 750 }}>{Math.round((previousRun.confidence ?? 0) * 100)}%</Typography>
+            </Button>
           )}
         </>
+      )}
+
+      {detailTab === 'assessment' && previousRun?.analysisResultId && (
+        <IncidentAnalysis key={previousRun.diagnosticRunId} previousRun={previousRun} onRate={handleRate} />
       )}
 
       {detailTab === 'timeline' && (

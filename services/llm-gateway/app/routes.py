@@ -6,7 +6,14 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from app.models import AnalyzeRequest, AnalyzeResponse, ExclusionRuleProposal, SuggestedResource
+from app.models import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    AssessmentV2,
+    CitationValidation,
+    ExclusionRuleProposal,
+    SuggestedResource,
+)
 from app.parser import parse_llm_json
 from app.prompt import build_prompt
 from app.providers.base import make_provider
@@ -67,7 +74,15 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 
     def _str(val: Any, default: str = "") -> str:
         if isinstance(val, list):
-            return "\n".join(str(item) for item in val)
+            rendered: list[str] = []
+            for index, item in enumerate(val, start=1):
+                if isinstance(item, dict):
+                    title = str(item.get("title") or item.get("description") or "Action")
+                    command = str(item.get("command") or "").strip()
+                    rendered.append(f"{index}. {title}" + (f" — `{command}`" if command else ""))
+                else:
+                    rendered.append(str(item))
+            return "\n".join(rendered)
         return str(val) if val is not None else default
 
     raw_suggested = parsed.get("suggestedResources") or []
@@ -78,6 +93,61 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     ]
 
     needs_more_info = bool(parsed.get("needsMoreInfo", False)) and len(suggested) > 0
+
+    # Validate all model citations against the immutable source catalog sent in
+    # this request. Unknown IDs are removed and their claims become unsupported.
+    assessment: AssessmentV2 | None = None
+    citation_validation: CitationValidation | None = None
+    raw_assessment = parsed.get("assessment")
+    if isinstance(raw_assessment, dict) and req.payload.get("sources"):
+        try:
+            assessment = AssessmentV2.model_validate(raw_assessment)
+            valid_ids = {str(s.get("id")) for s in req.payload.get("sources", []) if isinstance(s, dict) and s.get("id")}
+            suffixes: dict[str, list[str]] = {}
+            for source_id in valid_ids:
+                suffixes.setdefault(source_id.rsplit(":", 1)[-1], []).append(source_id)
+            total = 0
+            invalid_ids: list[str] = []
+            for claim in [*assessment.claims, *assessment.alternativeHypotheses]:
+                total += len(claim.citations)
+                accepted = []
+                for citation in claim.citations:
+                    if citation.sourceId in valid_ids:
+                        accepted.append(citation)
+                    elif len(suffixes.get(citation.sourceId, [])) == 1:
+                        # Some models preserve the deterministic hash but omit
+                        # the human-readable type prefix. Resolve only a unique
+                        # suffix and store the canonical source ID.
+                        citation.sourceId = suffixes[citation.sourceId][0]
+                        accepted.append(citation)
+                    else:
+                        invalid_ids.append(citation.sourceId)
+                claim.citations = accepted
+                if not accepted and claim.verdict != "unsupported":
+                    claim.verdict = "unsupported"
+            for step in assessment.remediation:
+                total += len(step.citations)
+                accepted = []
+                for citation in step.citations:
+                    if citation.sourceId in valid_ids:
+                        accepted.append(citation)
+                    elif len(suffixes.get(citation.sourceId, [])) == 1:
+                        citation.sourceId = suffixes[citation.sourceId][0]
+                        accepted.append(citation)
+                    else:
+                        invalid_ids.append(citation.sourceId)
+                step.citations = accepted
+            citation_validation = CitationValidation(
+                valid=not invalid_ids,
+                total=total,
+                invalid=len(invalid_ids),
+                invalidSourceIds=sorted(set(invalid_ids)),
+            )
+            if invalid_ids:
+                assessment.confidence = min(assessment.confidence, 0.69)
+        except Exception:
+            logger.exception("invalid assessment v2 payload")
+            assessment = None
 
     # Parse suggestExclusionRule — only accept if it has required fields.
     suggest_exclusion_rule: ExclusionRuleProposal | None = None
@@ -105,6 +175,9 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         needsMoreInfo=needs_more_info,
         suggestedResources=suggested,
         suggestExclusionRule=suggest_exclusion_rule,
+        assessmentVersion=2 if assessment else 1,
+        assessment=assessment,
+        citationValidation=citation_validation,
         thinkingBudgetUsed=thinking_tokens,
         rawResponse=raw,
         prompt=prompt,

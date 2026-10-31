@@ -222,6 +222,10 @@ type llmAnalyzeResponse struct {
 	NeedsMoreInfo        bool                   `json:"needsMoreInfo"`
 	SuggestedResources   []suggestedResource    `json:"suggestedResources,omitempty"`
 	SuggestExclusionRule *exclusionRuleProposal `json:"suggestExclusionRule,omitempty"`
+	SuggestFalsePositive bool                   `json:"suggestFalsePositive,omitempty"`
+	AssessmentVersion    int                    `json:"assessmentVersion,omitempty"`
+	Assessment           json.RawMessage        `json:"assessment,omitempty"`
+	CitationValidation   json.RawMessage        `json:"citationValidation,omitempty"`
 	ThinkingBudget       int                    `json:"thinkingBudgetUsed"`
 	Prompt               string                 `json:"prompt,omitempty"`
 }

@@ -79,6 +79,7 @@ type ProblemCaseEvidence struct {
 
 // Evidence is the full evidence payload posted to /internal/evidence.
 type Evidence struct {
+	SchemaVersion      int                   `json:"schemaVersion,omitempty"`
 	DiagnosticRunID    string                `json:"diagnosticRunId"`
 	IncidentID         string                `json:"incidentId"`
 	CollectedAt        time.Time             `json:"collectedAt"`
@@ -91,14 +92,38 @@ type Evidence struct {
 	UserMessage string `json:"userMessage,omitempty"`
 	// RelatedResourceEvidence holds events (and logs) for user-tagged related resources.
 	RelatedResourceEvidence []RelatedResourceEvidence `json:"relatedResourceEvidence,omitempty"`
+	// Sources is the normalized, citation-safe catalog consumed by assessment v2.
+	// Legacy fields above remain populated for backwards compatibility.
+	Sources []EvidenceSource `json:"sources,omitempty"`
+}
+
+// EvidenceSource is one atomic, addressable observation. Analysis citations may
+// reference only IDs present in this catalog.
+type EvidenceSource struct {
+	ID          string           `json:"id"`
+	Type        string           `json:"type"` // resource_field, log_line, event, collection_error
+	Resource    ResourceRef      `json:"resource"`
+	CollectedAt time.Time        `json:"collectedAt,omitempty"`
+	Path        string           `json:"path,omitempty"`
+	Value       any              `json:"value,omitempty"`
+	Line        *EvidenceLogLine `json:"line,omitempty"`
+	Event       *K8sEvent        `json:"event,omitempty"`
+	Truncated   bool             `json:"truncated,omitempty"`
+	Redacted    bool             `json:"redacted,omitempty"`
+}
+
+type EvidenceLogLine struct {
+	Number    int        `json:"number"`
+	Timestamp *time.Time `json:"timestamp,omitempty"`
+	Text      string     `json:"text"`
 }
 
 // RelatedResourceEvidence holds collected events and spec data for a user-tagged resource.
 type RelatedResourceEvidence struct {
-	Resource ResourceRef    `json:"resource"`
-	Events   []K8sEvent     `json:"events,omitempty"`
-	Logs     string         `json:"logs,omitempty"`
+	Resource ResourceRef `json:"resource"`
+	Events   []K8sEvent  `json:"events,omitempty"`
+	Logs     string      `json:"logs,omitempty"`
 	// Spec holds kind-specific diagnostic fields extracted from the resource spec/status
 	// (e.g. Ingress backend service names, Service selector, ConfigMap data, etc.).
-	Spec     map[string]any `json:"spec,omitempty"`
+	Spec map[string]any `json:"spec,omitempty"`
 }

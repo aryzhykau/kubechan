@@ -64,6 +64,64 @@ _VALID_LLM_JSON = json.dumps({
 
 
 class TestAnalyzeSuccess:
+    def test_assessment_citations_are_validated(self, client):
+        source = {"id": "field:valid", "type": "resource_field", "resource": {"kind": "Ingress", "namespace": "demo", "name": "web"}, "path": "/spec/backend", "value": "missing"}
+        body = {**_VALID_ANALYZE_BODY, "payload": {**_VALID_ANALYZE_BODY["payload"], "sources": [source]}}
+        assessment = {
+            "version": 2, "summary": "Wrong backend", "confidence": 0.95,
+            "claims": [{"id": "c1", "statement": "Backend is missing", "verdict": "supported", "citations": [
+                {"sourceId": "valid", "relevance": "configured value"},
+                {"sourceId": "field:invented", "relevance": "hallucinated"},
+            ]}],
+            "alternativeHypotheses": [], "missingEvidence": [], "remediation": [],
+        }
+        llm_json = json.dumps({**json.loads(_VALID_LLM_JSON), "assessmentVersion": 2, "assessment": assessment})
+        mock_provider = MagicMock()
+        mock_provider.model_id.return_value = "test-model"
+        mock_provider.call = AsyncMock(return_value=(llm_json, 0))
+        with patch("app.routes.make_provider", return_value=mock_provider):
+            resp = client.post("/analyze", json=body)
+        data = resp.json()
+        assert data["assessmentVersion"] == 2
+        assert data["citationValidation"]["invalid"] == 1
+        assert data["assessment"]["confidence"] == 0.69
+        assert [c["sourceId"] for c in data["assessment"]["claims"][0]["citations"]] == ["field:valid"]
+
+    def test_assessment_accepts_alternative_hypothesis_without_id(self, client):
+        source = {"id": "field:pod-phase", "type": "resource_field", "value": "Running"}
+        body = {**_VALID_ANALYZE_BODY, "payload": {**_VALID_ANALYZE_BODY["payload"], "sources": [source]}}
+        assessment = {
+            "version": 2,
+            "summary": "The pod is healthy",
+            "confidence": 0.9,
+            "claims": [],
+            "alternativeHypotheses": [{
+                "statement": "The pod is not running",
+                "confidence": 0.3,
+                "citations": [],
+            }],
+            "missingEvidence": ["No Service named web exists in the namespace"],
+            "remediation": [],
+        }
+        llm_json = json.dumps({
+            **json.loads(_VALID_LLM_JSON),
+            "assessmentVersion": 2,
+            "assessment": assessment,
+            "recommendation": [{"title": "Inspect pod", "command": "kubectl get pod web"}],
+        })
+        mock_provider = MagicMock()
+        mock_provider.model_id.return_value = "test-model"
+        mock_provider.call = AsyncMock(return_value=(llm_json, 0))
+        with patch("app.routes.make_provider", return_value=mock_provider):
+            resp = client.post("/analyze", json=body)
+
+        data = resp.json()
+        assert data["assessmentVersion"] == 2
+        assert data["assessment"]["alternativeHypotheses"][0]["id"] == ""
+        assert data["assessment"]["alternativeHypotheses"][0]["verdict"] == "unsupported"
+        assert data["assessment"]["missingEvidence"][0]["description"] == "No Service named web exists in the namespace"
+        assert data["recommendation"] == "1. Inspect pod — `kubectl get pod web`"
+
     def test_returns_200_with_valid_response(self, client):
         mock_provider = MagicMock()
         mock_provider.model_id.return_value = "qwen3-32b"

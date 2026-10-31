@@ -125,11 +125,52 @@ export interface RelatedResourceEvidence {
 }
 
 export interface EvidencePayload {
+  schemaVersion?: number
   rootResource?: { kind: string; name: string; namespace?: string }
   rootResourceEvents?: K8sEvent[]
   workloadPodLogs?: PodLog[]
   pvcInfos?: PVCInfo[]
   relatedResourceEvidence?: RelatedResourceEvidence[]
+  sources?: EvidenceSource[]
+}
+
+export interface EvidenceSource {
+  id: string
+  type: 'resource_field' | 'log_line' | 'event' | 'collection_error'
+  resource: ResourceRef
+  collectedAt?: string
+  path?: string
+  value?: unknown
+  line?: { number: number; timestamp?: string; text: string }
+  event?: K8sEvent
+  truncated?: boolean
+  redacted?: boolean
+}
+
+export interface AssessmentCitation { sourceId: string; quote?: string; relevance?: string }
+export interface AssessmentClaim {
+  id: string
+  statement: string
+  verdict: 'supported' | 'partially_supported' | 'unsupported'
+  citations: AssessmentCitation[]
+}
+export interface AssessmentRemediationStep {
+  order: number
+  title: string
+  description?: string
+  command?: string
+  risk: 'low' | 'medium' | 'high'
+  verification?: string
+  citations?: AssessmentCitation[]
+}
+export interface AssessmentV2 {
+  version: 2
+  summary: string
+  confidence: number
+  claims: AssessmentClaim[]
+  alternativeHypotheses: AssessmentClaim[]
+  missingEvidence: Array<{ resource?: ResourceRef; description: string; reason?: string }>
+  remediation: AssessmentRemediationStep[]
 }
 
 export interface Evidence {
@@ -220,6 +261,9 @@ export interface AnalysisResult {
     suggestedResources?: SuggestedResource[]
     suggestFalsePositive?: boolean
     suggestExclusionRule?: ExclusionRuleProposal | null
+    assessmentVersion?: number
+    assessment?: AssessmentV2
+    citationValidation?: { valid: boolean; total: number; invalid: number; invalidSourceIds?: string[] }
   }
   createdAt: string
 }
