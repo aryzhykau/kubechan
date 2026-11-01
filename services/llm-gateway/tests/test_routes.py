@@ -117,6 +117,35 @@ class TestAnalyzeSuccess:
         assert data["assessmentVersion"] == 2
         assert data["assessment"]["causalPath"] is None
 
+    def test_node_insights_are_constrained_to_snapshot(self, client):
+        source = {"id": "field:valid", "type": "resource_field", "value": "x"}
+        node_id = "resource:apps:Deployment:demo:web"
+        graph = {"entryResourceId": node_id, "nodes": [{"id": node_id}], "edges": [], "candidates": []}
+        body = {**_VALID_ANALYZE_BODY, "payload": {**_VALID_ANALYZE_BODY["payload"], "sources": [source], "graph": graph}}
+        assessment = {
+            "version": 2, "summary": "Deployment is relevant", "confidence": 0.8,
+            "claims": [{"id": "c1", "statement": "Observed", "verdict": "supported", "citations": [{"sourceId": "field:valid"}]}],
+            "alternativeHypotheses": [], "missingEvidence": [], "remediation": [],
+            "nodeInsights": [
+                {"nodeId": node_id, "relevance": "relevant", "comment": "This node matters.", "claimIds": ["c1", "invented"], "sourceIds": ["field:valid", "invented"]},
+                {"nodeId": node_id, "relevance": "context", "comment": "Duplicate.", "claimIds": [], "sourceIds": []},
+                {"nodeId": "resource:invented", "relevance": "not_relevant", "comment": "Unknown.", "claimIds": [], "sourceIds": []},
+            ],
+        }
+        llm_json = json.dumps({**json.loads(_VALID_LLM_JSON), "assessment": assessment})
+        mock_provider = MagicMock()
+        mock_provider.model_id.return_value = "test-model"
+        mock_provider.call = AsyncMock(return_value=(llm_json, 0))
+        with patch("app.routes.make_provider", return_value=mock_provider):
+            data = client.post("/analyze", json=body).json()
+        assert data["assessment"]["nodeInsights"] == [{
+            "nodeId": node_id,
+            "relevance": "relevant",
+            "comment": "This node matters.",
+            "claimIds": ["c1"],
+            "sourceIds": ["field:valid"],
+        }]
+
     def test_causal_path_recovers_graph_backed_citation(self, client):
         source = {"id": "field:ingress-backend", "type": "resource_field", "value": "missing-service"}
         graph = {

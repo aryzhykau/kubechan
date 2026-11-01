@@ -24,6 +24,14 @@ func BuildSourceCatalog(ev *Evidence) []EvidenceSource {
 	}
 	for _, pc := range ev.ProblemCases {
 		ref := pc.AffectedResource
+		// Detector output is evidence too. Keep each observation atomic so a
+		// model can cite the currently active failure instead of anchoring on a
+		// stale, but otherwise well-formed, related-resource configuration.
+		out = append(out, fieldSource(ref, "/problemCases/"+escapeJSONPointer(pc.Name)+"/detector", pc.Detector, ev.CollectedAt))
+		out = append(out, fieldSource(ref, "/problemCases/"+escapeJSONPointer(pc.Name)+"/severity", pc.Severity, ev.CollectedAt))
+		for i, symptom := range pc.Symptoms {
+			out = append(out, fieldSource(ref, "/problemCases/"+escapeJSONPointer(pc.Name)+"/symptoms/"+strconv.Itoa(i), symptom, ev.CollectedAt))
+		}
 		for _, event := range pc.Events {
 			out = append(out, eventSource(ref, event, ev.CollectedAt))
 		}

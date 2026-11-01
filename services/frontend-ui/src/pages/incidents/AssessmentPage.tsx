@@ -4,11 +4,18 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import { useNavigate, useParams } from 'react-router-dom'
 import { getToken } from '../../api/index'
-import type { AnalysisResult, AssessmentClaim, Evidence, EvidenceSource, GraphCandidate, GraphEdge, GraphNode, InvestigationGraph } from '../../api/index'
+import type { AnalysisResult, AssessmentClaim, Evidence, EvidenceSource, GraphCandidate, GraphEdge, GraphNode, InvestigationGraph, NodeInsight } from '../../api/index'
 import './AssessmentPage.css'
 
 type PositionedNode = GraphNode & { x: number; y: number }
 type Selection = { type: 'node'; value: GraphNode } | { type: 'edge'; value: GraphEdge } | { type: 'candidate'; value: GraphCandidate }
+
+const NODE_WIDTH = 210
+const NODE_HEIGHT = 88
+const COLUMN_WIDTH = 310
+const ROW_HEIGHT = 148
+const TOOLTIP_WIDTH = 640
+const TOOLTIP_SAFE_ATTRIBUTES = ['selector', 'templateLabels', 'replicas', 'readyReplicas', 'availableReplicas', 'readyEndpoints', 'notReadyEndpoints', 'phase', 'storageClass', 'scaleTargetRef']
 
 const KIND_RANK: Record<string, number> = {
   Ingress: 0, HTTPRoute: 0, GRPCRoute: 0,
@@ -16,6 +23,7 @@ const KIND_RANK: Record<string, number> = {
   Deployment: 2, StatefulSet: 2, DaemonSet: 2, Job: 2, CronJob: 2,
   Pod: 3,
   ConfigMap: 4, Secret: 4, PersistentVolumeClaim: 4,
+  StorageClass: 5,
 }
 
 function graphLayout(graph: InvestigationGraph): { nodes: PositionedNode[]; width: number; height: number } {
@@ -24,16 +32,61 @@ function graphLayout(graph: InvestigationGraph): { nodes: PositionedNode[]; widt
     const rank = KIND_RANK[node.resource.kind] ?? 2
     groups.set(rank, [...(groups.get(rank) ?? []), node])
   }
-  const columnWidth = 250
-  const rowHeight = 126
   const positioned: PositionedNode[] = []
   for (const [rank, values] of groups) {
     values.sort((a, b) => a.id.localeCompare(b.id))
-    values.forEach((node, index) => positioned.push({ ...node, x: 34 + rank * columnWidth, y: 34 + index * rowHeight }))
+    values.forEach((node, index) => positioned.push({ ...node, x: 40 + rank * COLUMN_WIDTH, y: 40 + index * ROW_HEIGHT }))
   }
   const maxRank = Math.max(0, ...Array.from(groups.keys()))
   const maxRows = Math.max(1, ...Array.from(groups.values()).map(values => values.length))
-  return { nodes: positioned, width: 34 + (maxRank + 1) * columnWidth, height: 58 + maxRows * rowHeight }
+  return { nodes: positioned, width: Math.max(1180, 80 + maxRank * COLUMN_WIDTH + NODE_WIDTH), height: Math.max(520, 80 + (maxRows - 1) * ROW_HEIGHT + NODE_HEIGHT) }
+}
+
+function compactLabel(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`
+}
+
+function tooltipValue(value: unknown): string {
+  if (value == null) return '—'
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return JSON.stringify(value)
+}
+
+function nodeTooltipLines(node: GraphNode): Array<{ label: string; value: string }> {
+  const lines = [
+    { label: 'state', value: node.state },
+    { label: 'role', value: node.role || 'context' },
+    { label: 'namespace', value: node.resource.namespace || 'cluster scoped' },
+    { label: 'evidence', value: `${node.sourceIds?.length ?? 0} sources` },
+  ]
+  const attributes = node.attributes ?? {}
+  for (const key of TOOLTIP_SAFE_ATTRIBUTES) {
+    if (!(key in attributes) || lines.length >= 8) continue
+    lines.push({ label: key, value: compactLabel(tooltipValue(attributes[key]), 38) })
+  }
+  return lines
+}
+
+function wrapTooltipText(value: string, maxLength = 53, maxLines = 8): string[] {
+  const words = value.trim().split(/\s+/).filter(Boolean)
+  const lines: string[] = []
+  for (const word of words) {
+    const current = lines[lines.length - 1]
+    if (!current || current.length + word.length + 1 > maxLength) lines.push(word)
+    else lines[lines.length - 1] = `${current} ${word}`
+    if (lines.length > maxLines) break
+  }
+  if (lines.length > maxLines) {
+    lines.length = maxLines
+    lines[maxLines - 1] = compactLabel(lines[maxLines - 1], maxLength - 1) + '…'
+  }
+  return lines.length ? lines : ['No model comment for this snapshot.']
+}
+
+function nodeInsightImage(relevance?: NodeInsight['relevance']): string {
+  if (relevance === 'relevant') return '/kubechan-facepalm-angry.png'
+  if (relevance === 'not_relevant') return '/kubechan-rolleye.png'
+  return '/kubechan-looking-2.png'
 }
 
 function observedValue(source: EvidenceSource): string {
@@ -47,22 +100,30 @@ function sourceLabel(source: EvidenceSource): string {
   return `${source.resource.kind} · ${source.resource.namespace ?? 'cluster'}/${source.resource.name}`
 }
 
-function GraphCanvas({ graph, rootCauseId, selected, onSelect }: {
+function GraphCanvas({ graph, rootCauseId, nodeInsights, selected, onSelect }: {
   graph: InvestigationGraph
   rootCauseId?: string
+  nodeInsights: NodeInsight[]
   selected?: Selection
   onSelect: (selection: Selection) => void
 }) {
   const layout = useMemo(() => graphLayout(graph), [graph])
   const [zoom, setZoom] = useState(0.75)
+  const [hoveredNodeId, setHoveredNodeId] = useState<string>()
+  const [tooltipPointer, setTooltipPointer] = useState({ x: 0, y: 0 })
   const byId = new Map(layout.nodes.map(node => [node.id, node]))
+  const insightByNode = new Map(nodeInsights.map(insight => [insight.nodeId, insight]))
   const candidates = graph.candidates ?? []
+  const candidateByNode = new Map<string, GraphCandidate>()
+  for (const candidate of [...candidates].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))) {
+    if (!candidateByNode.has(candidate.candidateNodeId)) candidateByNode.set(candidate.candidateNodeId, candidate)
+  }
 
   function edgePath(fromId: string, toId: string): string {
     const from = byId.get(fromId); const to = byId.get(toId)
     if (!from || !to) return ''
-    const x1 = from.x + 190; const y1 = from.y + 42
-    const x2 = to.x; const y2 = to.y + 42
+    const x1 = from.x + NODE_WIDTH; const y1 = from.y + NODE_HEIGHT / 2
+    const x2 = to.x; const y2 = to.y + NODE_HEIGHT / 2
     const bend = Math.max(36, Math.abs(x2 - x1) * 0.45)
     return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`
   }
@@ -84,10 +145,10 @@ function GraphCanvas({ graph, rootCauseId, selected, onSelect }: {
         {graph.edges.map(edge => {
           const path = edgePath(edge.from, edge.to)
           if (!path) return null
-          return <g key={edge.id} className={`graph-edge graph-edge--${edge.state} ${selected?.type === 'edge' && selected.value.id === edge.id ? 'is-selected' : ''}`} role="button" tabIndex={0} onClick={() => onSelect({ type: 'edge', value: edge })} onKeyDown={event => event.key === 'Enter' && onSelect({ type: 'edge', value: edge })}>
+          return <g key={edge.id} className={`graph-edge graph-edge--${edge.state} ${edge.origin === 'inferred' ? 'graph-edge--inferred' : ''} ${selected?.type === 'edge' && selected.value.id === edge.id ? 'is-selected' : ''}`} role="button" tabIndex={0} onClick={() => onSelect({ type: 'edge', value: edge })} onKeyDown={event => event.key === 'Enter' && onSelect({ type: 'edge', value: edge })}>
             <path className="graph-edge__hit" d={path} />
-            <path className="graph-edge__line" d={path} markerEnd={`url(#arrow-${edge.state === 'broken' ? 'broken' : 'normal'})`} />
-            <text x={((byId.get(edge.from)?.x ?? 0) + (byId.get(edge.to)?.x ?? 0)) / 2 + 95} y={Math.min(byId.get(edge.from)?.y ?? 0, byId.get(edge.to)?.y ?? 0) + 30}>{edge.type.replace(/_/g, ' ')}</text>
+            <path className="graph-edge__line" d={path} markerEnd={`url(#arrow-${edge.origin === 'inferred' ? 'candidate' : edge.state === 'broken' ? 'broken' : 'normal'})`} />
+            <text x={((byId.get(edge.from)?.x ?? 0) + (byId.get(edge.to)?.x ?? 0)) / 2 + NODE_WIDTH / 2} y={Math.min(byId.get(edge.from)?.y ?? 0, byId.get(edge.to)?.y ?? 0) + 30}>{edge.type.replace(/_/g, ' ')}</text>
           </g>
         })}
         {candidates.map(candidate => {
@@ -99,20 +160,45 @@ function GraphCanvas({ graph, rootCauseId, selected, onSelect }: {
           return <g key={candidate.id} className={`graph-edge graph-edge--candidate ${selected?.type === 'candidate' && selected.value.id === candidate.id ? 'is-selected' : ''}`} role="button" tabIndex={0} onClick={() => onSelect({ type: 'candidate', value: candidate })} onKeyDown={event => event.key === 'Enter' && onSelect({ type: 'candidate', value: candidate })}>
             <path className="graph-edge__hit" d={path} />
             <path className="graph-edge__line" d={path} markerEnd="url(#arrow-candidate)" />
-            <text x={((byId.get(sourceNodeId)?.x ?? 0) + (byId.get(candidate.candidateNodeId)?.x ?? 0)) / 2 + 90} y={Math.min(byId.get(sourceNodeId)?.y ?? 0, byId.get(candidate.candidateNodeId)?.y ?? 0) + 70}>{candidate.strength === 'strong' ? 'should route to' : 'possible target'}</text>
+            <text x={((byId.get(sourceNodeId)?.x ?? 0) + (byId.get(candidate.candidateNodeId)?.x ?? 0)) / 2 + NODE_WIDTH / 2} y={Math.min(byId.get(sourceNodeId)?.y ?? 0, byId.get(candidate.candidateNodeId)?.y ?? 0) + 70}>{candidate.strength === 'strong' ? 'should route to' : 'possible target'}</text>
           </g>
         })}
         {layout.nodes.map(node => {
           const state = node.id === rootCauseId ? 'root-cause' : node.state
-          return <g key={node.id} className={`graph-node graph-node--${state} ${node.type === 'reference' ? 'graph-node--reference' : ''} ${selected?.type === 'node' && selected.value.id === node.id ? 'is-selected' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" tabIndex={0} onClick={() => onSelect({ type: 'node', value: node })} onKeyDown={event => event.key === 'Enter' && onSelect({ type: 'node', value: node })}>
-            <rect width="190" height="84" rx="3" />
-            <text className="graph-node__kind" x="14" y="21">{node.resource.kind}</text>
-            <text className="graph-node__name" x="14" y="44">{node.resource.name}</text>
-            <text className="graph-node__namespace" x="14" y="64">{node.resource.namespace || 'cluster scoped'}</text>
-            <text className="graph-node__state" x="176" y="20" textAnchor="end">{node.type === 'reference' ? 'not found' : node.id === rootCauseId ? 'root cause' : node.state}</text>
+          const candidate = candidateByNode.get(node.id)
+          return <g key={node.id} className={`graph-node graph-node--${state} ${node.type === 'reference' ? 'graph-node--reference' : ''} ${selected?.type === 'node' && selected.value.id === node.id ? 'is-selected' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" tabIndex={0} onMouseEnter={event => { setHoveredNodeId(node.id); setTooltipPointer({ x: event.clientX, y: event.clientY }) }} onMouseMove={event => setTooltipPointer({ x: event.clientX, y: event.clientY })} onMouseLeave={() => setHoveredNodeId(undefined)} onFocus={event => { const rect = event.currentTarget.getBoundingClientRect(); setHoveredNodeId(node.id); setTooltipPointer({ x: rect.right, y: rect.top }) }} onBlur={() => setHoveredNodeId(undefined)} onClick={() => onSelect({ type: 'node', value: node })} onKeyDown={event => event.key === 'Enter' && onSelect({ type: 'node', value: node })}>
+            <title>{`${node.resource.kind}/${node.resource.name} · ${node.resource.namespace || 'cluster scoped'}`}</title>
+            <rect width={NODE_WIDTH} height={NODE_HEIGHT} rx="3" />
+            <text className="graph-node__kind" x="14" y="21">{compactLabel(node.resource.kind, 18)}</text>
+            <text className="graph-node__name" x="14" y="44">{compactLabel(node.resource.name, 23)}</text>
+            <text className="graph-node__namespace" x="14" y="66">{compactLabel(node.resource.namespace || 'cluster scoped', 31)}</text>
+            <text className="graph-node__state" x={NODE_WIDTH - 14} y="20" textAnchor="end">{node.type === 'reference' ? 'not found' : node.id === rootCauseId ? 'root cause' : compactLabel(node.state, 13)}</text>
+            {candidate && <g className={`graph-node__candidate ${selected?.type === 'candidate' && selected.value.id === candidate.id ? 'is-selected' : ''}`} role="button" tabIndex={0} aria-label={`Inspect ${candidate.strength} candidate`} onClick={event => { event.stopPropagation(); onSelect({ type: 'candidate', value: candidate }) }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onSelect({ type: 'candidate', value: candidate }) } }}>
+              <rect x="108" y="69" width="88" height="15" rx="2" />
+              <text x="152" y="80" textAnchor="middle">{candidate.strength} candidate</text>
+            </g>}
           </g>
         })}
       </svg>
+      {(() => {
+        const node = hoveredNodeId ? byId.get(hoveredNodeId) : undefined
+        if (!node) return null
+        const insight = insightByNode.get(node.id)
+        const commentLines = wrapTooltipText(insight?.comment || '')
+        const lines = nodeTooltipLines(node).slice(0, 5)
+        const effectiveWidth = Math.min(TOOLTIP_WIDTH, window.innerWidth - 32)
+        const estimatedHeight = Math.min(window.innerHeight - 32, Math.max(330, 128 + commentLines.length * 24 + lines.length * 26))
+        const left = Math.max(16, Math.min(tooltipPointer.x + 18, window.innerWidth - effectiveWidth - 16))
+        const top = Math.max(16, Math.min(tooltipPointer.y + 18, window.innerHeight - estimatedHeight - 16))
+        return <aside className="graph-node-tooltip" style={{ left, top, width: effectiveWidth, maxHeight: window.innerHeight - 32 }} role="tooltip">
+          <header><strong>{node.resource.kind}/{node.resource.name}</strong><span className={`graph-node-tooltip__relevance graph-node-tooltip__relevance--${insight?.relevance ?? 'unknown'}`}>{(insight?.relevance ?? 'legacy snapshot').replace('_', ' ')}</span></header>
+          <div className="graph-node-tooltip__message">
+            <div className="graph-node-tooltip__avatar-bg"><img className="graph-node-tooltip__avatar" src={nodeInsightImage(insight?.relevance)} alt="KubeChan reaction" /></div>
+            <div><b className="graph-node-tooltip__speaker">KUBECHAN</b><p className="graph-node-tooltip__comment">{insight?.comment || 'No model comment for this snapshot.'}</p></div>
+          </div>
+          <dl>{lines.map(line => <div key={line.label}><dt>{line.label}</dt><dd>{line.value}</dd></div>)}</dl>
+        </aside>
+      })()}
     </div>
   )
 }
@@ -129,6 +215,8 @@ function EvidencePanel({ selection, sources }: { selection?: Selection; sources:
   return <aside className="assessment-inspector">
     <div className="assessment-inspector__header"><span>{selection.type}</span><h3>{title}</h3></div>
     {selection.type === 'candidate' && selection.value.reasons.map(reason => <div className="candidate-reason" key={reason.code}><strong>{reason.label}</strong><span>{reason.code}</span></div>)}
+    {selection.type === 'edge' && selection.value.origin === 'inferred' && <div className="candidate-reason"><strong>{selection.value.strength ?? 'possible'} inferred relationship · score {selection.value.score ?? 0}</strong><span>Not observed Kubernetes topology</span></div>}
+    {selection.type === 'edge' && selection.value.reasons?.map(reason => <div className="candidate-reason" key={reason.code}><strong>{reason.label}</strong><span>{reason.code}</span></div>)}
     {resolved.length === 0 && <p className="assessment-inspector__muted">No directly addressable evidence is attached to this entity.</p>}
     {resolved.map(source => <div className="source-record" key={source.id}>
       <strong>{sourceLabel(source)}</strong>
@@ -203,8 +291,8 @@ export function AssessmentPage() {
 
     <section className="assessment-workspace">
       <div className="assessment-workspace__main">
-        <div className="assessment-section-heading"><span>Investigation scope</span><strong>Resources seen by the model</strong></div>
-        <GraphCanvas graph={graph} rootCauseId={assessment.causalPath?.rootCauseEntityId} selected={effectiveSelection} onSelect={value => { setSourceSelection(undefined); setSelection(value) }} />
+        <div className="assessment-section-heading"><span>Investigation scope</span><strong>{graph.truncated ? `Truncated at ${graph.policy?.maxNodes ?? graph.nodes.length} resources` : 'Resources seen by the model'}</strong></div>
+        <GraphCanvas graph={graph} rootCauseId={assessment.causalPath?.rootCauseEntityId} nodeInsights={assessment.nodeInsights ?? []} selected={effectiveSelection} onSelect={value => { setSourceSelection(undefined); setSelection(value) }} />
       </div>
       {sourceSelection ? <aside className="assessment-inspector"><div className="assessment-inspector__header"><span>source</span><h3>{sourceLabel(sourceSelection)}</h3></div>{sourceSelection.path && <code>{sourceSelection.path}</code>}<div className="source-record"><pre>{observedValue(sourceSelection)}</pre><small>{sourceSelection.id}</small></div><Button size="small" onClick={() => setSourceSelection(undefined)}>Back to graph selection</Button></aside> : <EvidencePanel selection={selection} sources={sources} />}
     </section>

@@ -90,7 +90,7 @@ export function AugmentIncidentModal({ incidentId, defaultNamespace = '', sugges
             Add more context
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.3, display: 'block', lineHeight: 1.4 }}>
-            KubeChan asked for more evidence — add resources and trigger a new analysis
+            Attach resources to this incident and trigger a new evidence snapshot and analysis
           </Typography>
         </Box>
         <IconButton size="small" onClick={onClose} sx={{ mt: 0.2 }}>
@@ -102,7 +102,7 @@ export function AugmentIncidentModal({ incidentId, defaultNamespace = '', sugges
         {suggestions.length > 0 && (
           <Box>
             <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, mb: 1, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              KubeChan suggests
+              Suggested by KubeChan
             </Typography>
             <Stack spacing={1}>
               {suggestions.map((s, i) => (
@@ -152,6 +152,10 @@ export function AugmentIncidentModal({ incidentId, defaultNamespace = '', sugges
             ))}
           </Box>
         )}
+
+        <Alert severity="info" sx={{ fontSize: '0.78rem' }}>
+          Added resources stay attached to the incident and will be collected in future diagnostic runs.
+        </Alert>
 
         {submitError && <Alert severity="error" sx={{ fontSize: '0.78rem' }}>{submitError}</Alert>}
       </DialogContent>

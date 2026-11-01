@@ -88,6 +88,14 @@ class CausalPath(BaseModel):
     steps: list[CausalPathStep] = []
 
 
+class NodeInsight(BaseModel):
+    nodeId: str
+    relevance: Literal["relevant", "context", "not_relevant"]
+    comment: str
+    claimIds: list[str] = []
+    sourceIds: list[str] = []
+
+
 class AssessmentV2(BaseModel):
     version: Literal[2] = 2
     summary: str
@@ -97,6 +105,7 @@ class AssessmentV2(BaseModel):
     missingEvidence: list[MissingEvidence] = []
     remediation: list[RemediationStep] = []
     causalPath: CausalPath | None = None
+    nodeInsights: list[NodeInsight] = []
 
     @model_validator(mode="before")
     @classmethod

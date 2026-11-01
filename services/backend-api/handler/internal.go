@@ -173,25 +173,17 @@ func nullBytes(b []byte) any {
 
 // llmAnalyzeRequest is the body sent to llm-gateway POST /analyze.
 type llmAnalyzeRequest struct {
-	EvidenceID      string           `json:"evidenceId"`
-	DiagnosticRunID string           `json:"diagnosticRunId"`
-	IncidentID      string           `json:"incidentId,omitempty"`
-	IncidentSource  string           `json:"incidentSource,omitempty"` // "auto" or "manual"
-	ReanalysisCount int              `json:"reanalysisCount"`
-	MoodLevel       int              `json:"moodLevel"`
-	PriorDiagnoses  []priorDiagnosis `json:"priorDiagnoses,omitempty"`
-	UserMessage     string           `json:"userMessage,omitempty"`
-	Provider        string           `json:"provider,omitempty"`
-	Credentials     map[string]any   `json:"credentials,omitempty"`
-	PersonaEnabled  bool             `json:"personaEnabled"`
-	Payload         map[string]any   `json:"payload"`
-}
-
-// priorDiagnosis is a previous analysis attempt for the same incident, with its user rating.
-type priorDiagnosis struct {
-	Attempt         int    `json:"attempt"`
-	LikelyRootCause string `json:"likelyRootCause"`
-	UserRating      string `json:"userRating"` // "up", "down", or ""
+	EvidenceID      string         `json:"evidenceId"`
+	DiagnosticRunID string         `json:"diagnosticRunId"`
+	IncidentID      string         `json:"incidentId,omitempty"`
+	IncidentSource  string         `json:"incidentSource,omitempty"` // "auto" or "manual"
+	ReanalysisCount int            `json:"reanalysisCount"`
+	MoodLevel       int            `json:"moodLevel"`
+	UserMessage     string         `json:"userMessage,omitempty"`
+	Provider        string         `json:"provider,omitempty"`
+	Credentials     map[string]any `json:"credentials,omitempty"`
+	PersonaEnabled  bool           `json:"personaEnabled"`
+	Payload         map[string]any `json:"payload"`
 }
 
 // suggestedResource mirrors the LLM gateway's SuggestedResource model.
@@ -245,34 +237,11 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 
 	// Count how many prior completed analyses exist for this incident.
 	var priorCount int
-	var priorDiagnoses []priorDiagnosis
 	if req.IncidentID != "" {
 		_ = h.DB.QueryRow(
 			`SELECT COUNT(*) FROM analysis_results WHERE incident_id = ?`,
 			req.IncidentID,
 		).Scan(&priorCount)
-
-		rows, err := h.DB.Query(
-			`SELECT likely_root_cause, COALESCE(user_rating, '') FROM analysis_results
-			 WHERE incident_id = ? AND status = 'completed'
-			 ORDER BY created_at ASC`,
-			req.IncidentID,
-		)
-		if err == nil {
-			defer func() { _ = rows.Close() }()
-			attempt := 1
-			for rows.Next() {
-				var rootCause, rating string
-				if err := rows.Scan(&rootCause, &rating); err == nil {
-					priorDiagnoses = append(priorDiagnoses, priorDiagnosis{
-						Attempt:         attempt,
-						LikelyRootCause: rootCause,
-						UserRating:      rating,
-					})
-					attempt++
-				}
-			}
-		}
 	}
 
 	// Read current mood from the KubeChanState singleton (fast cache read).
@@ -331,7 +300,6 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		IncidentSource:  incidentSource,
 		ReanalysisCount: priorCount,
 		MoodLevel:       moodLevel,
-		PriorDiagnoses:  priorDiagnoses,
 		UserMessage:     userMessage,
 		Provider:        provider,
 		Credentials:     credentials,
@@ -410,12 +378,12 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		msg, _ := json.Marshal(map[string]any{
 			"type":                 "Analysis.Completed",
 			"diagnosticRunId":      req.DiagnosticRunID,
-			"analysisId":          analysisID,
-			"incidentId":          req.IncidentID,
-			"rootCause":           result.LikelyRootCause,
-			"confidence":          result.Confidence,
-			"needsMoreInfo":       result.NeedsMoreInfo,
-			"suggestedResources":  result.SuggestedResources,
+			"analysisId":           analysisID,
+			"incidentId":           req.IncidentID,
+			"rootCause":            result.LikelyRootCause,
+			"confidence":           result.Confidence,
+			"needsMoreInfo":        result.NeedsMoreInfo,
+			"suggestedResources":   result.SuggestedResources,
 			"suggestExclusionRule": result.SuggestExclusionRule,
 		})
 		h.Hub.Broadcast(msg)

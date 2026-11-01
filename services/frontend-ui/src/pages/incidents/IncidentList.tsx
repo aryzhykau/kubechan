@@ -712,6 +712,16 @@ function IncidentCard({
             {alreadyAnalyzed ? 'Ask again' : 'Ask KubeChan to help'}
           </Button>
         )}
+        {!isResolved && !isAnalyzing && (
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => setAugmentOpen(true)}
+            sx={{ fontSize: '0.78rem', minWidth: 0 }}
+          >
+            Add context
+          </Button>
+        )}
         {!isResolved && isManual && resolveStep === 'idle' && !isAnalyzing && (
           <Button size="small" variant="outlined" color="success" onClick={() => setResolveStep('confirm')} sx={{ fontSize: '0.78rem' }}>
             Resolve
@@ -738,9 +748,6 @@ function IncidentCard({
               ))}
             </Box>
           </Box>
-          <Button size="small" variant="outlined" color="warning" onClick={() => setAugmentOpen(true)} sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
-            Add context
-          </Button>
         </Box>
       )}
 

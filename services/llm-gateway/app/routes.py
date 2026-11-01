@@ -144,8 +144,22 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
             # Drop any causal path that does not resolve completely against the
             # immutable graph included in this request.
             graph = req.payload.get("graph") or {}
+            node_ids = {str(n.get("id")) for n in graph.get("nodes", []) if isinstance(n, dict) and n.get("id")}
+            claim_ids = {claim.id for claim in assessment.claims if claim.id}
+            validated_insights = []
+            seen_insight_nodes: set[str] = set()
+            for insight in assessment.nodeInsights:
+                if insight.nodeId not in node_ids or insight.nodeId in seen_insight_nodes:
+                    continue
+                insight.sourceIds = sorted({source_id for source_id in insight.sourceIds if source_id in valid_ids})
+                insight.claimIds = sorted({claim_id for claim_id in insight.claimIds if claim_id in claim_ids})
+                if insight.relevance == "relevant" and not insight.sourceIds and not insight.claimIds:
+                    insight.relevance = "context"
+                seen_insight_nodes.add(insight.nodeId)
+                validated_insights.append(insight)
+            assessment.nodeInsights = validated_insights
+
             if assessment.causalPath and graph:
-                node_ids = {str(n.get("id")) for n in graph.get("nodes", []) if isinstance(n, dict) and n.get("id")}
                 edge_ids = {str(e.get("id")) for e in graph.get("edges", []) if isinstance(e, dict) and e.get("id")}
                 candidate_ids = {str(c.get("id")) for c in graph.get("candidates", []) if isinstance(c, dict) and c.get("id")}
                 path = assessment.causalPath

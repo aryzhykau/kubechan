@@ -119,6 +119,7 @@ export interface PVCInfo {
 
 export interface RelatedResourceEvidence {
   resource: { kind: string; name: string; namespace?: string; apiGroup?: string }
+  discoveryOrigin?: 'root' | 'explicit' | 'automatic' | string
   events?: K8sEvent[]
   logs?: string
   spec?: Record<string, unknown>
@@ -151,6 +152,10 @@ export interface GraphEdge {
   from: string
   to: string
   state: 'resolved' | 'broken' | 'empty' | string
+  origin?: 'observed' | 'inferred' | string
+  strength?: 'strong' | 'possible' | string
+  score?: number
+  reasons?: GraphCandidateReason[]
   attributes?: Record<string, unknown>
   sourceIds?: string[]
 }
@@ -169,6 +174,16 @@ export interface GraphCandidate {
 export interface InvestigationGraph {
   schemaVersion: number
   entryResourceId: string
+  policy?: {
+    maxObservedDepth: number
+    maxInferredHops: number
+    maxNodes: number
+    maxEdges: number
+    maxCandidatesPerGap: number
+    strongThreshold: number
+    possibleThreshold: number
+  }
+  truncated?: boolean
   nodes: GraphNode[]
   edges: GraphEdge[]
   candidates?: GraphCandidate[]
@@ -203,6 +218,13 @@ export interface AssessmentRemediationStep {
   verification?: string
   citations?: AssessmentCitation[]
 }
+export interface NodeInsight {
+  nodeId: string
+  relevance: 'relevant' | 'context' | 'not_relevant'
+  comment: string
+  claimIds: string[]
+  sourceIds: string[]
+}
 export interface AssessmentV2 {
   version: 2
   summary: string
@@ -211,6 +233,7 @@ export interface AssessmentV2 {
   alternativeHypotheses: AssessmentClaim[]
   missingEvidence: Array<{ resource?: ResourceRef; description: string; reason?: string }>
   remediation: AssessmentRemediationStep[]
+  nodeInsights?: NodeInsight[]
   causalPath?: {
     entryResourceId: string
     rootCauseEntityId: string

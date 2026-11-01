@@ -70,3 +70,28 @@ func TestBuildSourceCatalogFlattensTypedMapSlices(t *testing.T) {
 		t.Fatalf("unexpected JSON pointer %q", got)
 	}
 }
+
+func TestBuildSourceCatalogIncludesProblemCaseObservations(t *testing.T) {
+	ev := &Evidence{
+		CollectedAt:  time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC),
+		RootResource: ResourceRef{Kind: "Service", Namespace: "demo", Name: "gateway-public"},
+		ProblemCases: []ProblemCaseEvidence{{
+			Name:             "service-no-endpoints",
+			Detector:         "ServiceNoEndpoints",
+			Severity:         "high",
+			Symptoms:         []string{"service \"gateway-public\" has no ready endpoints"},
+			AffectedResource: ResourceRef{Kind: "Service", Namespace: "demo", Name: "gateway-public"},
+		}},
+	}
+
+	sources := BuildSourceCatalog(ev)
+	if len(sources) != 3 {
+		t.Fatalf("expected detector, severity, and symptom sources, got %#v", sources)
+	}
+	if sources[2].Path != "/problemCases/service-no-endpoints/symptoms/0" {
+		t.Fatalf("unexpected symptom path %q", sources[2].Path)
+	}
+	if sources[2].Value != "service \"gateway-public\" has no ready endpoints" {
+		t.Fatalf("unexpected symptom value %#v", sources[2].Value)
+	}
+}

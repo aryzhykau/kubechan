@@ -51,6 +51,10 @@ export const incidentsApi = createApi({
         method: 'POST',
         body: { relatedResources },
       }),
+      invalidatesTags: (_, __, { incidentId }) => [
+        { type: 'Incident', id: incidentId },
+        { type: 'Incident', id: 'LIST' },
+      ],
     }),
   }),
 })
