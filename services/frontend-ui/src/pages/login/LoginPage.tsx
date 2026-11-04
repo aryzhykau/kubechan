@@ -15,6 +15,7 @@ export function LoginPage() {
   const dispatch = useAppDispatch()
   const navigate = useNavigate()
   const [loginApi, { isLoading }] = useLoginMutation()
+  const [submitting, setSubmitting] = useState(false)
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -24,6 +25,7 @@ export function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    setSubmitting(true)
     try {
       const res = await loginApi({ username, password }).unwrap()
       // Derive CurrentUser from login response
@@ -36,6 +38,8 @@ export function LoginPage() {
       navigate('/', { replace: true })
     } catch {
       setError('Invalid username or password.')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -95,7 +99,7 @@ export function LoginPage() {
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
                 required
-                disabled={isLoading}
+                disabled={isLoading || submitting}
                 fullWidth
                 size="small"
               />
@@ -106,7 +110,7 @@ export function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
                 required
-                disabled={isLoading}
+                disabled={isLoading || submitting}
                 fullWidth
                 size="small"
                 slotProps={{
@@ -128,7 +132,7 @@ export function LoginPage() {
                 type="submit"
                 variant="contained"
                 size="large"
-                disabled={isLoading}
+                disabled={isLoading || submitting}
                 fullWidth
                 sx={{ mt: 0.5 }}
               >

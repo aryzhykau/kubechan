@@ -30,6 +30,7 @@ class CopilotProvider(LLMProvider):
             async with await client.create_session(
                 on_permission_request=_approve_all,
                 model=self._model,
+                github_token=self._token,
             ) as session:
                 response = await session.send_and_wait(prompt, timeout=300.0)
                 if response is None:

@@ -1,5 +1,7 @@
 # Codebase Concerns
 
+> Point-in-time audit, not a specification. Reproduce the cited behavior in the current branch before planning work from this file. Current contracts and verification commands are indexed in [`../README.md`](../README.md).
+
 ## Core Sections (Required)
 
 ### 1) Top Risks (Prioritized)
@@ -8,7 +10,7 @@
 |----------|---------|----------|--------|------------------|
 | High | SQLite single-writer — backend-api cannot scale horizontally | `services/backend-api/db/db.go` WAL pragma; single `DB_PATH` volume | Any attempt to run multiple replicas of backend-api will cause write conflicts or data corruption | Replace SQLite with PostgreSQL or add a proxy if horizontal scaling is needed |
 | High | `POST /internal/evidence` has no authentication | `services/backend-api/main.go` — `r.Route("/internal", ...)` registers no auth middleware | Any pod in the cluster can inject arbitrary evidence, potentially poisoning LLM analysis | Add network policy to restrict access; optionally add a shared secret or mTLS for service-to-service calls |
-| High | JWT passed as WebSocket URL query parameter | `services/frontend-ui/src/useWebSocket.ts` — `?token=${encodeURIComponent(token)}` | Token appears in nginx/proxy access logs and browser history | Authenticate WebSocket via initial HTTP upgrade headers or a short-lived ticket |
+| High | JWT passed as WebSocket URL query parameter | `services/frontend-ui/src/store/middleware/wsMiddleware.ts` — `?token=${encodeURIComponent(token)}` | Token can appear in nginx/proxy access logs | Authenticate WebSocket via a short-lived ticket or secure cookie |
 | Medium | No `.env.example` file — required env vars undocumented | Scan: "No .env.example or .env.template found" | New operators must read source code to find all required env vars | Add `.env.example` listing all vars with descriptions |
 | Medium | LLM prompt and raw response logged at INFO level | `services/llm-gateway/app/routes.py` — `logger.info("=== PROMPT TO MODEL ===\n%s\n=== END PROMPT ===", prompt)` | Evidence payloads (pod logs, ConfigMap contents) are written to pod logs; may leak sensitive runtime data | Redact or truncate logged payloads; move to DEBUG level |
 | Medium | No retry on llm-gateway LLM calls | `services/llm-gateway/app/routes.py` — single `await provider.call(prompt)` with no retry | Transient Bedrock/Copilot errors result in failed DiagnosticRuns | Add exponential backoff retry (2–3 attempts) before returning 502 |
@@ -23,8 +25,7 @@
 |-----------|---------------|-------|-----------------|---------------|
 | Coverage tests added to reach threshold rather than test behaviour | Phase-7 PR history shows multiple commits "fix tests to raise coverage" | `services/backend-api/handler/`, `services/backend-api/ws/ws_test.go` | Tests may pass while real regressions are missed | Refactor to test outcomes, not implementation; add envtest-based controller tests |
 | No envtest integration tests for controllers | MVP time constraint; comment in `.github/go-coverage.yml`: "Target: raise this to 50% once backend-api and cluster-watcher controllers have envtest-based tests" | `services/cluster-watcher/controllers/`, `services/diagnostics-worker/controllers/` | Controller reconcile logic is exercised only in production cluster | Add envtest-based suite as a follow-up phase |
-| Python test mock strategy unverified | [TODO from investigation] | `services/llm-gateway/tests/` | Unknown coverage of error paths in LLM provider calls | Read test files and verify provider mocking |
-| No E2E tests | Not yet implemented per `full-plan.md` | `Makefile` `e2e` target (stub) | Full user flows (cluster-watcher → UI) are not regression-tested | Add e2e tests using a real k8s cluster (e.g., kind) |
+| No automated browser test suite | The current E2E target verifies build/deploy/readiness, not browser interactions | `Makefile` `e2e` target; `services/frontend-ui/package.json` | UI regressions require manual validation | Add Playwright coverage for critical incident and assessment flows |
 | `handler/internal.go` is high-churn and large | Receives evidence, stores in DB, creates analysis request, dispatches LLM goroutine — multiple responsibilities | `services/backend-api/handler/internal.go` (7 churn events in 90 days) | Hard to test in isolation; changes here risk breaking the core pipeline | Extract LLM dispatch into a separate package |
 | ConfigMap value redaction not verified | Documented in `project-description.md` as implemented; actual code not read during investigation | `services/diagnostics-worker/collector/` | If not implemented, sensitive ConfigMap values may reach LLM prompts | Verify and add a test for redaction logic |
 | No formatter enforced for Python or TypeScript | Not configured | `services/llm-gateway/`, `services/frontend-ui/src/` | Style drift over time | Add `ruff` (Python) and `prettier` (TypeScript) with CI enforcement |
@@ -36,7 +37,7 @@
 | Risk | OWASP category | Evidence | Current mitigation | Gap |
 |------|----------------|----------|--------------------|-----|
 | Unauthenticated internal endpoint | A01 (Broken Access Control) | `services/backend-api/main.go` `/internal` route — no middleware | Network isolation (cluster-internal DNS only) | No explicit network policy in Helm chart; any cluster workload can call it |
-| JWT in WebSocket URL | A02 (Cryptographic Failures / A07 Identification and Authentication Failures) | `services/frontend-ui/src/useWebSocket.ts` | HTTPS required for production (nginx configured) | Token may appear in access logs on proxy; browser history |
+| JWT in WebSocket URL | A02 (Cryptographic Failures / A07 Identification and Authentication Failures) | `services/frontend-ui/src/store/middleware/wsMiddleware.ts` | HTTPS required for production (nginx configured) | Token may appear in proxy access logs |
 | Full evidence/prompt logged at INFO | A09 (Security Logging and Monitoring Failures) | `services/llm-gateway/app/routes.py` | Pod log access requires RBAC | Pod logs accessible to anyone with `kubectl logs` RBAC; sensitive data in CloudWatch/Loki if log forwarding is active |
 | Log lines collected without redaction | A02 (Sensitive Data Exposure) | `docs/project-description.md`: "Log lines are collected as-is; redaction of secrets in logs is a post-MVP concern" | Secret values never collected (only metadata) | Secrets injected into logs by applications are not redacted |
 | Admin password in Kubernetes Secret (plaintext value) | A02 | `services/backend-api/startup/admin_bootstrap.go` — Secret contains generated password | bcrypt-hashed in DB | The Kubernetes Secret itself stores the plaintext password; anyone with `get secret kubechan-admin-credentials` RBAC can read it |
@@ -61,8 +62,8 @@
 | `.github/workflows/ci.yml` | CI pipeline evolved across all phases; coverage thresholds, badge publishing, multi-language build | 17 commits in 90 days (highest in repo) | Test changes in a branch PR; keep job names stable for artifact upload |
 | `services/backend-api/main.go` | Wire-up of all dependencies; router configuration; every new handler requires a change here | 8 commits in 90 days | Extract handler registration into a setup function; changes require full integration test |
 | `services/backend-api/handler/internal.go` | Receives evidence, stores results, dispatches LLM goroutine — multiple responsibilities in one file | 7 commits in 90 days | Extract LLM dispatch into a dedicated package |
-| `services/frontend-ui/src/IncidentList.tsx` | Primary UI component; new incident features land here | 7 commits in 90 days | Add snapshot or interaction tests |
-| `services/frontend-ui/src/api.ts` | All API call logic; changes with every new endpoint | 7 commits in 90 days | Keep API client thin; avoid business logic here |
+| `services/frontend-ui/src/pages/incidents/IncidentList.tsx` | Primary incident operations UI | Historical churn; verify with `git log` | Add interaction tests before large workflow changes |
+| `services/frontend-ui/src/store/api/` | Endpoint modules and cache tags drive most server-state behavior | Changes affect fetching and WebSocket invalidation | Keep transport code free of presentation business logic |
 | `api/v1alpha1/zz_generated.deepcopy.go` | Generated; must stay in sync with type changes | 7 commits in 90 days | Always run `make generate` after editing `api/v1alpha1/`; CI enforces this |
 
 ---
@@ -73,10 +74,8 @@
 2. **[ASK USER]** Should the `/internal/evidence` endpoint be secured with a network policy, a shared token, or mTLS? What is the current cluster network policy posture?
 3. **[ASK USER]** Is the full prompt/response logging in `llm-gateway` intentional for debugging, or should it be gated behind a debug flag? Logs may contain sensitive workload data.
 4. **[ASK USER]** What is the intended deployment topology? Single-replica only, or HA? This affects WebSocket Hub, SQLite, and LLM dispatch design.
-5. **[ASK USER]** ConfigMap value redaction: has this been implemented in `diagnostics-worker/collector/`? The project description says it is implemented, but it was not verified in source code during this investigation.
-6. **[ASK USER]** How are GitHub Copilot credentials obtained and stored for per-user LLM settings? The `llm_settings.go` handler was not read in detail.
-7. **[ASK USER]** Are there plans to add ESLint/Prettier for TypeScript and ruff for Python, or is current style discipline team-enforced?
-8. **[ASK USER]** The `make e2e` target exists but appears to be a stub. Is there a timeline for implementing E2E tests?
+5. **[ASK USER]** Are there plans to add ESLint/Prettier for TypeScript and ruff for Python, or is current style discipline team-enforced?
+6. **[ASK USER]** Should browser-level tests run against the kind/Tilt environment in CI or only in a dedicated integration workflow?
 
 ---
 
@@ -84,7 +83,7 @@
 
 - `docs/codebase/.codebase-scan.txt` — HIGH-CHURN FILES section (top 20 files, last 90 days)
 - `services/backend-api/main.go` — `/internal` route without auth middleware
-- `services/frontend-ui/src/useWebSocket.ts` — JWT in URL query param
+- `services/frontend-ui/src/store/middleware/wsMiddleware.ts` — JWT in URL query param
 - `services/llm-gateway/app/routes.py` — full prompt/response at INFO log level
 - `services/backend-api/db/db.go` — WAL pragma, single-writer SQLite
 - `services/backend-api/db/migrations/001_init.sql` — `payload TEXT NOT NULL` unbounded

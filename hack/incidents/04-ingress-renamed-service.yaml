@@ -1,0 +1,50 @@
+# Level 4: Ingress still references an old Service name; the replacement is deterministic.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubechan-incident-04
+  labels: {kubechan.io/test-incident: "04"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storefront
+  namespace: kubechan-incident-04
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: storefront}}
+  template:
+    metadata: {labels: {app: storefront}}
+    spec:
+      containers:
+        - name: storefront
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args: ["echo 'FATAL route table failed to load'; exit 1"]
+          ports: [{name: http, containerPort: 80}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storefront-web
+  namespace: kubechan-incident-04
+  annotations: {kubechan.io/renamed-from: storefront}
+spec:
+  selector: {app: storefront}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: storefront
+  namespace: kubechan-incident-04
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: incident-04.kubechan.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: storefront, port: {number: 80}}

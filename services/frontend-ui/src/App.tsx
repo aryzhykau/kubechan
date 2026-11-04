@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createBrowserRouter, RouterProvider, Navigate, Outlet, useNavigate, NavLink } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Navigate, Outlet, useNavigate, useLocation, NavLink } from 'react-router-dom'
 import { Box, CircularProgress, Button, Tooltip, Avatar, Chip, IconButton } from '@mui/material'
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined'
 import ListAltIcon from '@mui/icons-material/ListAlt'
@@ -9,6 +9,7 @@ import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined'
 import LogoutIcon from '@mui/icons-material/Logout'
 import SearchIcon from '@mui/icons-material/Search'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import CloudQueueOutlinedIcon from '@mui/icons-material/CloudQueueOutlined'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import CircleNotificationsOutlinedIcon from '@mui/icons-material/CircleNotificationsOutlined'
@@ -27,7 +28,7 @@ import { ExclusionRuleModal } from './pages/exclusion-rules/ExclusionRuleModal'
 import { useAppDispatch, useAppSelector } from './store/hooks'
 import { setUser, clearUser, selectCurrentUser } from './store/slices/authSlice'
 import { selectKubeChan, selectMoodLevel } from './store/slices/kubechanSlice'
-import { closeManualModal, selectUI } from './store/slices/uiSlice'
+import { closeManualModal, openManualModal, selectUI } from './store/slices/uiSlice'
 import { useMeQuery } from './store/api/authApi'
 import { incidentsApi } from './store/api/incidentsApi'
 import { useKubeChan } from './hooks/useKubeChan'
@@ -41,7 +42,8 @@ import './app.css'
 function AuthGate({ children }: { children: React.ReactNode }) {
   const dispatch  = useAppDispatch()
   const current   = useAppSelector(selectCurrentUser)
-  const { data: me, isLoading, isError } = useMeQuery()
+  const hasToken = Boolean(getToken())
+  const { data: me, isLoading, isError } = useMeQuery(undefined, { skip: !hasToken })
 
   useEffect(() => {
     if (me)      dispatch(setUser(me))
@@ -71,16 +73,41 @@ const NAV_ITEMS = [
   { to: '/llm-settings',     label: 'LLM',             section: 'Manage',    icon: <SmartToyOutlinedIcon sx={{ fontSize: '1.05rem' }} />, end: false },
 ]
 
+const ASSISTANT_OPEN_KEY = 'kubechan:assistant-open'
+
+function readAssistantOpen() {
+  try {
+    return window.localStorage.getItem(ASSISTANT_OPEN_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
 function AppShell() {
   const dispatch    = useAppDispatch()
+  const isIncidentInbox = useLocation().pathname === '/'
   const kubechan    = useAppSelector(selectKubeChan)
   const moodLevel   = useAppSelector(selectMoodLevel)
   const ui          = useAppSelector(selectUI)
   const navigate    = useNavigate()
   const currentUser = useAppSelector(selectCurrentUser)
-  const [assistantOpen, setAssistantOpen] = useState(true)
+  const [assistantOpen, setAssistantOpen] = useState(readAssistantOpen)
 
-  const { triggerChatter, handleAnalysisStart, handleAnalysisComplete, handleRunResultLoaded, handleRate, handlePoke, handleDismiss } = useKubeChan()
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(ASSISTANT_OPEN_KEY, String(assistantOpen))
+    } catch { /* Browsers may block storage; the panel still works for this session. */ }
+  }, [assistantOpen])
+
+  useEffect(() => {
+    const syncAssistantOpen = (event: StorageEvent) => {
+      if (event.key === ASSISTANT_OPEN_KEY) setAssistantOpen(event.newValue === 'true')
+    }
+    window.addEventListener('storage', syncAssistantOpen)
+    return () => window.removeEventListener('storage', syncAssistantOpen)
+  }, [])
+
+  const { triggerChatter, handleAnalysisStart, handleAnalysisComplete, handleAnalysisFailed, handleRunResultLoaded, handleRate, handlePoke, handleDismiss } = useKubeChan()
 
   return (
     <div className="app">
@@ -148,7 +175,27 @@ function AppShell() {
       </aside>
 
       <div className="app-workspace">
-        <header className="app-context-bar">
+        <header className={`app-context-bar${isIncidentInbox ? ' incident-context-bar' : ''}`}>
+          {isIncidentInbox ? <>
+            <span className="incident-top-brand">KubeChan</span>
+            <span className="incident-top-crumb">/ Incidents</span>
+            <span className="incident-top-cluster">argocd-course</span>
+            <span className="incident-top-spacer" />
+            <button className="incident-top-search" type="button" onClick={() => document.getElementById('incident-search')?.focus()}>
+              <SearchIcon fontSize="small" /> Search incidents
+            </button>
+            <Tooltip title="Refresh incidents">
+              <IconButton className="incident-top-refresh" aria-label="Refresh incidents" size="small" onClick={() => window.dispatchEvent(new Event('kubechan:refresh-incidents'))}>
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Button className="incident-top-report" size="small" variant="contained" onClick={() => dispatch(openManualModal())}>+ Report issue</Button>
+            <Tooltip title={assistantOpen ? 'Close KubeChan assistant' : 'Open KubeChan assistant'}>
+              <IconButton className={`incident-top-assistant${assistantOpen ? ' active' : ''}`} aria-label={assistantOpen ? 'Close KubeChan assistant' : 'Open KubeChan assistant'} aria-expanded={assistantOpen} aria-controls="kubechan-assistant-panel" size="small" onClick={() => setAssistantOpen(open => !open)}>
+                <SmartToyOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </> : <>
           <button className="context-scope context-scope--primary" type="button">
             <span className="context-scope-icon"><CloudQueueOutlinedIcon /></span>
             <span>
@@ -177,12 +224,16 @@ function AppShell() {
           <Tooltip title={assistantOpen ? 'Close KubeChan assistant' : 'Open KubeChan assistant'}>
             <IconButton
               className={`context-icon-button assistant-toggle ${assistantOpen ? 'active' : ''}`}
+              aria-label={assistantOpen ? 'Close KubeChan assistant' : 'Open KubeChan assistant'}
+              aria-expanded={assistantOpen}
+              aria-controls="kubechan-assistant-panel"
               size="small"
               onClick={() => setAssistantOpen(open => !open)}
             >
               <SmartToyOutlinedIcon />
             </IconButton>
           </Tooltip>
+          </>}
         </header>
 
         {/* ── Body: main + optional KubeChan assistant ── */}
@@ -192,7 +243,7 @@ function AppShell() {
           </main>
 
           {assistantOpen && (
-            <div className="assistant-panel">
+            <div id="kubechan-assistant-panel" className={`assistant-panel${isIncidentInbox ? ' assistant-panel--inbox' : ''}`} role="complementary" aria-label="KubeChan assistant">
               <div className="assistant-panel-header">
                 <div>
                   <span className="assistant-eyebrow">AI investigation</span>
@@ -218,7 +269,7 @@ function AppShell() {
             dispatch(closeManualModal())
             handleAnalysisStart(incidentId)
             waitForAnalysis(diagnosticRunId).then(ok => {
-              if (!ok) return
+              if (!ok) { handleAnalysisFailed(incidentId); return }
               const token = getToken()
               const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
               fetch(`/api/v1/diagnosticruns/${encodeURIComponent(diagnosticRunId)}/analysisresult`, { headers })

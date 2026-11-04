@@ -13,7 +13,7 @@ import {
   useGetLLMModelsQuery,
 } from '../../store/api/adminApi'
 
-type Provider   = 'bedrock' | 'copilot'
+type Provider   = 'bedrock' | 'copilot' | 'openai' | 'anthropic'
 type AuthMethod = 'bearer'  | 'iam'
 
 interface BedrockCreds {
@@ -50,6 +50,8 @@ export function LLMSettingsPage() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [bedrock, setBedrock]         = useState<BedrockCreds>({ ...BEDROCK_DEFAULT })
   const [copilot, setCopilot]         = useState<CopilotCreds>({ ...COPILOT_DEFAULT })
+  const [apiKey, setApiKey] = useState('')
+  const [apiModel, setApiModel] = useState('gpt-4.1')
 
   // Populate form when settings load
   useEffect(() => {
@@ -58,6 +60,8 @@ export function LLMSettingsPage() {
     const f  = (settings.credFields ?? {}) as Record<string, unknown>
     setProvider(p)
     setConfigured(settings.configured)
+    setApiKey('')
+    setApiModel(credStr(f, 'modelId') || (p === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4.1'))
 
     if (p === 'bedrock') {
       const hasIam = 'accessKeyId' in f
@@ -81,7 +85,20 @@ export function LLMSettingsPage() {
   const models = modelsData?.providers ?? {}
   const copilotModels = (models['copilot'] ?? []) as { id: string; label: string }[]
   const bedrockModels = (models['bedrock'] ?? []) as { id: string; label: string }[]
-  const secretPlaceholder = configured ? '(stored — leave blank to keep)' : ''
+  const openaiModels = (models['openai'] ?? []) as { id: string; label: string }[]
+  const anthropicModels = (models['anthropic'] ?? []) as { id: string; label: string }[]
+  const selectedModels = provider === 'bedrock' ? bedrockModels
+    : provider === 'copilot' ? copilotModels
+      : provider === 'openai' ? openaiModels : anthropicModels
+  const selectedModel = provider === 'bedrock' ? bedrock.modelId
+    : provider === 'copilot' ? copilot.modelId : apiModel
+  const secretPlaceholder = configured && settings?.provider === provider ? '(stored — leave blank to keep)' : ''
+
+  function updateModelId(value: string) {
+    if (provider === 'bedrock') setBedrock(current => ({ ...current, modelId: value }))
+    else if (provider === 'copilot') setCopilot(current => ({ ...current, modelId: value }))
+    else setApiModel(value)
+  }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -90,6 +107,9 @@ export function LLMSettingsPage() {
     if (provider === 'copilot') {
       creds.modelId = copilot.modelId
       if (copilot.token) creds.token = copilot.token
+    } else if (provider === 'openai' || provider === 'anthropic') {
+      creds.modelId = selectedModel
+      if (apiKey) creds.apiKey = apiKey
     } else {
       creds.region  = bedrock.region
       creds.modelId = bedrock.modelId
@@ -124,7 +144,7 @@ export function LLMSettingsPage() {
         Secret fields are never returned — leave them blank to keep the stored value.
       </Typography>
 
-      {configured && (
+      {configured && settings?.provider === provider && (
         <Chip icon={<CheckCircleIcon />} label="Provider configured" color="success" size="small" sx={{ mb: 2 }} />
       )}
 
@@ -136,7 +156,16 @@ export function LLMSettingsPage() {
 
           <FormControl fullWidth size="small">
             <InputLabel>Provider</InputLabel>
-            <Select value={provider} label="Provider" onChange={e => { setProvider(e.target.value as Provider); setError(''); setSuccess('') }}>
+            <Select value={provider} label="Provider" onChange={e => {
+              const next = e.target.value as Provider
+              setProvider(next)
+              setApiKey('')
+              if (next === 'openai') setApiModel('gpt-4.1')
+              if (next === 'anthropic') setApiModel('claude-sonnet-4-6')
+              setError(''); setSuccess('')
+            }}>
+              <MenuItem value="openai">OpenAI API</MenuItem>
+              <MenuItem value="anthropic">Anthropic API</MenuItem>
               <MenuItem value="bedrock">AWS Bedrock</MenuItem>
               <MenuItem value="copilot">GitHub Copilot</MenuItem>
             </Select>
@@ -144,17 +173,15 @@ export function LLMSettingsPage() {
 
           <Divider />
 
+          <TextField
+            label="Model ID" size="small" value={selectedModel}
+            onChange={e => updateModelId(e.target.value)} fullWidth
+            helperText={selectedModels.length ? `Examples: ${selectedModels.slice(0, 4).map(m => m.id).join(', ')}. You can enter another model enabled for your account.` : 'Enter a model ID enabled for your account.'}
+          />
+
           {provider === 'bedrock' && (
             <>
               <TextField label="AWS Region" size="small" placeholder="us-east-1" value={bedrock.region} onChange={e => setBedrock(b => ({ ...b, region: e.target.value }))} fullWidth />
-
-              <FormControl fullWidth size="small">
-                <InputLabel>Model</InputLabel>
-                <Select value={bedrock.modelId} label="Model" onChange={e => setBedrock(b => ({ ...b, modelId: e.target.value }))}>
-                  {bedrockModels.map(m => <MenuItem key={m.id} value={m.id}>{m.label}</MenuItem>)}
-                  {bedrockModels.length === 0 && <MenuItem value={bedrock.modelId}>{bedrock.modelId}</MenuItem>}
-                </Select>
-              </FormControl>
 
               <Box>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Authentication</Typography>
@@ -203,13 +230,17 @@ export function LLMSettingsPage() {
             <>
               <TextField label="GitHub Token" type="password" size="small" placeholder={secretPlaceholder || 'github_pat_…'}
                 value={copilot.token} onChange={e => setCopilot(c => ({ ...c, token: e.target.value }))} autoComplete="new-password" fullWidth />
-              <FormControl fullWidth size="small">
-                <InputLabel>Model</InputLabel>
-                <Select value={copilot.modelId} label="Model" onChange={e => setCopilot(c => ({ ...c, modelId: e.target.value }))}>
-                  {copilotModels.map(m => <MenuItem key={m.id} value={m.id}>{m.label}</MenuItem>)}
-                  {copilotModels.length === 0 && <MenuItem value={copilot.modelId}>{copilot.modelId}</MenuItem>}
-                </Select>
-              </FormControl>
+            </>
+          )}
+
+          {(provider === 'openai' || provider === 'anthropic') && (
+            <>
+              <TextField
+                label={provider === 'openai' ? 'OpenAI API key' : 'Anthropic API key'}
+                type="password" size="small" placeholder={secretPlaceholder || (provider === 'openai' ? 'sk-…' : 'sk-ant-…')}
+                value={apiKey} onChange={e => setApiKey(e.target.value)}
+                autoComplete="new-password" required={!secretPlaceholder} fullWidth
+              />
             </>
           )}
 

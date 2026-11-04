@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Button, IconButton, Typography, Box, Stack, Chip,
+  Button, IconButton, Typography, Box, Stack, FormControlLabel, Checkbox,
   CircularProgress, Alert, Fade,
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
@@ -13,6 +13,13 @@ import { ResourcePicker, type ResourceEntry } from '../../components/ResourcePic
 import type { SuggestedResource } from '../../api/index'
 
 interface RelatedEntry { id: number; namespace: string; kind: string; apiGroup: string; name: string; evidenceSlices: string[] }
+
+const EVIDENCE_SLICES = ['spec', 'status', 'conditions', 'events', 'labels', 'annotations', 'ownerRefs']
+const WORKLOAD_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet', 'Pod', 'Job'])
+
+function defaultEvidenceSlices(kind: string) {
+  return [...EVIDENCE_SLICES.slice(0, 5), ...(WORKLOAD_KINDS.has(kind) ? ['logs', 'metrics'] : [])]
+}
 
 export interface AugmentIncidentModalProps {
   incidentId: string
@@ -36,7 +43,7 @@ export function AugmentIncidentModal({ incidentId, defaultNamespace = '', sugges
 
   function commitResource() {
     if (!pendingEntry || added.length >= 5) return
-    setAdded(prev => [...prev, { id: ++_rowId, ...pendingEntry }])
+    setAdded(prev => [...prev, { id: ++_rowId, ...pendingEntry, evidenceSlices: [...pendingEntry.evidenceSlices] }])
     setPendingEntry(null)
     setPickerKey(k => k + 1)
   }
@@ -65,32 +72,32 @@ export function AugmentIncidentModal({ incidentId, defaultNamespace = '', sugges
     <Dialog
       open
       onClose={onClose}
-      maxWidth="sm"
+      maxWidth="md"
       fullWidth
       slots={{ transition: Fade }}
       slotProps={{ transition: { timeout: 180 } }}
     >
       <DialogTitle sx={{
         px: 3, pt: 2.5, pb: 2,
-        background: 'linear-gradient(135deg, rgba(245,158,11,0.12) 0%, rgba(99,102,241,0.06) 100%)',
+        background: 'background.paper',
         borderBottom: '1px solid',
         borderColor: 'divider',
         display: 'flex', alignItems: 'flex-start', gap: 1.5,
       }}>
         <Box sx={{
-          mt: 0.2, width: 36, height: 36, borderRadius: '10px',
-          background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+          mt: 0.2, width: 32, height: 32, borderRadius: 0,
+          background: 'rgba(213,166,74,0.12)', border: '1px solid rgba(213,166,74,0.45)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 4px 14px rgba(245,158,11,0.35)', flexShrink: 0,
+          flexShrink: 0,
         }}>
-          <HelpIcon sx={{ fontSize: '1.15rem', color: '#fff' }} />
+          <HelpIcon sx={{ fontSize: '1rem', color: '#f0d28b' }} />
         </Box>
         <Box sx={{ flex: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.25 }}>
             Add more context
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.3, display: 'block', lineHeight: 1.4 }}>
-            KubeChan asked for more evidence — add resources and trigger a new analysis
+            Attach resources to this incident and trigger a new evidence snapshot and analysis
           </Typography>
         </Box>
         <IconButton size="small" onClick={onClose} sx={{ mt: 0.2 }}>
@@ -98,17 +105,23 @@ export function AugmentIncidentModal({ incidentId, defaultNamespace = '', sugges
         </IconButton>
       </DialogTitle>
 
-      <DialogContent sx={{ px: 3, py: 3, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+      <DialogContent sx={{ px: 3, py: 2.5, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
         {suggestions.length > 0 && (
           <Box>
             <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, mb: 1, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              KubeChan suggests
+              Suggested by KubeChan
             </Typography>
             <Stack spacing={1}>
               {suggestions.map((s, i) => (
-                <Box key={i} sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
-                  <Chip label={s.kind} size="small" sx={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24', flexShrink: 0 }} />
-                  <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.45 }}>{s.reason}</Typography>
+                <Box key={`${s.kind}-${i}`} sx={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 1.5, alignItems: 'start', py: 0.5 }}>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'baseline', minWidth: 0 }}>
+                    <Typography variant="caption" sx={{ color: '#f0d28b', fontWeight: 700, flexShrink: 0 }}>{s.kind}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.45 }}>{s.reason}</Typography>
+                  </Box>
+                  <Button size="small" variant="outlined" disabled={added.length >= 5 || pendingEntry?.kind === s.kind} onClick={() => {
+                    setPendingEntry({ namespace: defaultNamespace || namespaces[0] || '', kind: s.kind, apiGroup: '', name: '', evidenceSlices: defaultEvidenceSlices(s.kind) })
+                    setPickerKey(k => k + 1)
+                  }}>Choose resource</Button>
                 </Box>
               ))}
             </Stack>
@@ -121,8 +134,8 @@ export function AugmentIncidentModal({ incidentId, defaultNamespace = '', sugges
           </Box>
         ) : (
           <Box>
-            <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, mb: 1, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              Add resource
+              <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, mb: 1, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              {pendingEntry?.kind ? `Choose ${pendingEntry.kind}` : 'Add a different resource'}
             </Typography>
             <ResourcePicker
               key={pickerKey}
@@ -139,19 +152,40 @@ export function AugmentIncidentModal({ incidentId, defaultNamespace = '', sugges
           </Box>
         )}
 
-        {added.length > 0 && (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8 }}>
-            {added.map(r => (
-              <Chip
-                key={r.id}
-                label={`${r.apiGroup ? r.apiGroup + '/' : ''}${r.kind}/${r.name}`}
-                size="small"
-                onDelete={() => setAdded(prev => prev.filter(x => x.id !== r.id))}
-                sx={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}
-              />
-            ))}
+        <Box>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: 1, borderTop: '1px solid', borderColor: 'divider', pt: 1.5 }}>
+            <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Added to next run</Typography>
+            <Typography variant="caption" color="text.secondary">{added.length} / 5 resources</Typography>
           </Box>
-        )}
+          {added.length === 0 ? <Typography variant="caption" color="text.secondary">No resources added yet.</Typography> : (
+            <Stack spacing={0.75}>
+              {added.map(r => {
+                const slices = [...EVIDENCE_SLICES, ...(WORKLOAD_KINDS.has(r.kind) ? ['logs', 'metrics'] : [])]
+                return <Box key={r.id} sx={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 1, p: 1.25, border: '1px solid', borderColor: 'divider', bgcolor: 'rgba(255,255,255,0.015)' }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" sx={{ fontSize: '0.82rem', fontWeight: 700, overflowWrap: 'anywhere' }}>{r.kind}/{r.name}</Typography>
+                    <Typography variant="caption" color="text.secondary">{r.namespace}{r.apiGroup ? ` · ${r.apiGroup}` : ''}</Typography>
+                    <Box sx={{ mt: 0.5, borderTop: '1px solid', borderColor: 'divider', pt: 0.5 }}>
+                      <Typography component="div" variant="caption" sx={{ color: '#f0d28b', fontSize: '0.7rem' }}>
+                        Evidence for this resource · {r.evidenceSlices.length} selected
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 1, rowGap: 0, mt: 0.25 }}>
+                        {slices.map(slice => <FormControlLabel key={slice} sx={{ mr: 0.5, my: -0.25, '& .MuiFormControlLabel-label': { fontSize: '0.7rem', color: 'text.secondary' } }}
+                          control={<Checkbox size="small" checked={r.evidenceSlices.includes(slice)} onChange={() => setAdded(prev => prev.map(entry => entry.id !== r.id ? entry : { ...entry, evidenceSlices: entry.evidenceSlices.includes(slice) ? entry.evidenceSlices.filter(value => value !== slice) : [...entry.evidenceSlices, slice] }))} sx={{ p: 0.5, '& .MuiSvgIcon-root': { fontSize: 16 } }} />}
+                          label={slice} />)}
+                      </Box>
+                    </Box>
+                  </Box>
+                  <Button size="small" color="inherit" onClick={() => setAdded(prev => prev.filter(x => x.id !== r.id))} aria-label={`Remove ${r.kind}/${r.name}`}>Remove</Button>
+                </Box>
+              })}
+            </Stack>
+          )}
+        </Box>
+
+        <Alert severity="info" sx={{ fontSize: '0.78rem' }}>
+          Evidence is configured independently for each resource. A new immutable run will be created; workloads are not changed. Secret values are never collected.
+        </Alert>
 
         {submitError && <Alert severity="error" sx={{ fontSize: '0.78rem' }}>{submitError}</Alert>}
       </DialogContent>

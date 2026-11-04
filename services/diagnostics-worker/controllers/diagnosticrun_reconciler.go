@@ -10,13 +10,17 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -54,6 +58,10 @@ type DiagnosticRunReconciler struct {
 	LogTailLines     int64
 	PrevLogLines     int64
 	CollectorVersion string
+}
+
+type relatedResourceEntry struct {
+	kind, namespace, name, apiGroup, origin string
 }
 
 func (r *DiagnosticRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -222,7 +230,7 @@ func (r *DiagnosticRunReconciler) collect(
 	ev.RootResourceEvents = rootEvents
 
 	// Collect pods owned by the root resource (in its actual namespace).
-	pods, pvcs, err := r.collectWorkloadPodLogs(ctx, rootNS, inc.Spec.RootResource.Name)
+	pods, pvcs, err := r.collectWorkloadPodLogs(ctx, ev.RootResource)
 	if err != nil {
 		errs = append(errs, fmt.Sprintf("pod logs for workload %s: %s", inc.Spec.RootResource.Name, err))
 	}
@@ -236,9 +244,11 @@ func (r *DiagnosticRunReconciler) collect(
 	// start with user-tagged ones, then auto-discover Ingresses in the root namespace.
 	type rrKey struct{ kind, ns, name string }
 	seen := map[rrKey]bool{}
+	var toCollect []relatedResourceEntry
 
-	type rrEntry struct{ kind, ns, name, apiGroup string }
-	var toCollect []rrEntry
+	rootEntry := relatedResourceEntry{kind: inc.Spec.RootResource.Kind, namespace: rootNS, name: inc.Spec.RootResource.Name, apiGroup: inc.Spec.RootResource.APIGroup, origin: "root"}
+	seen[rrKey{rootEntry.kind, rootEntry.namespace, rootEntry.name}] = true
+	toCollect = append(toCollect, rootEntry)
 
 	for _, rr := range inc.Spec.RelatedResources {
 		rrNS := rr.Namespace
@@ -248,7 +258,17 @@ func (r *DiagnosticRunReconciler) collect(
 		k := rrKey{rr.Kind, rrNS, rr.Name}
 		if !seen[k] {
 			seen[k] = true
-			toCollect = append(toCollect, rrEntry{rr.Kind, rrNS, rr.Name, rr.APIGroup})
+			toCollect = append(toCollect, relatedResourceEntry{kind: rr.Kind, namespace: rrNS, name: rr.Name, apiGroup: rr.APIGroup, origin: "explicit"})
+		}
+	}
+
+	automatic, discoveryErrors := r.discoverApplicationResources(ctx, ev.RootResource)
+	errs = append(errs, discoveryErrors...)
+	for _, rr := range automatic {
+		k := rrKey{rr.kind, rr.namespace, rr.name}
+		if !seen[k] {
+			seen[k] = true
+			toCollect = append(toCollect, rr)
 		}
 	}
 
@@ -261,7 +281,7 @@ func (r *DiagnosticRunReconciler) collect(
 				k := rrKey{"Ingress", rootNS, ing.Name}
 				if !seen[k] {
 					seen[k] = true
-					toCollect = append(toCollect, rrEntry{"Ingress", rootNS, ing.Name, ""})
+					toCollect = append(toCollect, relatedResourceEntry{kind: "Ingress", namespace: rootNS, name: ing.Name, apiGroup: "networking.k8s.io", origin: "automatic"})
 				}
 			}
 		} else {
@@ -272,15 +292,16 @@ func (r *DiagnosticRunReconciler) collect(
 	// Collect events + spec for each related resource.
 	for _, rr := range toCollect {
 		rre := collector.RelatedResourceEvidence{
-			Resource: collector.ResourceRef{Kind: rr.kind, Name: rr.name, Namespace: rr.ns, APIGroup: rr.apiGroup},
+			Resource:        collector.ResourceRef{Kind: rr.kind, Name: rr.name, Namespace: rr.namespace, APIGroup: rr.apiGroup},
+			DiscoveryOrigin: rr.origin,
 		}
-		events, err := r.collectEvents(ctx, rr.ns, rr.kind, rr.name)
+		events, err := r.collectEvents(ctx, rr.namespace, rr.kind, rr.name)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("events for related %s/%s: %s", rr.kind, rr.name, err))
 		}
 		rre.Events = events
-		spec, err := r.collectResourceSpec(ctx, rr.ns, rr.kind, rr.name, rr.apiGroup)
-		if err != nil {
+		spec, err := r.collectResourceSpec(ctx, rr.namespace, rr.kind, rr.name, rr.apiGroup)
+		if err != nil && !(rr.origin == "root" && apierrors.IsNotFound(err)) {
 			errs = append(errs, fmt.Sprintf("spec for related %s/%s: %s", rr.kind, rr.name, err))
 		}
 		rre.Spec = spec
@@ -291,6 +312,285 @@ func (r *DiagnosticRunReconciler) collect(
 	ev.Sources = collector.BuildSourceCatalog(ev)
 	ev.Graph = graphengine.Build(ev)
 	return ev, errs
+}
+
+type workloadDiscoveryInfo struct {
+	ref            collector.ResourceRef
+	templateLabels map[string]string
+	dependencies   []collector.ResourceRef
+}
+
+// discoverApplicationResources performs a bounded, namespace-local discovery
+// pass. It uses literal references first and partial selector compatibility
+// only to bridge an otherwise empty Service/workload relationship.
+func (r *DiagnosticRunReconciler) discoverApplicationResources(ctx context.Context, root collector.ResourceRef) ([]relatedResourceEntry, []string) {
+	ns := root.Namespace
+	if ns == "" {
+		return nil, nil
+	}
+	var errs []string
+	var deployments appsv1.DeploymentList
+	var statefulSets appsv1.StatefulSetList
+	var daemonSets appsv1.DaemonSetList
+	var services corev1.ServiceList
+	var ingresses networkingv1.IngressList
+	var hpas autoscalingv2.HorizontalPodAutoscalerList
+	var endpointSlices discoveryv1.EndpointSliceList
+	for label, list := range map[string]client.ObjectList{
+		"deployments":    &deployments,
+		"statefulsets":   &statefulSets,
+		"daemonsets":     &daemonSets,
+		"services":       &services,
+		"ingresses":      &ingresses,
+		"hpas":           &hpas,
+		"endpointslices": &endpointSlices,
+	} {
+		if err := r.List(ctx, list, client.InNamespace(ns)); err != nil {
+			errs = append(errs, fmt.Sprintf("discover %s in %s: %s", label, ns, err))
+		}
+	}
+
+	workloads := make([]workloadDiscoveryInfo, 0, len(deployments.Items)+len(statefulSets.Items)+len(daemonSets.Items))
+	for _, item := range deployments.Items {
+		workloads = append(workloads, workloadDiscoveryInfo{ref: collector.ResourceRef{APIGroup: "apps", Kind: "Deployment", Namespace: ns, Name: item.Name}, templateLabels: item.Spec.Template.Labels, dependencies: templateDependencyRefs(ns, item.Spec.Template.Spec)})
+	}
+	for _, item := range statefulSets.Items {
+		workloads = append(workloads, workloadDiscoveryInfo{ref: collector.ResourceRef{APIGroup: "apps", Kind: "StatefulSet", Namespace: ns, Name: item.Name}, templateLabels: item.Spec.Template.Labels, dependencies: templateDependencyRefs(ns, item.Spec.Template.Spec)})
+	}
+	for _, item := range daemonSets.Items {
+		workloads = append(workloads, workloadDiscoveryInfo{ref: collector.ResourceRef{APIGroup: "apps", Kind: "DaemonSet", Namespace: ns, Name: item.Name}, templateLabels: item.Spec.Template.Labels, dependencies: templateDependencyRefs(ns, item.Spec.Template.Spec)})
+	}
+	sort.Slice(workloads, func(i, j int) bool {
+		if workloads[i].ref.Kind != workloads[j].ref.Kind {
+			return workloads[i].ref.Kind < workloads[j].ref.Kind
+		}
+		return workloads[i].ref.Name < workloads[j].ref.Name
+	})
+
+	selectedServices := map[string]bool{}
+	selectedWorkloads := map[string]bool{}
+	selectWorkload := func(kind, name string) {
+		selectedWorkloads[strings.ToLower(kind)+"/"+name] = true
+	}
+	if isControllerKind(root.Kind) {
+		selectWorkload(root.Kind, root.Name)
+	}
+	if root.Kind == "Service" {
+		selectedServices[root.Name] = true
+	}
+	if root.Kind == "Ingress" {
+		for _, ingress := range ingresses.Items {
+			if ingress.Name != root.Name {
+				continue
+			}
+			for _, rule := range ingress.Spec.Rules {
+				if rule.HTTP == nil {
+					continue
+				}
+				for _, path := range rule.HTTP.Paths {
+					if path.Backend.Service != nil {
+						selectedServices[path.Backend.Service.Name] = true
+					}
+				}
+			}
+		}
+	}
+	if root.Kind == "HorizontalPodAutoscaler" {
+		for _, hpa := range hpas.Items {
+			if hpa.Name == root.Name {
+				selectWorkload(hpa.Spec.ScaleTargetRef.Kind, hpa.Spec.ScaleTargetRef.Name)
+			}
+		}
+	}
+	if root.Kind == "ConfigMap" || root.Kind == "Secret" || root.Kind == "PersistentVolumeClaim" {
+		for _, workload := range workloads {
+			for _, dep := range workload.dependencies {
+				if dep.Kind == root.Kind && dep.Name == root.Name {
+					selectWorkload(workload.ref.Kind, workload.ref.Name)
+				}
+			}
+		}
+	}
+
+	// Resolve Service selectors and reverse-selecting Services to a fixed point.
+	for pass := 0; pass < 3; pass++ {
+		for _, service := range services.Items {
+			if selectedServices[service.Name] {
+				for _, workload := range workloads {
+					score, matched, _ := graphengine.SelectorInferenceScore(service.Spec.Selector, workload.templateLabels)
+					if score >= graphengine.DefaultPolicy().PossibleThreshold && len(matched) > 0 {
+						selectWorkload(workload.ref.Kind, workload.ref.Name)
+					}
+				}
+			}
+			for _, workload := range workloads {
+				if !selectedWorkloads[strings.ToLower(workload.ref.Kind)+"/"+workload.ref.Name] {
+					continue
+				}
+				score, matched, _ := graphengine.SelectorInferenceScore(service.Spec.Selector, workload.templateLabels)
+				if score >= graphengine.DefaultPolicy().PossibleThreshold && len(matched) > 0 {
+					selectedServices[service.Name] = true
+				}
+			}
+		}
+	}
+
+	entries := map[string]relatedResourceEntry{}
+	add := func(kind, name, apiGroup string) {
+		if name == "" {
+			return
+		}
+		key := strings.ToLower(kind) + "/" + name
+		entries[key] = relatedResourceEntry{kind: kind, namespace: ns, name: name, apiGroup: apiGroup, origin: "automatic"}
+	}
+	for _, service := range services.Items {
+		if selectedServices[service.Name] {
+			add("Service", service.Name, "")
+		}
+	}
+	for _, workload := range workloads {
+		if !selectedWorkloads[strings.ToLower(workload.ref.Kind)+"/"+workload.ref.Name] {
+			continue
+		}
+		add(workload.ref.Kind, workload.ref.Name, workload.ref.APIGroup)
+		for _, dep := range workload.dependencies {
+			switch dep.Kind {
+			case "ConfigMap":
+				obj := &corev1.ConfigMap{}
+				if r.Get(ctx, client.ObjectKey{Namespace: ns, Name: dep.Name}, obj) == nil {
+					add(dep.Kind, dep.Name, "")
+				}
+			case "Secret":
+				obj := &corev1.Secret{}
+				if r.Get(ctx, client.ObjectKey{Namespace: ns, Name: dep.Name}, obj) == nil {
+					add(dep.Kind, dep.Name, "")
+				}
+			case "PersistentVolumeClaim":
+				obj := &corev1.PersistentVolumeClaim{}
+				if r.Get(ctx, client.ObjectKey{Namespace: ns, Name: dep.Name}, obj) == nil {
+					add(dep.Kind, dep.Name, "")
+				}
+			}
+		}
+		for _, hpa := range hpas.Items {
+			if hpa.Spec.ScaleTargetRef.Kind == workload.ref.Kind && hpa.Spec.ScaleTargetRef.Name == workload.ref.Name {
+				add("HorizontalPodAutoscaler", hpa.Name, "autoscaling")
+			}
+		}
+	}
+	for _, endpointSlice := range endpointSlices.Items {
+		if selectedServices[endpointSlice.Labels[discoveryv1.LabelServiceName]] {
+			add("EndpointSlice", endpointSlice.Name, "discovery.k8s.io")
+		}
+	}
+
+	out := make([]relatedResourceEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].kind != out[j].kind {
+			return out[i].kind < out[j].kind
+		}
+		return out[i].name < out[j].name
+	})
+	if len(out) > graphengine.DefaultPolicy().MaxNodes {
+		out = out[:graphengine.DefaultPolicy().MaxNodes]
+		errs = append(errs, fmt.Sprintf("application discovery truncated at %d resources", graphengine.DefaultPolicy().MaxNodes))
+	}
+	return out, errs
+}
+
+func isControllerKind(kind string) bool {
+	switch kind {
+	case "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob":
+		return true
+	default:
+		return false
+	}
+}
+
+func apiGroupFromAPIVersion(apiVersion string) string {
+	if slash := strings.IndexByte(apiVersion, '/'); slash >= 0 {
+		return apiVersion[:slash]
+	}
+	return ""
+}
+
+func templateDependencyRefs(namespace string, spec corev1.PodSpec) []collector.ResourceRef {
+	seen := map[string]collector.ResourceRef{}
+	add := func(kind, name string) {
+		if name != "" {
+			seen[kind+"/"+name] = collector.ResourceRef{Kind: kind, Namespace: namespace, Name: name}
+		}
+	}
+	for _, volume := range spec.Volumes {
+		if volume.ConfigMap != nil {
+			add("ConfigMap", volume.ConfigMap.Name)
+		}
+		if volume.Secret != nil {
+			add("Secret", volume.Secret.SecretName)
+		}
+		if volume.PersistentVolumeClaim != nil {
+			add("PersistentVolumeClaim", volume.PersistentVolumeClaim.ClaimName)
+		}
+	}
+	containers := append(append([]corev1.Container{}, spec.InitContainers...), spec.Containers...)
+	for _, container := range containers {
+		for _, source := range container.EnvFrom {
+			if source.ConfigMapRef != nil {
+				add("ConfigMap", source.ConfigMapRef.Name)
+			}
+			if source.SecretRef != nil {
+				add("Secret", source.SecretRef.Name)
+			}
+		}
+		for _, env := range container.Env {
+			if env.ValueFrom == nil {
+				continue
+			}
+			if env.ValueFrom.ConfigMapKeyRef != nil {
+				add("ConfigMap", env.ValueFrom.ConfigMapKeyRef.Name)
+			}
+			if env.ValueFrom.SecretKeyRef != nil {
+				add("Secret", env.ValueFrom.SecretKeyRef.Name)
+			}
+		}
+	}
+	out := make([]collector.ResourceRef, 0, len(seen))
+	for _, ref := range seen {
+		out = append(out, ref)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func (r *DiagnosticRunReconciler) templateDependencyFields(ctx context.Context, namespace string, spec corev1.PodSpec) []map[string]any {
+	refs := templateDependencyRefs(namespace, spec)
+	out := make([]map[string]any, 0, len(refs))
+	for _, ref := range refs {
+		exists := false
+		switch ref.Kind {
+		case "ConfigMap":
+			exists = r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &corev1.ConfigMap{}) == nil
+		case "Secret":
+			exists = r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &corev1.Secret{}) == nil
+		case "PersistentVolumeClaim":
+			exists = r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &corev1.PersistentVolumeClaim{}) == nil
+		}
+		out = append(out, map[string]any{
+			"kind":      ref.Kind,
+			"name":      ref.Name,
+			"exists":    exists,
+			"fieldPath": "/spec/template/spec",
+		})
+	}
+	return out
 }
 
 // collectResourceSpec fetches a resource and returns kind-specific diagnostic fields.
@@ -308,9 +608,13 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 			var paths []map[string]any
 			if rule.HTTP != nil {
 				for _, p := range rule.HTTP.Paths {
+					pathType := ""
+					if p.PathType != nil {
+						pathType = string(*p.PathType)
+					}
 					path := map[string]any{
 						"path":           p.Path,
-						"pathType":       string(*p.PathType),
+						"pathType":       pathType,
 						"backendService": p.Backend.Service.Name,
 						"backendPort":    p.Backend.Service.Port.Number,
 					}
@@ -323,6 +627,7 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 			"ingressClassName": obj.Spec.IngressClassName,
 			"rules":            rules,
 			"annotations":      obj.Annotations,
+			"labels":           obj.Labels,
 		}
 		if obj.Spec.IngressClassName == nil {
 			spec["ingressClassName"] = nil
@@ -349,6 +654,7 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 			"ports":       ports,
 			"clusterIP":   obj.Spec.ClusterIP,
 			"annotations": obj.Annotations,
+			"labels":      obj.Labels,
 		}, nil
 
 	case "ConfigMap":
@@ -365,7 +671,14 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 				data[k] = v
 			}
 		}
-		return map[string]any{"data": data, "annotations": obj.Annotations}, nil
+		return map[string]any{"data": data, "annotations": obj.Annotations, "labels": obj.Labels}, nil
+
+	case "Secret":
+		obj := &corev1.Secret{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		return map[string]any{"exists": true, "type": string(obj.Type), "labels": obj.Labels, "annotations": obj.Annotations}, nil
 
 	case "Deployment":
 		obj := &appsv1.Deployment{}
@@ -375,6 +688,9 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 		return map[string]any{
 			"replicas":          obj.Spec.Replicas,
 			"selector":          obj.Spec.Selector.MatchLabels,
+			"labels":            obj.Labels,
+			"templateLabels":    obj.Spec.Template.Labels,
+			"dependencies":      r.templateDependencyFields(ctx, ns, obj.Spec.Template.Spec),
 			"availableReplicas": obj.Status.AvailableReplicas,
 			"readyReplicas":     obj.Status.ReadyReplicas,
 			"conditions":        summariseDeploymentConditions(obj.Status.Conditions),
@@ -387,6 +703,9 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 		}
 		return map[string]any{
 			"replicas":        obj.Spec.Replicas,
+			"labels":          obj.Labels,
+			"templateLabels":  obj.Spec.Template.Labels,
+			"dependencies":    r.templateDependencyFields(ctx, ns, obj.Spec.Template.Spec),
 			"readyReplicas":   obj.Status.ReadyReplicas,
 			"currentReplicas": obj.Status.CurrentReplicas,
 		}, nil
@@ -398,6 +717,9 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 		}
 		return map[string]any{
 			"desiredNumberScheduled": obj.Status.DesiredNumberScheduled,
+			"labels":                 obj.Labels,
+			"templateLabels":         obj.Spec.Template.Labels,
+			"dependencies":           r.templateDependencyFields(ctx, ns, obj.Spec.Template.Spec),
 			"numberReady":            obj.Status.NumberReady,
 			"numberUnavailable":      obj.Status.NumberUnavailable,
 		}, nil
@@ -449,11 +771,55 @@ func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, k
 		if q, ok := obj.Status.Capacity[corev1.ResourceStorage]; ok {
 			capacity = q.String()
 		}
+		storageClassExists := true
+		storageClassName := ""
+		if obj.Spec.StorageClassName != nil && *obj.Spec.StorageClassName != "" {
+			storageClassName = *obj.Spec.StorageClassName
+			storageClass := &storagev1.StorageClass{}
+			storageClassExists = r.Get(ctx, client.ObjectKey{Name: storageClassName}, storageClass) == nil
+		}
 		return map[string]any{
-			"phase":        string(obj.Status.Phase),
-			"capacity":     capacity,
-			"accessModes":  obj.Spec.AccessModes,
-			"storageClass": obj.Spec.StorageClassName,
+			"phase":              string(obj.Status.Phase),
+			"capacity":           capacity,
+			"accessModes":        obj.Spec.AccessModes,
+			"storageClass":       storageClassName,
+			"storageClassExists": storageClassExists,
+			"labels":             obj.Labels,
+		}, nil
+
+	case "HorizontalPodAutoscaler":
+		obj := &autoscalingv2.HorizontalPodAutoscaler{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"labels":          obj.Labels,
+			"scaleTargetRef":  map[string]any{"apiVersion": obj.Spec.ScaleTargetRef.APIVersion, "kind": obj.Spec.ScaleTargetRef.Kind, "name": obj.Spec.ScaleTargetRef.Name},
+			"minReplicas":     obj.Spec.MinReplicas,
+			"maxReplicas":     obj.Spec.MaxReplicas,
+			"currentReplicas": obj.Status.CurrentReplicas,
+			"desiredReplicas": obj.Status.DesiredReplicas,
+		}, nil
+
+	case "EndpointSlice":
+		obj := &discoveryv1.EndpointSlice{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		ready, notReady := 0, 0
+		for _, endpoint := range obj.Endpoints {
+			if endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready {
+				ready += len(endpoint.Addresses)
+			} else {
+				notReady += len(endpoint.Addresses)
+			}
+		}
+		return map[string]any{
+			"labels":            obj.Labels,
+			"serviceName":       obj.Labels[discoveryv1.LabelServiceName],
+			"addressType":       string(obj.AddressType),
+			"readyEndpoints":    ready,
+			"notReadyEndpoints": notReady,
 		}, nil
 
 	default:
@@ -588,7 +954,8 @@ func (r *DiagnosticRunReconciler) collectPodLogs(ctx context.Context, ns, podNam
 	return string(logs), truncated, nil
 }
 
-func (r *DiagnosticRunReconciler) collectWorkloadPodLogs(ctx context.Context, ns, workloadName string) ([]collector.PodLogs, []collector.PVCInfo, error) {
+func (r *DiagnosticRunReconciler) collectWorkloadPodLogs(ctx context.Context, root collector.ResourceRef) ([]collector.PodLogs, []collector.PVCInfo, error) {
+	ns := root.Namespace
 	podList := &corev1.PodList{}
 	if err := r.List(ctx, podList, client.InNamespace(ns)); err != nil {
 		return nil, nil, err
@@ -606,14 +973,51 @@ func (r *DiagnosticRunReconciler) collectWorkloadPodLogs(ctx context.Context, ns
 	seenPVCs := map[string]bool{}
 	var podOut []collector.PodLogs
 	var pvcOut []collector.PVCInfo
+	var discoverySelectors []map[string]string
+	if root.Kind == "Service" {
+		service := &corev1.Service{}
+		if r.Get(ctx, client.ObjectKey{Namespace: ns, Name: root.Name}, service) == nil {
+			discoverySelectors = append(discoverySelectors, service.Spec.Selector)
+		}
+	}
+	if root.Kind == "Ingress" {
+		ingress := &networkingv1.Ingress{}
+		if r.Get(ctx, client.ObjectKey{Namespace: ns, Name: root.Name}, ingress) == nil {
+			for _, rule := range ingress.Spec.Rules {
+				if rule.HTTP == nil {
+					continue
+				}
+				for _, path := range rule.HTTP.Paths {
+					if path.Backend.Service == nil {
+						continue
+					}
+					service := &corev1.Service{}
+					if r.Get(ctx, client.ObjectKey{Namespace: ns, Name: path.Backend.Service.Name}, service) == nil {
+						discoverySelectors = append(discoverySelectors, service.Spec.Selector)
+					}
+				}
+			}
+		}
+	}
 
 	for _, pod := range podList.Items {
 		// Match pods that belong to the workload by label app or by name prefix.
-		if !podBelongsToWorkload(pod, workloadName) {
+		belongs := podBelongsToWorkload(pod, root.Name)
+		for _, selector := range discoverySelectors {
+			score, matched, _ := graphengine.SelectorInferenceScore(selector, pod.Labels)
+			if score >= graphengine.DefaultPolicy().PossibleThreshold && len(matched) > 0 {
+				belongs = true
+				break
+			}
+		}
+		if !belongs {
 			continue
 		}
 
 		pl := collector.PodLogs{PodName: pod.Name, Phase: string(pod.Status.Phase), Labels: pod.Labels}
+		for _, owner := range pod.OwnerReferences {
+			pl.Owners = append(pl.Owners, collector.ResourceRef{APIGroup: apiGroupFromAPIVersion(owner.APIVersion), Kind: owner.Kind, Namespace: ns, Name: owner.Name})
+		}
 
 		// Collect pod logs.
 		tailLines := r.LogTailLines

@@ -65,7 +65,7 @@ func TestLLMSettings_Put_InvalidProvider(t *testing.T) {
 	db := openDB(t)
 	h := &LLMSettings{DB: db}
 
-	body, _ := json.Marshal(llmSettingsPutRequest{Provider: "openai", Credentials: map[string]any{}})
+	body, _ := json.Marshal(llmSettingsPutRequest{Provider: "unknown", Credentials: map[string]any{}})
 	r := httptest.NewRequest(http.MethodPut, "/", bytes.NewReader(body))
 	r = injectUser(r, "uid-1", "alice", "viewer")
 	w := httptest.NewRecorder()
@@ -73,6 +73,44 @@ func TestLLMSettings_Put_InvalidProvider(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestLLMSettings_Put_OpenAIRequiresKey(t *testing.T) {
+	t.Parallel()
+	db := openDB(t)
+	insertTestUser(t, db, "uid-openai")
+	h := &LLMSettings{DB: db}
+	body, _ := json.Marshal(llmSettingsPutRequest{Provider: "openai", Credentials: map[string]any{"modelId": "gpt-4.1"}})
+	r := injectUser(httptest.NewRequest(http.MethodPut, "/", bytes.NewReader(body)), "uid-openai", "alice", "viewer")
+	w := httptest.NewRecorder()
+	h.Put(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLLMSettings_Put_OpenAISuccess(t *testing.T) {
+	t.Parallel()
+	db := openDB(t)
+	insertTestUser(t, db, "uid-openai-ok")
+	h := &LLMSettings{DB: db}
+	body, _ := json.Marshal(llmSettingsPutRequest{Provider: "openai", Credentials: map[string]any{"apiKey": "secret", "modelId": "gpt-4.1"}})
+	r := injectUser(httptest.NewRequest(http.MethodPut, "/", bytes.NewReader(body)), "uid-openai-ok", "alice", "viewer")
+	w := httptest.NewRecorder()
+	h.Put(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	getReq := injectUser(httptest.NewRequest(http.MethodGet, "/", nil), "uid-openai-ok", "alice", "viewer")
+	getResp := httptest.NewRecorder()
+	h.Get(getResp, getReq)
+	var settings llmSettingsResponse
+	if err := json.NewDecoder(getResp.Body).Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if settings.CredFields["apiKey"] != "***" {
+		t.Errorf("api key should be masked, got %v", settings.CredFields["apiKey"])
 	}
 }
 

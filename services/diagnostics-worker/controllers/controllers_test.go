@@ -13,8 +13,10 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -244,6 +246,68 @@ func TestCollectResourceSpec_Service(t *testing.T) {
 	}
 	if spec == nil {
 		t.Error("expected non-nil spec")
+	}
+}
+
+func TestDiscoverApplicationResourcesFromServiceSelectorMismatch(t *testing.T) {
+	t.Parallel()
+	ns := "incident-10"
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "gateway-public", Namespace: ns}, Spec: corev1.ServiceSpec{Selector: map[string]string{"app": "gateway", "track": "canary"}}}
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "gateway", Namespace: ns},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "gateway"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "gateway", "track": "stable"}},
+				Spec:       corev1.PodSpec{Volumes: []corev1.Volume{{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "gateway-config"}}}}}},
+			},
+		},
+	}
+	hpa := &autoscalingv2.HorizontalPodAutoscaler{ObjectMeta: metav1.ObjectMeta{Name: "gateway", Namespace: ns}, Spec: autoscalingv2.HorizontalPodAutoscalerSpec{ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "gateway"}, MaxReplicas: 3}}
+	slice := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "gateway-empty", Namespace: ns, Labels: map[string]string{discoveryv1.LabelServiceName: "gateway-public"}}, AddressType: discoveryv1.AddressTypeIPv4}
+	c := fake.NewClientBuilder().WithScheme(newDWTestScheme()).WithObjects(svc, deploy, hpa, slice).Build()
+	r := &DiagnosticRunReconciler{Client: c, Logger: newSlogDiscard(), CollectorVersion: "test"}
+
+	resources, errs := r.discoverApplicationResources(context.Background(), collector.ResourceRef{Kind: "Service", Namespace: ns, Name: svc.Name})
+	if len(errs) != 0 {
+		t.Fatalf("discovery errors: %v", errs)
+	}
+	got := map[string]bool{}
+	for _, resource := range resources {
+		got[resource.kind+"/"+resource.name] = true
+	}
+	for _, want := range []string{"Service/gateway-public", "Deployment/gateway", "HorizontalPodAutoscaler/gateway", "EndpointSlice/gateway-empty"} {
+		if !got[want] {
+			t.Fatalf("missing %s in %#v", want, resources)
+		}
+	}
+}
+
+func TestCollectResourceSpecDeploymentIncludesTemplateDependencies(t *testing.T) {
+	t.Parallel()
+	ns := "default"
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: ns},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api", "track": "stable"}},
+				Spec:       corev1.PodSpec{Volumes: []corev1.Volume{{Name: "cfg", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "missing-config"}}}}}},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(newDWTestScheme()).WithObjects(deploy).Build()
+	r := &DiagnosticRunReconciler{Client: c, Logger: newSlogDiscard()}
+	spec, err := r.collectResourceSpec(context.Background(), ns, "Deployment", deploy.Name, "apps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec["templateLabels"].(map[string]string)["track"] != "stable" {
+		t.Fatalf("template labels = %#v", spec["templateLabels"])
+	}
+	deps := spec["dependencies"].([]map[string]any)
+	if len(deps) != 1 || deps[0]["name"] != "missing-config" || deps[0]["exists"] != false {
+		t.Fatalf("dependencies = %#v", deps)
 	}
 }
 

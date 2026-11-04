@@ -1,3 +1,7 @@
+# Archived Product Description
+
+> Historical MVP snapshot. It is useful for product intent, but paths, versions, UI behavior, and runtime details may be obsolete. Start with [`../AGENTS.md`](../AGENTS.md), [`README.md`](../README.md), and [`docs/README.md`](README.md) for the current system.
+
 Project: Kubernetes AI Troubleshooting Assistant
 
 Goal:

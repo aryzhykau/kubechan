@@ -56,6 +56,7 @@ type PodLogs struct {
 	Error        string            `json:"error,omitempty"`
 	Events       []K8sEvent        `json:"events,omitempty"`
 	Dependencies *PodDependencies  `json:"dependencies,omitempty"`
+	Owners       []ResourceRef     `json:"owners,omitempty"`
 }
 
 // PVCInfo holds the status and events for a PersistentVolumeClaim.
@@ -107,9 +108,23 @@ type Evidence struct {
 type InvestigationGraph struct {
 	SchemaVersion   int              `json:"schemaVersion"`
 	EntryResourceID string           `json:"entryResourceId"`
+	Policy          GraphPolicy      `json:"policy"`
+	Truncated       bool             `json:"truncated,omitempty"`
 	Nodes           []GraphNode      `json:"nodes"`
 	Edges           []GraphEdge      `json:"edges"`
 	Candidates      []GraphCandidate `json:"candidates,omitempty"`
+}
+
+// GraphPolicy records the effective bounded-discovery settings used for an
+// immutable graph snapshot. Defaults are intentionally conservative.
+type GraphPolicy struct {
+	MaxObservedDepth    int `json:"maxObservedDepth"`
+	MaxInferredHops     int `json:"maxInferredHops"`
+	MaxNodes            int `json:"maxNodes"`
+	MaxEdges            int `json:"maxEdges"`
+	MaxCandidatesPerGap int `json:"maxCandidatesPerGap"`
+	StrongThreshold     int `json:"strongThreshold"`
+	PossibleThreshold   int `json:"possibleThreshold"`
 }
 
 type GraphNode struct {
@@ -123,13 +138,17 @@ type GraphNode struct {
 }
 
 type GraphEdge struct {
-	ID         string         `json:"id"`
-	Type       string         `json:"type"`
-	From       string         `json:"from"`
-	To         string         `json:"to"`
-	State      string         `json:"state"` // resolved, broken, empty
-	Attributes map[string]any `json:"attributes,omitempty"`
-	SourceIDs  []string       `json:"sourceIds,omitempty"`
+	ID         string            `json:"id"`
+	Type       string            `json:"type"`
+	From       string            `json:"from"`
+	To         string            `json:"to"`
+	State      string            `json:"state"`            // resolved, broken, empty
+	Origin     string            `json:"origin,omitempty"` // observed or inferred
+	Strength   string            `json:"strength,omitempty"`
+	Score      int               `json:"score,omitempty"`
+	Reasons    []CandidateReason `json:"reasons,omitempty"`
+	Attributes map[string]any    `json:"attributes,omitempty"`
+	SourceIDs  []string          `json:"sourceIds,omitempty"`
 }
 
 type GraphCandidate struct {
@@ -171,9 +190,10 @@ type EvidenceLogLine struct {
 
 // RelatedResourceEvidence holds collected events and spec data for a user-tagged resource.
 type RelatedResourceEvidence struct {
-	Resource ResourceRef `json:"resource"`
-	Events   []K8sEvent  `json:"events,omitempty"`
-	Logs     string      `json:"logs,omitempty"`
+	Resource        ResourceRef `json:"resource"`
+	DiscoveryOrigin string      `json:"discoveryOrigin,omitempty"` // root, explicit, or automatic
+	Events          []K8sEvent  `json:"events,omitempty"`
+	Logs            string      `json:"logs,omitempty"`
 	// Spec holds kind-specific diagnostic fields extracted from the resource spec/status
 	// (e.g. Ingress backend service names, Service selector, ConfigMap data, etc.).
 	Spec map[string]any `json:"spec,omitempty"`

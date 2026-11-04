@@ -1,0 +1,31 @@
+# Level 3: the Service selector does not match the healthy Pod labels.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubechan-incident-03
+  labels: {kubechan.io/test-incident: "03"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory
+  namespace: kubechan-incident-03
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: inventory}}
+  template:
+    metadata: {labels: {app: inventory, version: v2}}
+    spec:
+      containers:
+        - name: inventory
+          image: nginx:stable-alpine
+          ports: [{name: http, containerPort: 80}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory
+  namespace: kubechan-incident-03
+spec:
+  selector: {app: inventory, version: v1}
+  ports: [{name: http, port: 80, targetPort: http}]

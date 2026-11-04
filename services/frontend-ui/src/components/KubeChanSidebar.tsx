@@ -1,4 +1,9 @@
 import { useRef, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Button, CircularProgress } from '@mui/material'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import { useListIncidentsQuery } from '../store/api/incidentsApi'
+import { useListDiagnosticRunsQuery } from '../store/api/diagnosticsApi'
 import type { AnalysisResult } from '../api/index'
 
 const THINKING_FRAMES: { image: string; phrase: string }[] = [
@@ -29,6 +34,9 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onDismiss }: {
   moodLevel?: number
   onDismiss?: () => void
 }) {
+  const navigate = useNavigate()
+  const { data: incidents = [], isLoading: incidentsLoading, isError: incidentsError } = useListIncidentsQuery(undefined, { pollingInterval: 15000, refetchOnMountOrArgChange: true })
+  const { data: runs = [], isLoading: runsLoading, isError: runsError } = useListDiagnosticRunsQuery(undefined, { pollingInterval: 10000, refetchOnMountOrArgChange: true })
   const { pose, result, incidentName, reactionLine, chatterImage } = state
   const contentRef = useRef<HTMLDivElement>(null)
   const [shaking, setShaking] = useState(false)
@@ -84,11 +92,62 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onDismiss }: {
 
   const openingRant   = result?.payload?.openingRant   || ''
   const closingInsult = result?.payload?.closingInsult || ''
+  const openIncidents = incidents.filter(item => item.status.state === 'open')
+  const terminalStates = ['completed', 'failed', 'error']
+  const activeRuns = runs.filter(run => !run.analysisResultId && !terminalStates.includes(run.status.toLowerCase()))
+  const recentRuns = runs.filter(run => !!run.analysisResultId || terminalStates.includes(run.status.toLowerCase())).slice(0, 3)
+
+  const elapsed = (value: string) => {
+    const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000))
+    if (!Number.isFinite(seconds)) return 'unknown time'
+    if (seconds < 60) return `${seconds}s`
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+  }
+  const runStatus = (value: string) => ({ pending: 'Waiting for evidence', dispatched: 'Waiting for evidence', in_progress: 'Analyzing', queued: 'Queued', running: 'Running', collecting: 'Collecting evidence', analyzing: 'Analyzing' }[value.toLowerCase()] ?? (value || 'In progress'))
 
   return (
     <aside className="kubechan-sidebar">
       {/* scrollable top zone */}
       <div className="kubechan-scroll-zone">
+        <div className="assistant-overview">
+          <div className="assistant-overview-counts">
+            <button type="button" onClick={() => navigate('/')}><strong>{openIncidents.length}</strong><span>Open incidents</span></button>
+            <div><strong>{activeRuns.length}</strong><span>Active analyses</span></div>
+          </div>
+          {(incidentsLoading || runsLoading) && <div className="assistant-loading"><CircularProgress size={13} /> Refreshing overview…</div>}
+          {(incidentsError || runsError) && <p className="assistant-data-error">Could not refresh all data. Open a section to try again.</p>}
+          <section className="assistant-list-section">
+            <h3>Active analyses</h3>
+            {activeRuns.length === 0 ? <p className="assistant-empty">No analyses running.</p> : activeRuns.slice(0, 5).map(run => {
+              const incident = incidents.find(item => item.metadata.name === run.incidentId)
+              const resource = incident?.spec.rootResource
+              const title = resource ? `${resource.kind}/${resource.name}` : run.incidentId || 'Incident'
+              return <article className="assistant-run" key={run.diagnosticRunId}>
+                <strong title={title}>{title}</strong>
+                <span>{incident?.spec.rootResource.namespace ?? incident?.metadata.namespace ?? 'Unknown namespace'} · {runStatus(run.status)}</span>
+                <span>Started {elapsed(run.requestedAt)} ago</span>
+                <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate(`/diagnostics/${encodeURIComponent(run.diagnosticRunId)}`)}>Open run</Button>
+              </article>
+            })}
+            {activeRuns.length > 5 && <button className="assistant-more" onClick={() => navigate('/diagnostics')}>View all runs ({activeRuns.length - 5} more)</button>}
+          </section>
+          <section className="assistant-list-section">
+            <h3>Recent results</h3>
+            {recentRuns.length === 0 ? <p className="assistant-empty">No completed analyses yet.</p> : recentRuns.map(run => {
+              const incident = incidents.find(item => item.metadata.name === run.incidentId)
+              const isFailed = ['failed', 'error'].includes(run.status.toLowerCase())
+              const hasResult = !!run.analysisResultId && !!run.incidentId
+              const title = incident ? `${incident.spec.rootResource.kind}/${incident.spec.rootResource.name}` : run.incidentId || 'Incident'
+              return <article className="assistant-run assistant-run--recent" key={run.diagnosticRunId}>
+                <strong title={title}>{title}</strong>
+                <span>{isFailed ? 'Analysis failed' : !hasResult ? 'Result unavailable' : run.needsMoreInfo ? 'More evidence needed' : 'Analysis ready'}</span>
+                <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => hasResult ? navigate(`/incidents/${encodeURIComponent(run.incidentId)}/assessments/${encodeURIComponent(run.diagnosticRunId)}`) : navigate(`/diagnostics/${encodeURIComponent(run.diagnosticRunId)}`)}>{hasResult ? 'Open assessment' : 'Open run'}</Button>
+              </article>
+            })}
+          </section>
+          {openIncidents.length > 0 && <button className="assistant-more" onClick={() => navigate('/')}>View all open incidents ({openIncidents.length})</button>}
+        </div>
         {pose !== 'idle' && (
           <div className="sidebar-bubble-wrap">
             <div className="speech-bubble">

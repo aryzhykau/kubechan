@@ -87,7 +87,7 @@ This is a **polyglot monorepo** with five services across three languages. Each 
 | `pyright` | Python static type checking for llm-gateway | `Makefile` `lint-python`, `pyproject.toml` `[dependency-groups] dev` |
 | `pytest` + `pytest-cov` | Python unit testing and coverage | `pyproject.toml` `[dependency-groups] dev` |
 | `vladopajic/go-test-coverage` | Enforce Go coverage thresholds in CI | `.github/workflows/ci.yml`, `.github/go-coverage.yml` |
-| `Tilt` | Local dev hot-reload orchestration (Docker Desktop k8s) | `Tiltfile` |
+| `Tilt` | Local image build, deploy, and live-update orchestration for kind | `Tiltfile` |
 | `Helm` | Kubernetes manifest templating | `helm/kubechan/` |
 
 ---
@@ -128,7 +128,7 @@ make lint-python
 # Generate CRD YAMLs and DeepCopy code
 make generate
 
-# Start local dev cluster (requires Docker Desktop)
+# Deploy to the active kind cluster
 make dev-up
 ```
 

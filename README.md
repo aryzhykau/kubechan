@@ -35,7 +35,8 @@ A read-only Kubernetes AI troubleshooting assistant. KubeChan watches your clust
 │                   ┌──────────────────────┐              │             │
 │                   │   llm-gateway        │              │             │
 │                   │   (Python/FastAPI)   │              │             │
-│                   │   AWS Bedrock        │              │             │
+│                   │ LiteLLM SDK +        │              │             │
+│                   │ Copilot adapter      │              │             │
 │                   └──────────────────────┘              │             │
 │                                                         ▼             │
 │                                          ┌──────────────────────┐   │
@@ -86,7 +87,7 @@ backend-api stores evidence, dispatches async goroutine
      ▼  POST /analyze
 llm-gateway:
   ├── builds prompt from all collected evidence
-  ├── calls AWS Bedrock (Qwen3-32B) via Converse API
+  ├── calls OpenAI, Anthropic, or Bedrock through LiteLLM; Copilot keeps its SDK adapter
   ├── parses and validates an evidence-backed assessment
   ├── accepts only citations and graph IDs present in the evidence snapshot
   └── if LLM confidence < 0.65 → sets needsMoreInfo + suggestedResources
@@ -246,11 +247,11 @@ Central API server and orchestration hub. Serves the frontend REST + WebSocket A
 
 ---
 
-### `llm-gateway` — Python, FastAPI + boto3
+### `llm-gateway` — Python + FastAPI
 
-Receives a structured evidence payload, builds a detailed prompt, calls AWS Bedrock via the Converse API, and returns a structured evidence-first assessment. The model may annotate the deterministic graph with a causal path, but it cannot create topology or cite evidence outside the immutable source catalog.
+Receives a structured evidence payload, builds a detailed prompt, calls OpenAI, Anthropic, or AWS Bedrock through the LiteLLM SDK (GitHub Copilot currently uses its SDK adapter), and returns a structured evidence-first assessment. The model may annotate the deterministic graph with a causal path, but it cannot create topology or cite evidence outside the immutable source catalog.
 
-**Model:** `qwen.qwen3-32b-v1:0` (aliased as `qwen3-32b`). Also supports `qwen3-235b`.
+**Provider and model:** selected through per-user LLM settings. OpenAI and Anthropic API keys are passed per request; Bedrock supports bearer API keys and AWS IAM credentials. The model selector lists KubeChan's curated model choices, which may not include every model enabled for a given account.
 
 **Analysis output:**
 
@@ -268,16 +269,7 @@ Receives a structured evidence payload, builds a detailed prompt, calls AWS Bedr
 | `assessment` | Versioned claims, citations, remediation steps, and causal-path annotations |
 | `citationValidation` | Count and IDs of citations rejected by the gateway |
 
-**Key env vars:**
-
-| Var | Default | Description |
-|---|---|---|
-| `BEDROCK_REGION` | `us-east-1` | AWS region for Bedrock |
-| `BEDROCK_MODEL_ID` | `qwen3-32b` | Model alias or full Bedrock model ID |
-| `TEMPERATURE` | `0.3` | LLM sampling temperature |
-| `MAX_TOKENS` | `4096` | Maximum response tokens |
-| `AWS_ACCESS_KEY_ID` | — | AWS credentials (via secret) |
-| `AWS_SECRET_ACCESS_KEY` | — | AWS credentials (via secret) |
+**LLM credentials and model parameters** are selected per user in Settings. OpenAI and Anthropic API keys and explicit Bedrock credentials are passed per request. Bedrock can also use the standard AWS credential chain supplied to the gateway deployment.
 
 ---
 
@@ -306,7 +298,7 @@ Single-page application served by nginx. Shows an incident list and the KubeChan
 **KubeChan sidebar:**
 
 - Pose transitions: `idle` → `thinking` → `speaking` → `chatter`
-- `speaking`: 5-section analysis (opening rant, root cause, evidence, fix, closing insult), confidence badge, thumbs-up/down rating
+- `speaking`: compact completion state with a link to the dedicated Assessment page; technical analysis is not duplicated in the sidebar
 - `chatter`: persona reaction line for events (new incident, resolved, poke, silence, analysis rating)
 - Mood system: open incidents raise mood level (0 = calm, 1 = irritated, 2 = rage); mood affects idle and reaction lines
 - Poke escalation: poke 3× → annoyed, 5× → rage
@@ -320,8 +312,10 @@ Single-page application served by nginx. Shows an incident list and the KubeChan
 | `Incident` (`kubechan.io`) | Groups related ProblemCases by workload root. Can be auto-created by cluster-watcher or manually created by the user. Carries `source`, `userMessage`, `relatedResources`. |
 | `ProblemCase` (`kubechan.io`) | A specific detected anomaly on a resource (e.g. CrashLoopBackOff on pod `foo`) |
 | `DiagnosticRun` (`kubechan.io`) | A request to collect evidence; lifecycle: `pending → running → completed/failed` |
+| `KubeChanState` (`kubechan.io`) | Singleton persona/mood state shared by the services and UI |
+| `KubechanExclusionRule` (`kubechan.io`) | Detector suppression rule scoped by namespace, resources, labels, and optional time windows |
 
-Both `Incident` and `ProblemCase` have status subresources. All CRDs live in the `kubechan` namespace.
+The control-plane CRs live in the `kubechan` namespace. `Incident`, `ProblemCase`, and `DiagnosticRun` expose status used by their reconcilers and the UI.
 
 ---
 
@@ -336,9 +330,11 @@ Both `Incident` and `ProblemCase` have status subresources. All CRDs live in the
 | ingress-nginx | current | Required in the kind cluster for `kubechan.local` |
 | Tilt | ≥ 0.33 | `brew install tilt` |
 | kubectl | ≥ 1.28 | Configured for the target kind cluster |
-| Go | 1.25+ | for local builds / codegen |
-| Python | 3.12+ | for llm-gateway local dev |
-| AWS account | — | with Bedrock access to `qwen.qwen3-32b-v1:0` in `us-east-1` |
+| Go | 1.26.2+ | for local builds / codegen |
+| Python | 3.13+ | for llm-gateway local development |
+| uv | current | Python dependency and command runner |
+| Node.js + npm | current LTS | frontend build and local development |
+| LLM access | — | OpenAI/Anthropic API keys, Bedrock credentials, or GitHub Copilot credentials configured in the UI |
 
 ---
 

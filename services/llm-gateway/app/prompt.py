@@ -331,11 +331,17 @@ def build_prompt(
         )
         persona_json_opening = '"openingRant": "<pure mockery, no technical content>",'
         persona_json_closing = '"closingInsult": "<one final humiliating remark>",'
+        node_insight_style = (
+            "Write every nodeInsights.comment in a concise tsundere voice consistent with KubeChan: "
+            "outwardly annoyed, sarcastic, condescending, and reluctantly helpful. Preserve the original "
+            "humiliating edge, but never sacrifice technical precision or invent evidence."
+        )
     else:
         persona_opening_contract = ""
         persona_closing_contract = ""
         persona_json_opening = ""
         persona_json_closing = ""
+        node_insight_style = "Write every nodeInsights.comment in a concise, neutral, professional engineering voice."
 
     incident_source_line = (
         "INCIDENT SOURCE: This incident was MANUALLY reported by the user."
@@ -485,6 +491,17 @@ def build_prompt(
           rootCauseEntityId identifies the node or reference where the failure originates.
           Order steps from root cause to reported impact. candidateId is allowed only when
           selecting a backend-ranked likely target; it remains a suggestion, not a real edge.
+          Graph edges with origin="observed" are Kubernetes facts from this snapshot. Edges
+          with origin="inferred" are deterministic discovery hints for gaps: they may guide
+          investigation, but MUST NOT be described as observed topology or used alone to prove
+          a root cause. State their strength and supporting reasons when relying on them.
+          Return exactly one nodeInsights item for EVERY graph node, including nodes that are
+          irrelevant to the diagnosis. Use relevance=relevant for causal or supporting nodes,
+          context for useful surrounding topology, and not_relevant when the node does not affect
+          this diagnosis. A relevant insight must reference supporting claimIds and/or sourceIds.
+          A not_relevant insight should briefly explain why the node is not involved, without
+          inventing facts. Use only exact node, claim, and source IDs from this response/request.
+          {node_insight_style}
 
         - "needsMoreInfo": PREFER true over false when in doubt.
           Set true when ANY of the following apply:
@@ -549,7 +566,8 @@ def build_prompt(
               "entryResourceId": "<exact graph.entryResourceId>",
               "rootCauseEntityId": "<exact node id>",
               "steps": [{{"order":1,"entityId":"<exact node id>","edgeId":"<exact edge id or empty>","candidateId":"<exact candidate id or empty>","claimId":"claim-1","role":"root_cause|failed_dependency|supporting_evidence|reported_impact|context"}}]
-            }}
+            }},
+            "nodeInsights": [{{"nodeId":"<exact node id>","relevance":"relevant|context|not_relevant","comment":"<one concise node-specific comment in the required voice>","claimIds":["claim-1"],"sourceIds":["<exact source id>"]}}]
           }},
           {persona_json_closing}
           "confidence": <0.0-1.0>,

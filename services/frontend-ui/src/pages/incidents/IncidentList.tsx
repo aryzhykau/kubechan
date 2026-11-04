@@ -1,19 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Box, Typography, Button, IconButton, Alert, Chip, Stack,
-  CircularProgress, Skeleton, Accordion, AccordionSummary, AccordionDetails, Tooltip,
-  TextField, InputAdornment, ToggleButton, ToggleButtonGroup, FormControl, Select, MenuItem,
-  Checkbox, Tabs, Tab,
+  Box, Typography, Button, IconButton, Alert, Stack,
+  CircularProgress, Skeleton, Tooltip,
+  TextField, InputAdornment, FormControl, Select, MenuItem,
+  Checkbox,
 } from '@mui/material'
-import RefreshIcon from '@mui/icons-material/Refresh'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import AddCommentIcon from '@mui/icons-material/AddComment'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
-import HistoryIcon from '@mui/icons-material/History'
-import LinkIcon from '@mui/icons-material/Link'
 import SearchIcon from '@mui/icons-material/Search'
+import CloseIcon from '@mui/icons-material/Close'
 import {
   useListIncidentsQuery,
   useListProblemCasesQuery,
@@ -24,8 +20,7 @@ import {
 import { useGetDiagnosticRunEvidenceQuery, useListDiagnosticRunsQuery } from '../../store/api/diagnosticsApi'
 import { useAppDispatch } from '../../store/hooks'
 import { useKubeChan } from '../../hooks/useKubeChan'
-import { openManualModal, setExclusionProposal } from '../../store/slices/uiSlice'
-import { ConfidenceBadge } from '../../components/shared/ConfidenceBadge'
+import { setExclusionProposal } from '../../store/slices/uiSlice'
 import { ResourcePill } from '../../components/shared/ResourcePill'
 import { timeAgo } from '../../components/shared/utils'
 import { AugmentIncidentModal } from './AugmentIncidentModal'
@@ -49,37 +44,17 @@ function incidentLabel(incident: Incident): { title: string; sub: string } {
 
 // ── IncidentDetails accordion ─────────────────────────────────────────────────
 
-const sectionAccordionSx = {
-  background: 'rgba(255,255,255,0.02)',
-  border: '1px solid rgba(255,255,255,0.08)',
-  borderRadius: '8px !important',
-  mt: 1,
-  '&:before': { display: 'none' },
-}
-const sectionSummarySx = {
-  px: 1.5,
-  minHeight: 40,
-  '.MuiAccordionSummary-content': { my: 0 },
-  '&:hover': { background: 'rgba(255,255,255,0.03)' },
-  borderRadius: '8px',
-}
-
-function IncidentDetails({ incident, previousRun, problemCases, runs }: {
+function IncidentDetails({ incident, problemCases }: {
   incident: Incident
-  previousRun?: DiagnosticRunSummary
   problemCases: ProblemCase[]
-  runs: DiagnosticRunSummary[]
 }) {
   const isManual = incident.spec.source === 'manual'
   const related = incident.spec.relatedResources ?? []
   const pcs = incident.spec.problemCases ?? []
-  const suggestions = previousRun?.suggestedResources ?? []
-  const needsMoreInfo = !!previousRun?.needsMoreInfo && suggestions.length > 0
   const pcByName = new Map(problemCases.map(pc => [pc.metadata.name, pc]))
   const incidentPCs = pcs.map(name => pcByName.get(name)).filter((pc): pc is ProblemCase => !!pc)
   const activePCs = incidentPCs.filter(pc => pc.status.state !== 'resolved')
   const previousPCs = incidentPCs.filter(pc => pc.status.state === 'resolved')
-  const occurrenceCount = incident.status.occurrenceCount ?? 1
 
   function isRootResource(pc: ProblemCase) {
     const affected = pc.spec.affectedResource
@@ -90,104 +65,43 @@ function IncidentDetails({ incident, previousRun, problemCases, runs }: {
   }
 
   function renderProblemCase(pc: ProblemCase) {
-    const runCount = runs.filter(run => run.problemCaseRef === pc.metadata.name).length
-    const isResolved = pc.status.state === 'resolved'
     const correlated = !isRootResource(pc)
+    const severity = pc.spec.severity.toLowerCase()
+    const signalColor = severity === 'critical' ? '#d96b68' : severity === 'high' ? '#d9975f' : '#d5a64a'
+    const resource = pc.spec.affectedResource
     return (
       <Box
         key={pc.metadata.name}
         sx={{
-          p: 1.25,
-          borderRadius: 1.5,
-          border: '1px solid',
-          borderColor: isResolved ? 'rgba(255,255,255,0.07)' : 'rgba(245,158,11,0.2)',
-          background: isResolved ? 'rgba(255,255,255,0.015)' : 'rgba(245,158,11,0.035)',
+          px: 0.85,
+          py: 0.65,
+          borderLeft: '2px solid',
+          borderLeftColor: signalColor,
+          borderBottom: '1px solid #303832',
+          background: '#141815',
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-          <Chip label={pc.spec.detector} size="small" color={isResolved ? 'default' : 'warning'} variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
-          <Chip label={pc.spec.severity} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20, textTransform: 'uppercase', opacity: 0.8 }} />
-          <Box sx={{ flex: 1 }} />
-          <Typography variant="caption" color="text.disabled">{timeAgo(pc.status.lastSeen ?? pc.status.firstSeen)}</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
+          <Typography sx={{ fontSize: '0.7rem', lineHeight: 1.25, fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere' }}>{pc.spec.detector.replace(/([a-z])([A-Z])/g, '$1 $2')}</Typography>
+          <Typography sx={{ ml: 'auto', flexShrink: 0, fontSize: '0.56rem', fontWeight: 750, textTransform: 'uppercase', color: signalColor }}>{pc.spec.severity}</Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', mt: 1 }}>
-          <ResourcePill kind={pc.spec.affectedResource.kind} name={pc.spec.affectedResource.name} namespace={pc.spec.affectedResource.namespace} />
-          {correlated && (
-            <Tooltip title={`This ${pc.spec.affectedResource.kind} was grouped under ${incident.spec.rootResource.kind} ${incident.spec.rootResource.name} because they belong to the same workload path.`} arrow>
-              <Chip
-                icon={<LinkIcon sx={{ fontSize: '0.8rem !important' }} />}
-                label="part of this workload"
-                size="small"
-                variant="outlined"
-                sx={{ fontSize: '0.65rem', height: 21, color: 'text.secondary' }}
-              />
-            </Tooltip>
-          )}
-          {runCount > 0 && <Typography variant="caption" color="text.secondary">{runCount} diagnostic{runCount === 1 ? '' : 's'}</Typography>}
-        </Box>
-        {(pc.spec.symptoms?.length ?? 0) > 0 && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, lineHeight: 1.45 }}>
-            {pc.spec.symptoms!.join(' · ')}
-          </Typography>
-        )}
+        <Typography sx={{ mt: 0.2, fontSize: '0.63rem', lineHeight: 1.3, color: 'text.secondary', overflowWrap: 'anywhere' }}>
+          {resource.kind}/{resource.name}{resource.namespace ? ` · ${resource.namespace}` : ''}{correlated ? ' · related' : ''} · {timeAgo(pc.status.lastSeen ?? pc.status.firstSeen)}
+        </Typography>
+        {(pc.spec.symptoms?.length ? pc.spec.symptoms : ['No symptom description recorded']).map((symptom, index) => (
+          <Typography key={`${pc.metadata.name}-symptom-${index}`} sx={{ mt: 0.3, fontSize: '0.65rem', lineHeight: 1.35, color: 'text.primary', overflowWrap: 'anywhere' }}>{symptom}</Typography>
+        ))}
       </Box>
     )
   }
 
   return (
-    <Accordion defaultExpanded={incident.status.state !== 'resolved'} disableGutters elevation={0} sx={sectionAccordionSx}>
-      <AccordionSummary
-        expandIcon={<ExpandMoreIcon sx={{ fontSize: '0.9rem', color: 'text.secondary' }} />}
-        sx={sectionSummarySx}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, width: '100%', pr: 1 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>Incident details</Typography>
-          {activePCs.length > 0 && <Chip label={`${activePCs.length} active`} size="small" color="warning" variant="outlined" sx={{ height: 19, fontSize: '0.62rem' }} />}
-          {previousPCs.length > 0 && <Chip label={`${previousPCs.length} previous`} size="small" variant="outlined" sx={{ height: 19, fontSize: '0.62rem', opacity: 0.7 }} />}
-        </Box>
-      </AccordionSummary>
-      <AccordionDetails sx={{ px: 1.5, pt: 0.5, pb: 1.5 }}>
-        <Stack spacing={1.5}>
-          {occurrenceCount > 1 && (
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: 'auto 1fr 1fr' },
-                alignItems: 'center',
-                gap: 1.25,
-                p: 1.25,
-                borderRadius: 1.5,
-                background: 'rgba(245,158,11,0.06)',
-                border: '1px solid rgba(245,158,11,0.16)',
-              }}
-            >
-              <HistoryIcon sx={{ color: 'warning.main', fontSize: '1.15rem' }} />
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>First detected</Typography>
-                <Typography variant="body2" sx={{ fontSize: '0.78rem', fontWeight: 600 }}>{timeAgo(incident.status.openedAt)}</Typography>
-              </Box>
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Latest occurrence</Typography>
-                <Typography variant="body2" sx={{ fontSize: '0.78rem', fontWeight: 600 }}>
-                  {timeAgo(incident.status.lastOccurrenceAt)} · occurrence #{occurrenceCount}
-                </Typography>
-              </Box>
-            </Box>
-          )}
-
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Root resource</Typography>
-            <ResourcePill
-              kind={incident.spec.rootResource.kind}
-              name={incident.spec.rootResource.name}
-              namespace={incident.spec.rootResource.namespace}
-            />
-          </Box>
-
+    <Box>
+        <Stack spacing={1}>
           {isManual && incident.spec.userMessage && (
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>User description</Typography>
-              <Typography variant="body2" sx={{ color: 'text.primary', fontSize: '0.82rem', lineHeight: 1.5 }}>
+              <Typography variant="body2" sx={{ color: 'text.primary', fontSize: '0.76rem', lineHeight: 1.4 }}>
                 {incident.spec.userMessage}
               </Typography>
             </Box>
@@ -206,58 +120,16 @@ function IncidentDetails({ incident, previousRun, problemCases, runs }: {
 
           {!isManual && activePCs.length > 0 && (
             <Box>
-              <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 0.75, fontWeight: 700 }}>Active symptoms</Typography>
-              <Stack spacing={0.75}>{activePCs.map(renderProblemCase)}</Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, fontSize: '0.68rem', fontWeight: 700 }}>Active signals <Box component="span" sx={{ color: 'text.disabled', fontWeight: 500 }}>· {activePCs.length}</Box></Typography>
+              <Stack spacing={0.5}>{activePCs.map(renderProblemCase)}</Stack>
             </Box>
           )}
 
           {!isManual && previousPCs.length > 0 && (
-            <Accordion
-              disableGutters
-              elevation={0}
-              sx={{
-                background: 'transparent',
-                border: '1px solid rgba(255,255,255,0.07)',
-                borderRadius: '8px !important',
-                '&:before': { display: 'none' },
-              }}
-            >
-              <AccordionSummary
-                expandIcon={<ExpandMoreIcon sx={{ fontSize: '0.9rem', color: 'text.secondary' }} />}
-                sx={{
-                  minHeight: 38,
-                  px: 1.25,
-                  '.MuiAccordionSummary-content': { my: 0.5, alignItems: 'center', gap: 0.75 },
-                }}
-              >
-                <HistoryIcon sx={{ fontSize: '0.95rem', color: 'text.secondary' }} />
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                  History
-                </Typography>
-                <Chip label={`${previousPCs.length} previous`} size="small" variant="outlined" sx={{ height: 19, fontSize: '0.62rem', opacity: 0.7 }} />
-              </AccordionSummary>
-              <AccordionDetails sx={{ px: 1.25, pt: 0.25, pb: 1.25 }}>
-                <Stack spacing={0.75}>{previousPCs.map(renderProblemCase)}</Stack>
-              </AccordionDetails>
-            </Accordion>
-          )}
-
-          {needsMoreInfo && (
-            <Box>
-              <Typography variant="caption" sx={{ color: 'warning.main', display: 'block', mb: 0.5 }}>KubeChan suggested</Typography>
-              <Stack spacing={0.75}>
-                {suggestions.map((s, i) => (
-                  <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                    <Chip label={s.kind} size="small" sx={{ background: 'rgba(245,158,11,0.1)', color: '#fbbf24', flexShrink: 0 }} />
-                    <Typography variant="caption" color="text.secondary">{s.reason}</Typography>
-                  </Box>
-                ))}
-              </Stack>
-            </Box>
+            <Typography variant="caption" color="text.disabled">{previousPCs.length} previous signals</Typography>
           )}
         </Stack>
-      </AccordionDetails>
-    </Accordion>
+    </Box>
   )
 }
 
@@ -453,6 +325,14 @@ function IncidentAnalysis({ previousRun, onRate }: {
             <Typography variant="caption" color="text.disabled" sx={{ fontFamily: 'monospace', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {analysisResult.model}
             </Typography>
+            {analysisResult.payload.tokenUsage && (
+              <Tooltip title={`Input: ${analysisResult.payload.tokenUsage.inputTokens.toLocaleString()} (${analysisResult.payload.tokenUsage.inputSource === 'provider' ? 'provider reported' : 'estimated'}) · Output: ${analysisResult.payload.tokenUsage.outputTokens.toLocaleString()} (${analysisResult.payload.tokenUsage.outputSource === 'provider' ? 'provider reported' : 'estimated'})`}>
+                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                  {analysisResult.payload.tokenUsage.totalTokens.toLocaleString()} tokens
+                  {analysisResult.payload.tokenUsage.inputSource === 'tokenizer_estimate' || analysisResult.payload.tokenUsage.outputSource === 'tokenizer_estimate' ? ' est.' : ''}
+                </Typography>
+              </Tooltip>
+            )}
             {onRate && (
               <>
                 <Typography variant="caption" color="text.secondary">{effectiveRating ? 'Feedback recorded' : 'Useful?'}</Typography>
@@ -472,8 +352,8 @@ function IncidentAnalysis({ previousRun, onRate }: {
 interface IncidentCardProps {
   incident: Incident
   previousRun?: DiagnosticRunSummary
+  analysisSummary?: string
   problemCases: ProblemCase[]
-  runs: DiagnosticRunSummary[]
   onAction?: () => void
   onResolved?: () => void
   onSuggestRule?: (p: ExclusionRuleProposal) => void
@@ -482,47 +362,29 @@ interface IncidentCardProps {
 }
 
 function IncidentCard({
-  incident, previousRun, problemCases, runs,
-  onAction, onResolved, onSuggestRule, onMarkFalsePositive, onRefresh,
-}: IncidentCardProps) {
-  const [analyze] = useAnalyzeMutation()
-  const navigate = useNavigate()
+  incident, previousRun, analysisSummary, problemCases,
+  onResolved, onSuggestRule, onMarkFalsePositive, onRefresh,
+  onRegisterAugment,
+}: IncidentCardProps & { onRegisterAugment?: (open: () => void) => void }) {
+  void IncidentAnalysis
   const [resolveApi] = useResolveIncidentMutation()
   const [fpApi] = useMarkFalsePositiveMutation()
-  const { handleAnalysisStart, handleAnalysisComplete, handleRate } = useKubeChan()
+  const { handleAnalysisStart, handleAnalysisComplete, handleAnalysisFailed } = useKubeChan()
 
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [resolveStep, setResolveStep] = useState<'idle' | 'confirm'>('idle')
   const [fpStep, setFpStep] = useState<'idle' | 'confirm'>('idle')
   const [augmentOpen, setAugmentOpen] = useState(false)
-  const [detailTab, setDetailTab] = useState<'overview' | 'assessment' | 'timeline' | 'diagnostics'>('overview')
 
   const id = incident.metadata.name
   const isResolved = incident.status.state === 'resolved'
   const isManual = incident.spec.source === 'manual'
   const alreadyAnalyzed = !!previousRun?.analysisResultId
-  const needsMoreInfo = alreadyAnalyzed && !!previousRun?.needsMoreInfo && (previousRun.suggestedResources?.length ?? 0) > 0
-  const { title, sub } = incidentLabel(incident)
+  const needsMoreInfo = alreadyAnalyzed && !!previousRun?.needsMoreInfo
+  const { title } = incidentLabel(incident)
   const rootNS = incident.spec.rootResource.namespace || incident.metadata.namespace || ''
 
-  async function handleAnalyze() {
-    setIsAnalyzing(true)
-    handleAnalysisStart(title)
-    onAction?.()
-    try {
-      const res = await analyze(id).unwrap()
-      const ok = await waitForAnalysis(res.diagnosticRunId)
-      if (ok) {
-        const result = await fetchAnalysisResult(res.diagnosticRunId)
-        if (result) handleAnalysisComplete(result, incident.metadata.name)
-      }
-      onRefresh()
-    } catch {
-      // error handled below
-    } finally {
-      setIsAnalyzing(false)
-    }
-  }
+  useEffect(() => { onRegisterAugment?.(() => setAugmentOpen(true)) }, [onRegisterAugment])
 
   async function fetchAnalysisResult(runId: string): Promise<AnalysisResult | null> {
     const { getToken } = await import('../../api/index')
@@ -562,155 +424,80 @@ function IncidentCard({
           onRefresh()
         })
       } else {
+        handleAnalysisFailed(title)
         onRefresh()
       }
     }).finally(() => setIsAnalyzing(false))
   }
 
-  const incidentRuns = [...runs].sort((a, b) => (b.requestedAt ?? '').localeCompare(a.requestedAt ?? ''))
-  const timeline = [
-    incident.status.resolvedAt ? { at: incident.status.resolvedAt, label: 'Incident resolved', tone: 'success.main' } : null,
-    ...incidentRuns.map(run => ({ at: run.requestedAt, label: `Diagnostic run ${run.status.toLowerCase()}`, tone: 'primary.main' })),
-    incident.status.lastOccurrenceAt && incident.status.lastOccurrenceAt !== incident.status.openedAt
-      ? { at: incident.status.lastOccurrenceAt, label: `Occurrence ${incident.status.occurrenceCount ?? 1} detected`, tone: 'warning.main' }
-      : null,
-    incident.status.openedAt ? { at: incident.status.openedAt, label: 'Incident opened', tone: 'warning.main' } : null,
-  ].filter((entry): entry is { at: string; label: string; tone: string } => !!entry)
-    .sort((a, b) => b.at.localeCompare(a.at))
-
   return (
     <Box
       sx={{
         background: '#171b18',
-        p: { xs: 1.75, md: 2.5 },
-        minHeight: { lg: 'calc(100vh - 235px)' },
+        p: { xs: 1.1, md: 1.5 },
       }}
     >
-      {/* Header row */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, pb: 1.5, mb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Typography sx={{ fontSize: '0.64rem', lineHeight: 1, fontWeight: 800, letterSpacing: '0.09em', textTransform: 'uppercase', color: isResolved ? 'success.main' : 'warning.main' }}>
-          {incident.status.state}
-        </Typography>
-        {isManual && <Typography variant="caption" color="text.secondary">Manual report</Typography>}
-        {isManual && incident.ownerUsername && (
-          <Typography variant="caption" color="text.secondary">by {incident.ownerUsername}</Typography>
-        )}
-        {(incident.status.occurrenceCount ?? 1) > 1 && (
-          <Typography variant="caption" color="warning.main">{incident.status.occurrenceCount} occurrences</Typography>
-        )}
-        <Box sx={{ flex: 1 }} />
-        <Typography variant="caption" color="text.secondary">
-          {(incident.status.occurrenceCount ?? 1) > 1 ? 'Last occurrence ' : ''}
-          {timeAgo(incident.status.lastOccurrenceAt ?? incident.status.openedAt)}
-        </Typography>
+      <Typography component="h2" sx={{ fontWeight: 650, fontSize: '1rem', lineHeight: 1.35, mb: 0.3, color: isResolved ? 'text.secondary' : 'text.primary', letterSpacing: '-0.01em' }}>
+        {incident.spec.rootResource.name}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.66rem' }}>
+        {incident.spec.rootResource.kind} · {rootNS} · {isManual ? `manual${incident.ownerUsername ? ` by ${incident.ownerUsername}` : ''}` : 'auto-detected'}
+      </Typography>
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', mt: 1, border: '1px solid #343c35', background: '#141815' }}>
+        {[
+          ['Active symptoms', `${incident.status.activeProblemCases ?? 0}`],
+          ['Latest event', timeAgo(incident.status.lastOccurrenceAt ?? incident.status.openedAt)],
+          ['First detected', timeAgo(incident.status.openedAt)],
+          ['Occurrences', `${incident.status.occurrenceCount ?? 1}`],
+        ].map(([label, value], index) => <Box key={label} sx={{ px: 0.9, py: 0.7, borderLeft: index % 2 ? '1px solid #343c35' : 0, borderTop: index > 1 ? '1px solid #343c35' : 0 }}>
+          <Typography sx={{ fontSize: '0.54rem', lineHeight: 1.2, color: 'text.disabled', textTransform: 'uppercase', letterSpacing: '.08em' }}>{label}</Typography>
+          <Typography sx={{ mt: 0.2, fontSize: '0.72rem', lineHeight: 1.25, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
+        </Box>)}
       </Box>
 
-      {/* Title */}
-      <Typography component="h2" sx={{ fontWeight: 650, fontSize: '1.05rem', lineHeight: 1.35, mb: 0.55, color: isResolved ? 'text.secondary' : 'text.primary', letterSpacing: '-0.01em' }}>
-        {title}
-      </Typography>
-      {sub && <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.78rem', mb: 1.5 }}>{sub}</Typography>}
-
-      <Tabs
-        value={detailTab}
-        onChange={(_, value) => {
-          if (value === 'assessment' && previousRun) {
-            navigate(`/incidents/${encodeURIComponent(id)}/assessments/${encodeURIComponent(previousRun.diagnosticRunId)}`)
-            return
-          }
-          setDetailTab(value)
-        }}
-        aria-label="Incident detail sections"
-        sx={{ mt: 1.5, mb: 1.25, minHeight: 34, borderBottom: '1px solid', borderColor: 'divider', '& .MuiTab-root': { minHeight: 34, px: 1.25, py: 0.5, fontSize: '0.7rem', letterSpacing: '0.04em' } }}
-      >
-        <Tab value="overview" label="Overview" />
-        {previousRun?.analysisResultId && <Tab value="assessment" label="Assessment" />}
-        <Tab value="timeline" label={`Timeline ${timeline.length}`} />
-        <Tab value="diagnostics" label={`Diagnostics ${incidentRuns.length}`} />
-      </Tabs>
-
-      {detailTab === 'overview' && (
-        <>
-          <IncidentDetails incident={incident} previousRun={previousRun} problemCases={problemCases} runs={runs} />
-          {previousRun?.analysisResultId && (
-            <Button fullWidth onClick={() => navigate(`/incidents/${encodeURIComponent(id)}/assessments/${encodeURIComponent(previousRun.diagnosticRunId)}`)} sx={{ mt: 1.25, justifyContent: 'space-between', border: '1px solid', borderColor: 'rgba(213,166,74,0.25)', borderRadius: 0, px: 1.5, py: 1.1 }}>
-              <Box sx={{ textAlign: 'left' }}>
-                <Typography sx={{ fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'primary.main', fontWeight: 800 }}>View assessment</Typography>
-                <Typography variant="body2" color="text.primary" sx={{ mt: 0.25 }}>{previousRun.likelyRootCause ?? 'Open structured diagnosis'}</Typography>
-              </Box>
-              <Typography sx={{ color: 'success.main', fontWeight: 750 }}>{Math.round((previousRun.confidence ?? 0) * 100)}%</Typography>
-            </Button>
-          )}
-        </>
-      )}
-
-      {detailTab === 'assessment' && previousRun?.analysisResultId && (
-        <IncidentAnalysis key={previousRun.diagnosticRunId} previousRun={previousRun} onRate={handleRate} />
-      )}
-
-      {detailTab === 'timeline' && (
-        <Box sx={{ py: 0.5 }}>
-          {timeline.map((entry, index) => (
-            <Box key={`${entry.at}-${entry.label}`} sx={{ display: 'grid', gridTemplateColumns: '86px 12px 1fr', gap: 1, minHeight: 48 }}>
-              <Typography variant="caption" color="text.disabled" sx={{ pt: 0.15, textAlign: 'right' }}>{timeAgo(entry.at)}</Typography>
-              <Box sx={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
-                {index < timeline.length - 1 && <Box sx={{ position: 'absolute', top: 9, bottom: -9, width: '1px', background: 'divider' }} />}
-                <Box sx={{ mt: 0.4, width: 7, height: 7, borderRadius: '50%', background: entry.tone, zIndex: 1 }} />
-              </Box>
-              <Box>
-                <Typography variant="body2" sx={{ fontSize: '0.78rem', fontWeight: 600 }}>{entry.label}</Typography>
-                <Typography variant="caption" color="text.disabled">{new Date(entry.at).toLocaleString()}</Typography>
-              </Box>
-            </Box>
-          ))}
+      <Box component="section" sx={{ mt: 1.1, pb: 1.1, borderBottom: '1px solid #3b443c' }}>
+        <IncidentDetails incident={incident} problemCases={problemCases} />
+      </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mt: 1.1, mb: 0.65 }}>
+        <Typography sx={{ fontSize: '0.68rem', fontWeight: 700 }}>Diagnostic analysis</Typography>
+        <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.6rem' }}>{previousRun ? `run · ${timeAgo(previousRun.analysisCreatedAt ?? previousRun.requestedAt)}` : 'not collected'}</Typography>
+      </Box>
+      {previousRun?.analysisResultId && (
+        <Box sx={{ p: 1, border: '1px solid', borderColor: 'divider', background: 'rgba(255,255,255,0.015)' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.35 }}>
+            <Typography sx={{ fontSize: '0.62rem', fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: previousRun.needsMoreInfo ? 'warning.main' : 'success.main' }}>
+              {previousRun.needsMoreInfo ? 'More context needed' : 'Analysis complete'}
+            </Typography>
+            <Typography sx={{ ml: 'auto', fontSize: '0.78rem', fontWeight: 750, color: (previousRun.confidence ?? 0) >= .8 ? 'success.main' : (previousRun.confidence ?? 0) >= .5 ? 'warning.main' : 'error.main' }}>
+              {Math.round((previousRun.confidence ?? 0) * 100)}%
+            </Typography>
+          </Box>
+          <Typography variant="body2" sx={{ fontSize: '0.72rem', lineHeight: 1.4 }}>{analysisSummary || previousRun.likelyRootCause || 'Analysis finished without a summary.'}</Typography>
+          {needsMoreInfo && !!previousRun.suggestedResources?.length && <Box sx={{ mt: 0.75, pt: 0.75, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Typography sx={{ fontSize: '0.6rem', color: 'warning.main', textTransform: 'uppercase', letterSpacing: '.07em' }}>Requested next</Typography>
+            {previousRun.suggestedResources.slice(0, 3).map((suggestion, index) => <Typography key={`${suggestion.kind}-${index}`} variant="caption" sx={{ display: 'block', mt: 0.35 }}><strong>{suggestion.kind}</strong> · {suggestion.reason}</Typography>)}
+            {previousRun.suggestedResources.some(suggestion => suggestion.kind.toLowerCase() === 'secret') && <Typography variant="caption" color="text.disabled">Secret values are never collected.</Typography>}
+          </Box>}
         </Box>
       )}
+      {!previousRun && <Box sx={{ mt: 0.75, py: 0.75, borderTop: '1px solid', borderColor: 'divider' }}>
+        <Typography sx={{ fontSize: '0.65rem', color: 'text.disabled', textTransform: 'uppercase', letterSpacing: '.08em' }}>Not analyzed</Typography>
+        <Typography variant="caption" color="text.secondary">Evidence has not been collected yet.</Typography>
+      </Box>}
+      {previousRun && !previousRun.analysisResultId && <Box sx={{ mt: 0.75, py: 0.75, borderTop: '1px solid', borderColor: 'divider' }}>
+        <Typography sx={{ fontSize: '0.65rem', fontWeight: 750, color: /fail|error/i.test(previousRun.status) ? 'error.main' : '#7fa8c9', textTransform: 'uppercase', letterSpacing: '.08em' }}>
+          {/fail|error/i.test(previousRun.status) ? 'Analysis failed' : /collect/i.test(previousRun.status) ? 'Collecting evidence' : 'Analysis running'}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">{timeAgo(previousRun.requestedAt)}</Typography>
+      </Box>}
 
-      {detailTab === 'diagnostics' && (
-        <Box sx={{ borderTop: incidentRuns.length ? '1px solid' : 0, borderColor: 'divider' }}>
-          {incidentRuns.length === 0 ? (
-            <Box sx={{ py: 4, textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">No diagnostic runs yet</Typography>
-              <Typography variant="caption" color="text.disabled">Run KubeChan analysis to collect evidence.</Typography>
-            </Box>
-          ) : incidentRuns.map(run => (
-            <Box key={run.diagnosticRunId} sx={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 1, py: 1.25, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography sx={{ fontFamily: 'monospace', fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>{run.diagnosticRunId}</Typography>
-                <Typography variant="caption" color="text.secondary">{timeAgo(run.requestedAt)}{run.model ? ` · ${run.model}` : ''}</Typography>
-              </Box>
-              <Box sx={{ textAlign: 'right' }}>
-                <Typography sx={{ fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: run.status === 'completed' ? 'success.main' : 'warning.main' }}>{run.status}</Typography>
-                {run.confidence != null && <Typography variant="caption" color="text.secondary">{Math.round(run.confidence * 100)}% confidence</Typography>}
-              </Box>
-            </Box>
-          ))}
-        </Box>
-      )}
-
-      {/* Actions row */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+      {(isAnalyzing || (!isResolved && isManual)) && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
         {isAnalyzing && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <CircularProgress size={14} />
             <Typography variant="caption" color="warning.main">KubeChan is on it…</Typography>
           </Box>
-        )}
-        {alreadyAnalyzed && !isAnalyzing && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-            <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>✓ analyzed</Typography>
-            <ConfidenceBadge confidence={previousRun?.confidence} />
-          </Box>
-        )}
-        {!isResolved && !isAnalyzing && (
-          <Button
-            size="small"
-            variant={alreadyAnalyzed ? 'text' : 'contained'}
-            onClick={handleAnalyze}
-            sx={{ fontSize: '0.78rem', minWidth: 0 }}
-          >
-            {alreadyAnalyzed ? 'Ask again' : 'Ask KubeChan to help'}
-          </Button>
         )}
         {!isResolved && isManual && resolveStep === 'idle' && !isAnalyzing && (
           <Button size="small" variant="outlined" color="success" onClick={() => setResolveStep('confirm')} sx={{ fontSize: '0.78rem' }}>
@@ -724,25 +511,7 @@ function IncidentCard({
             <Button size="small" variant="text" onClick={() => setResolveStep('idle')} sx={{ fontSize: '0.72rem' }}>Cancel</Button>
           </Box>
         )}
-      </Box>
-
-      {/* Needs more info banner */}
-      {needsMoreInfo && (
-        <Box sx={{ mt: 1.5, p: 1.5, background: 'rgba(245,158,11,0.08)', borderRadius: '8px', border: '1px solid rgba(245,158,11,0.2)', display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <HelpOutlineIcon sx={{ color: 'warning.main', fontSize: '1.1rem', flexShrink: 0 }} />
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="caption" sx={{ fontWeight: 700, color: 'warning.main', display: 'block' }}>KubeChan needs more evidence</Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-              {previousRun!.suggestedResources!.map((s, i) => (
-                <Chip key={i} label={s.kind} size="small" sx={{ background: 'rgba(245,158,11,0.1)', color: '#fbbf24', fontSize: '0.7rem', height: 18 }} />
-              ))}
-            </Box>
-          </Box>
-          <Button size="small" variant="outlined" color="warning" onClick={() => setAugmentOpen(true)} sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
-            Add context
-          </Button>
-        </Box>
-      )}
+      </Box>}
 
       {/* Exclusion rule suggestion banner */}
       {previousRun?.suggestExclusionRule && onSuggestRule && (
@@ -797,8 +566,18 @@ function IncidentCard({
 
 type InboxView = 'active' | 'resolved' | 'all'
 type IncidentSort = 'updated' | 'severity' | 'resource' | 'namespace'
+type AnalysisFilter = 'any' | 'not_analyzed' | 'needs_context' | 'completed' | 'running' | 'failed'
 
 const severityRank: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 }
+const toolbarSelectSx = {
+  height: 30,
+  fontSize: '0.68rem',
+  color: 'text.secondary',
+  '& .MuiSelect-select': { py: 0.5, pl: 0.75, pr: '19px !important', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  '& .MuiSelect-icon': { fontSize: '1rem' },
+  '&:hover': { bgcolor: 'rgba(255,255,255,0.035)' },
+  '&.Mui-focused': { outline: '2px solid #d5a64a', outlineOffset: 1 },
+}
 
 function incidentSeverity(incident: Incident, problemCases: ProblemCase[]): string {
   const names = new Set(incident.spec.problemCases ?? [])
@@ -808,11 +587,21 @@ function incidentSeverity(incident: Incident, problemCases: ProblemCase[]): stri
     .sort((a, b) => (severityRank[b] ?? 0) - (severityRank[a] ?? 0))[0] ?? 'unknown'
 }
 
-function IncidentInboxRow({ incident, severity, selected, checked, onClick, onCheck }: {
+function activeProblemCases(incident: Incident, problemCases: ProblemCase[]): ProblemCase[] {
+  const names = new Set(incident.spec.problemCases ?? [])
+  return problemCases.filter(pc => names.has(pc.metadata.name) && pc.status.state !== 'resolved')
+    .sort((a, b) => (severityRank[b.spec.severity.toLowerCase()] ?? 0) - (severityRank[a.spec.severity.toLowerCase()] ?? 0))
+}
+
+function IncidentInboxRow({ incident, severity, selected, expanded, checked, run, signal, symptoms, onClick, onCheck }: {
   incident: Incident
   severity: string
   selected: boolean
+  expanded: boolean
   checked: boolean
+  run?: DiagnosticRunSummary
+  signal: string
+  symptoms: string
   onClick: () => void
   onCheck: () => void
 }) {
@@ -823,16 +612,25 @@ function IncidentInboxRow({ incident, severity, selected, checked, onClick, onCh
   const severityColor: Record<string, string> = {
     critical: '#d96b68', high: '#d9975f', medium: '#d5a64a', low: '#7da399', unknown: '#687169',
   }
+  const analysisState = isResolved ? 'Resolved' : run?.needsMoreInfo ? 'Needs context' : run?.analysisResultId ? 'Completed' : run ? run.status === 'failed' ? 'Failed' : run.status === 'collecting' ? 'Collecting evidence' : 'Analysis running' : 'Not analyzed'
+  const analysisColor = isResolved ? '#7da399' : run?.needsMoreInfo ? '#d5a64a' : run?.analysisResultId ? '#6da985' : run && /fail|error/i.test(run.status) ? '#d96b68' : run ? '#7fa8c9' : '#7b837d'
   return (
     <Box
-      component="button"
+      component="div"
+      role="button"
+      data-incident-id={incident.metadata.name}
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClick() } }}
       aria-pressed={selected}
+      aria-expanded={expanded}
+      aria-controls="incident-drawer"
+      aria-label={`${rootResource.name}, ${severity} severity, ${isResolved ? 'resolved' : 'open'}, ${analysisState}${run?.confidence != null ? `, ${Math.round(run.confidence * 100)} percent confidence` : ''}`}
       sx={{
         width: '100%', textAlign: 'left', color: 'inherit', cursor: 'pointer',
         display: 'grid',
-        gridTemplateColumns: '32px 5px minmax(150px, 1fr) 88px 74px',
-        alignItems: 'center', gap: 1.25, minHeight: 58, px: 0, py: 0,
+        gridTemplateColumns: { xs: '28px 4px minmax(105px, 1fr) minmax(70px, .6fr) 58px', sm: '28px 4px minmax(130px, 1.3fr) minmax(100px, .8fr) minmax(100px, .9fr) minmax(120px, 1fr) 62px' },
+        alignItems: 'center', gap: 1.25, minHeight: 64, px: 0, py: 0,
         border: 0, borderBottom: '1px solid', borderColor: 'divider',
         background: selected ? 'rgba(213,166,74,0.075)' : 'transparent',
         boxShadow: selected ? 'inset 2px 0 0 #d5a64a' : 'none',
@@ -854,16 +652,26 @@ function IncidentInboxRow({ incident, severity, selected, checked, onClick, onCh
           {rootResource.name}
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {namespace} / {rootResource.kind}
+          {namespace} · {rootResource.kind}{incident.spec.source === 'manual' ? ' · manual' : ''}
         </Typography>
       </Box>
       <Box>
         <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: isResolved ? 'success.main' : severityColor[severity] }}>
           {isResolved ? 'Resolved' : severity}
         </Typography>
-        <Typography variant="caption" color="text.disabled">
-          {occurrences > 1 ? `${occurrences} events` : `${incident.status.activeProblemCases ?? 0} active`}
+        <Typography variant="caption" color="text.disabled" title={signal} sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {signal || (incident.spec.source === 'manual' ? 'User reported' : `${occurrences} events`)}
         </Typography>
+      </Box>
+      <Box sx={{ minWidth: 0, display: { xs: 'none', sm: 'block' } }}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{incident.spec.source === 'manual' ? 'Manual' : `${incident.status.activeProblemCases ?? 0} active`}</Typography>
+        <Typography variant="caption" color="text.disabled" title={symptoms} sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{symptoms || 'No symptom detail'}</Typography>
+      </Box>
+      <Box sx={{ display: { xs: 'none', sm: 'block' }, minWidth: 0 }}>
+        <Typography variant="caption" sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: analysisColor, fontWeight: 650 }}>
+          {analysisState}{run?.confidence != null && <Box component="span" sx={{ ml: 0.5, fontWeight: 750 }}>{Math.round(run.confidence * 100)}%</Box>}
+        </Typography>
+        <Typography variant="caption" color="text.disabled">{run ? timeAgo(run.analysisCreatedAt ?? run.requestedAt) : 'No diagnostic run'}</Typography>
       </Box>
       <Typography variant="caption" color="text.disabled" sx={{ textAlign: 'right', pr: 1.25 }}>
         {timeAgo(incident.status.lastOccurrenceAt ?? incident.status.resolvedAt ?? incident.status.openedAt)}
@@ -880,23 +688,36 @@ export interface IncidentListProps {
 
 export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: IncidentListProps = {}) {
   const dispatch = useAppDispatch()
+  const navigate = useNavigate()
   const initialParams = new URLSearchParams(window.location.search)
   const initialView = initialParams.get('view')
   const initialSort = initialParams.get('sort')
+  const initialAnalysis = initialParams.get('analysis')
   const [view, setView] = useState<InboxView>(initialView === 'resolved' || initialView === 'all' ? initialView : 'active')
   const [search, setSearch] = useState(initialParams.get('q') ?? '')
   const [namespace, setNamespace] = useState(initialParams.get('namespace') ?? 'all')
   const [severity, setSeverity] = useState(initialParams.get('severity') ?? 'all')
   const [sort, setSort] = useState<IncidentSort>(initialSort === 'severity' || initialSort === 'resource' || initialSort === 'namespace' ? initialSort : 'updated')
+  const [analysisFilter, setAnalysisFilter] = useState<AnalysisFilter>(initialAnalysis === 'not_analyzed' || initialAnalysis === 'needs_context' || initialAnalysis === 'completed' || initialAnalysis === 'running' || initialAnalysis === 'failed' ? initialAnalysis : 'any')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [visibleCount, setVisibleCount] = useState(20)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerIncidentId, setDrawerIncidentId] = useState<string | null>(null)
+  const [switching, setSwitching] = useState(false)
+  const switchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const switchToken = useRef(0)
+  const tableRef = useRef<HTMLDivElement | null>(null)
+  const controlsRef = useRef<HTMLDivElement | null>(null)
+  const drawerBodyRef = useRef<HTMLDivElement | null>(null)
+  const [tableHeight, setTableHeight] = useState(480)
 
   const { data: incidents = [], isLoading, isError, error, refetch } = useListIncidentsQuery()
-  const { data: problemCases = [] } = useListProblemCasesQuery()
+  const { data: problemCases = [], refetch: refetchProblemCases } = useListProblemCasesQuery()
   const { data: runs = [], refetch: refetchRuns } = useListDiagnosticRunsQuery()
+  const [analyzeIncident] = useAnalyzeMutation()
   const [resolveSelected] = useResolveIncidentMutation()
 
   useEffect(() => {
@@ -905,12 +726,19 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
     if (search.trim()) params.set('q', search.trim())
     if (namespace !== 'all') params.set('namespace', namespace)
     if (severity !== 'all') params.set('severity', severity)
+    if (analysisFilter !== 'any') params.set('analysis', analysisFilter)
     if (sort !== 'updated') params.set('sort', sort)
     const query = params.toString()
     window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
-  }, [view, search, namespace, severity, sort])
+  }, [view, search, namespace, severity, analysisFilter, sort])
 
-  function refetchAll() { refetch(); refetchRuns() }
+  function refetchAll() { refetch(); refetchProblemCases(); refetchRuns() }
+
+  useEffect(() => {
+    const refresh = () => { refetch(); refetchProblemCases(); refetchRuns() }
+    window.addEventListener('kubechan:refresh-incidents', refresh)
+    return () => window.removeEventListener('kubechan:refresh-incidents', refresh)
+  }, [refetch, refetchProblemCases, refetchRuns])
 
   // Build incidentId → latest run map
   const priorRuns = runs.reduce<Record<string, DiagnosticRunSummary>>((acc, run) => {
@@ -934,6 +762,12 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
     if (namespace !== 'all' && ns !== namespace) return false
     const currentSeverity = incidentSeverity(incident, problemCases)
     if (severity !== 'all' && currentSeverity !== severity) return false
+    const latestRun = priorRuns[incident.metadata.name]
+    if (analysisFilter === 'not_analyzed' && latestRun) return false
+    if (analysisFilter === 'needs_context' && !latestRun?.needsMoreInfo) return false
+    if (analysisFilter === 'completed' && (!latestRun?.analysisResultId || latestRun.needsMoreInfo)) return false
+    if (analysisFilter === 'running' && (!latestRun || latestRun.analysisResultId || /fail|error/i.test(latestRun.status))) return false
+    if (analysisFilter === 'failed' && (!latestRun || !/fail|error/i.test(latestRun.status))) return false
     if (normalizedSearch) {
       const haystack = [incident.metadata.name, incident.spec.rootResource.kind, incident.spec.rootResource.name, ns].join(' ').toLowerCase()
       if (!haystack.includes(normalizedSearch)) return false
@@ -952,11 +786,135 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
     return bTime.localeCompare(aTime)
   })
   const selected = filtered.find(i => i.metadata.name === selectedId) ?? filtered[0]
+  const drawerIncident = allIncidents.find(i => i.metadata.name === drawerIncidentId)
+  const drawerRun = drawerIncident ? priorRuns[drawerIncident.metadata.name] : undefined
+  const drawerRunActive = !!drawerRun && !drawerRun.analysisResultId && !['completed', 'failed', 'error'].includes(drawerRun.status.toLowerCase())
+  const { data: drawerEvidence, isLoading: evidenceLoading, isError: evidenceError } = useGetDiagnosticRunEvidenceQuery(drawerRun?.diagnosticRunId ?? '', { skip: !drawerOpen || !drawerRun?.analysisResultId })
+  const [drawerAnalysis, setDrawerAnalysis] = useState<AnalysisResult | null>(null)
+  const drawerNeedsMoreInfo = drawerAnalysis && drawerAnalysis.diagnosticRunId === drawerRun?.diagnosticRunId
+    ? (drawerAnalysis.payload.assessment?.needsMoreInfo ?? drawerAnalysis.payload.needsMoreInfo ?? drawerRun?.needsMoreInfo ?? false)
+    : (drawerRun?.needsMoreInfo ?? false)
+  const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [openAugment, setOpenAugment] = useState<(() => void) | null>(null)
+  const registerAugment = useCallback((open: () => void) => { setOpenAugment(() => open) }, [])
+  const [startingIds, setStartingIds] = useState<Set<string>>(new Set())
+  const footerBusy = !!drawerIncident && startingIds.has(drawerIncident.metadata.name)
+  const [footerError, setFooterError] = useState<string | null>(null)
+  const { handleAnalysisStart, handleAnalysisComplete, handleAnalysisFailed } = useKubeChan()
+
+  useEffect(() => {
+    let current = true
+    setDrawerAnalysis(null)
+    if (drawerOpen && drawerRun?.analysisResultId) {
+      setAnalysisLoading(true)
+      import('../../api/index').then(({ getToken }) => {
+        const token = getToken()
+        const headers: Record<string, string> = {}
+        if (token) headers.Authorization = `Bearer ${token}`
+        return fetch(`/api/v1/diagnosticruns/${encodeURIComponent(drawerRun.diagnosticRunId)}/analysisresult`, { headers })
+      }).then(async response => response.ok ? await response.json() as AnalysisResult : null)
+        .then(result => { if (current) setDrawerAnalysis(result) })
+        .catch(() => { if (current) setDrawerAnalysis(null) })
+        .finally(() => { if (current) setAnalysisLoading(false) })
+    } else setAnalysisLoading(false)
+    return () => { current = false }
+  }, [drawerOpen, drawerRun?.diagnosticRunId, drawerRun?.analysisResultId])
+
+  useEffect(() => () => { if (switchTimer.current) clearTimeout(switchTimer.current) }, [])
+
+  function closeDrawer() {
+    const focusWasInDrawer = !!document.activeElement?.closest('#incident-drawer')
+    ++switchToken.current
+    if (switchTimer.current) clearTimeout(switchTimer.current)
+    setSwitching(false)
+    setDrawerOpen(false)
+    if (focusWasInDrawer) requestAnimationFrame(() => {
+      const row = Array.from(document.querySelectorAll<HTMLElement>('[data-incident-id]'))
+        .find(element => element.dataset.incidentId === drawerIncidentId)
+      row?.focus()
+    })
+  }
+
+  async function startAnalysis(incident: Incident) {
+    const incidentId = incident.metadata.name
+    if (startingIds.has(incidentId)) return
+    setStartingIds(previous => new Set(previous).add(incidentId))
+    setFooterError(null)
+    const label = incidentLabel(incident).title
+    handleAnalysisStart(label)
+    onAction?.()
+    try {
+      const response = await analyzeIncident(incidentId).unwrap()
+      void waitForAnalysis(response.diagnosticRunId).then(async completed => {
+        if (completed) {
+          const { getToken } = await import('../../api/index')
+          const token = getToken()
+          const headers: Record<string, string> = {}
+          if (token) headers.Authorization = `Bearer ${token}`
+          const resultResponse = await fetch(`/api/v1/diagnosticruns/${encodeURIComponent(response.diagnosticRunId)}/analysisresult`, { headers })
+          if (resultResponse.ok) handleAnalysisComplete(await resultResponse.json() as AnalysisResult, incidentId)
+        } else {
+          handleAnalysisFailed(label)
+        }
+        refetchAll()
+      }).catch(() => { refetchAll() })
+    } catch {
+      handleAnalysisFailed(label)
+      setFooterError(incidentId)
+    } finally {
+      setStartingIds(previous => {
+        const next = new Set(previous)
+        next.delete(incidentId)
+        return next
+      })
+    }
+  }
+
+  function selectIncident(incident: Incident) {
+    setSelectedId(incident.metadata.name)
+    setFooterError(null)
+    if (drawerOpen && drawerIncidentId === incident.metadata.name) { closeDrawer(); return }
+    const token = ++switchToken.current
+    if (switchTimer.current) clearTimeout(switchTimer.current)
+    if (drawerOpen) {
+      setSwitching(true)
+      switchTimer.current = setTimeout(() => {
+        if (token !== switchToken.current) return
+        setDrawerIncidentId(incident.metadata.name)
+        requestAnimationFrame(() => requestAnimationFrame(() => { if (token === switchToken.current) setSwitching(false) }))
+      }, 220)
+    } else {
+      setDrawerIncidentId(incident.metadata.name)
+      setDrawerOpen(true)
+    }
+  }
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) { if (event.key === 'Escape' && drawerOpen) closeDrawer() }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [drawerOpen])
   const visibleIncidents = filtered.slice(0, visibleCount)
+
+  useLayoutEffect(() => {
+    const updateHeight = () => {
+      const top = tableRef.current?.getBoundingClientRect().top
+      if (top != null) setTableHeight(Math.max(260, Math.min(720, window.innerHeight - top - 12)))
+    }
+    updateHeight()
+    window.addEventListener('resize', updateHeight)
+    const observer = new ResizeObserver(updateHeight)
+    if (tableRef.current) observer.observe(tableRef.current)
+    if (controlsRef.current) observer.observe(controlsRef.current)
+    return () => { window.removeEventListener('resize', updateHeight); observer.disconnect() }
+  }, [isLoading, filtered.length, checkedIds.size])
+
+  useLayoutEffect(() => { if (drawerBodyRef.current) drawerBodyRef.current.scrollTop = 0 }, [drawerIncidentId])
 
   function changeView(next: InboxView) {
     setView(next)
     setSelectedId(null)
+    closeDrawer()
     setVisibleCount(20)
     setCheckedIds(new Set())
   }
@@ -964,7 +922,7 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
   useEffect(() => {
     function handleKeyboard(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null
-      if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
+      if (target?.closest('input, textarea, select, button, [role="dialog"], [contenteditable="true"]')) return
       if (!filtered.length) return
       const index = Math.max(0, filtered.findIndex(incident => incident.metadata.name === selected?.metadata.name))
       if (event.key === 'ArrowDown' || event.key === 'j') {
@@ -1010,13 +968,14 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
         key={incident.metadata.name}
         incident={incident}
         previousRun={priorRuns[incident.metadata.name]}
+        analysisSummary={drawerAnalysis?.diagnosticRunId === priorRuns[incident.metadata.name]?.diagnosticRunId ? drawerAnalysis.payload.assessment?.summary : undefined}
         problemCases={problemCases}
-        runs={runs.filter(run => run.incidentId === incident.metadata.name)}
         onAction={onAction}
         onResolved={onResolved}
         onSuggestRule={(p) => dispatch(setExclusionProposal(p))}
         onMarkFalsePositive={onMarkFalsePositive}
         onRefresh={refetchAll}
+        onRegisterAugment={registerAugment}
       />
     )
   }
@@ -1027,7 +986,7 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
           <Typography variant="h6">Incidents</Typography>
         </Box>
-        {[1, 2, 3].map(i => <Skeleton key={i} variant="rounded" height={120} sx={{ borderRadius: '12px' }} />)}
+        {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} variant="rectangular" height={58} />)}
       </Box>
     )
   }
@@ -1042,91 +1001,87 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1.5, mb: 2.25 }}>
-        <Box sx={{ flex: 1 }}>
-          <Typography component="h1" sx={{ fontSize: '1.35rem', fontWeight: 650, letterSpacing: '-0.02em' }}>Incident operations</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35, fontSize: '0.78rem' }}>
-            Triage cluster failures, review evidence, and coordinate resolution.
+      <Box sx={{ display: 'flex', alignItems: 'flex-end', flexWrap: { xs: 'wrap', sm: 'nowrap' }, gap: 1.5, mb: 2.25 }}>
+        <Box sx={{ flex: { xs: '1 1 100%', sm: 1 }, minWidth: 0 }}>
+          <Typography component="h1" sx={{ fontSize: '1.35rem', fontWeight: 650, letterSpacing: '-0.02em' }}>Incidents</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, fontSize: '0.68rem' }}>
+            Compare active signals and review diagnostic outcomes.
           </Typography>
         </Box>
-        <IconButton size="small" onClick={refetch} title="Refresh">
-          <RefreshIcon fontSize="small" />
-        </IconButton>
-        <Button
-          variant="contained"
-          size="small"
-          startIcon={<AddCommentIcon sx={{ fontSize: '0.9rem' }} />}
-          onClick={() => dispatch(openManualModal())}
-          sx={{ fontSize: '0.8rem' }}
-        >
-          Report an issue
-        </Button>
+        <Box sx={{ display: 'flex', width: { xs: '100%', sm: 'auto' }, gap: 1.1, mr: 0.5, color: 'text.secondary', whiteSpace: 'nowrap' }}>
+          <Typography variant="caption" sx={{ fontSize: '0.62rem' }}><strong>{open.length}</strong> active</Typography>
+          <Typography variant="caption" sx={{ fontSize: '0.62rem' }}><strong>{open.filter(incident => ['critical', 'high'].includes(incidentSeverity(incident, problemCases))).length}</strong> high priority</Typography>
+          <Typography variant="caption" sx={{ fontSize: '0.62rem' }}><strong>{open.filter(incident => priorRuns[incident.metadata.name]?.needsMoreInfo).length}</strong> need context</Typography>
+        </Box>
       </Box>
 
-      <Box sx={{ mb: 1.5, borderTop: '1px solid', borderBottom: '1px solid', borderColor: 'divider', background: 'rgba(255,255,255,0.01)' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <ToggleButtonGroup exclusive size="small" value={view} onChange={(_, value: InboxView | null) => value && changeView(value)} sx={{ alignSelf: 'stretch' }}>
-            <ToggleButton value="active">Active {open.length}</ToggleButton>
-            <ToggleButton value="resolved">Resolved {resolved.length}</ToggleButton>
-            <ToggleButton value="all">All {allIncidents.length}</ToggleButton>
-          </ToggleButtonGroup>
-          <TextField
-            size="small"
-            value={search}
-            onChange={event => { setSearch(event.target.value); setSelectedId(null); setVisibleCount(20) }}
-            placeholder="Search incidents"
-            sx={{ flex: '1 1 180px', minWidth: 0, my: 0.75 }}
-            slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: '1rem' }} /></InputAdornment> } }}
-          />
-          <FormControl size="small" sx={{ minWidth: 130, my: 0.75 }}>
-            <Select value={namespace} onChange={event => { setNamespace(event.target.value); setSelectedId(null); setVisibleCount(20) }} displayEmpty>
+      <Box ref={controlsRef} sx={{ mb: 1, py: 0.5, borderTop: '1px solid', borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4, flexWrap: 'wrap' }}>
+          <Box role="group" aria-label="Incident status" sx={{ display: 'flex', alignItems: 'center', gap: 0.65, flexShrink: 0 }}>
+            {([['active', open.length], ['resolved', resolved.length], ['all', allIncidents.length]] as const).map(([option, count]) => (
+              <Box component="button" type="button" key={option} aria-pressed={view === option} onClick={() => changeView(option)}
+                sx={{ height: 30, px: 0.7, border: '1px solid', borderColor: view === option ? '#8e6c2d' : 'divider', borderRadius: 0, background: view === option ? 'rgba(213,166,74,.08)' : 'transparent', color: view === option ? '#f0d28b' : 'text.secondary', font: 'inherit', fontSize: '0.63rem', whiteSpace: 'nowrap', cursor: 'pointer', '&:hover': { borderColor: '#8e6c2d', color: 'text.primary' }, '&:focus-visible': { outline: '2px solid #d5a64a', outlineOffset: 2 } }}>
+                {option === 'active' ? 'Active' : option === 'resolved' ? 'Resolved' : 'All'} {count}
+              </Box>
+            ))}
+          </Box>
+          <FormControl variant="standard" size="small" sx={{ width: 115, flex: '0 0 115px' }}>
+            <Select value={namespace} onChange={event => { setNamespace(event.target.value); setSelectedId(null); closeDrawer(); setVisibleCount(20) }} displayEmpty disableUnderline aria-label="Filter by namespace" renderValue={value => value === 'all' ? 'Namespace: all' : `Namespace: ${value}`} sx={toolbarSelectSx}>
               <MenuItem value="all">All namespaces</MenuItem>
               {namespaces.map(ns => <MenuItem key={ns} value={ns}>{ns}</MenuItem>)}
             </Select>
           </FormControl>
-          <FormControl size="small" sx={{ minWidth: 110, my: 0.75, mr: 0.75 }}>
-            <Select value={severity} onChange={event => { setSeverity(event.target.value); setSelectedId(null); setVisibleCount(20) }} displayEmpty>
+          <FormControl variant="standard" size="small" sx={{ width: 95, flex: '0 0 95px' }}>
+            <Select value={severity} onChange={event => { setSeverity(event.target.value); setSelectedId(null); closeDrawer(); setVisibleCount(20) }} displayEmpty disableUnderline aria-label="Filter by severity" renderValue={value => value === 'all' ? 'Severity: all' : `Severity: ${value}`} sx={toolbarSelectSx}>
               <MenuItem value="all">All severity</MenuItem>
               {['critical', 'high', 'medium', 'low'].map(level => <MenuItem key={level} value={level}>{level}</MenuItem>)}
             </Select>
           </FormControl>
-        </Box>
-      </Box>
-
-      <Box sx={{ display: 'flex', alignItems: 'center', minHeight: 34, mb: 1, gap: 1 }}>
-        <Typography variant="caption" color="text.secondary">
-          {filtered.length} incident{filtered.length === 1 ? '' : 's'}
-        </Typography>
-        <Typography variant="caption" color="text.disabled" sx={{ display: { xs: 'none', md: 'block' } }}>
-          · Navigate with ↑ ↓ or J K
-        </Typography>
-        <Box sx={{ flex: 1 }} />
-        {checkedIds.size === 0 && (
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <Select value={sort} onChange={event => setSort(event.target.value as IncidentSort)} displayEmpty aria-label="Sort incidents" sx={{ height: 30, fontSize: '0.75rem' }}>
+          <FormControl variant="standard" size="small" sx={{ width: 105, flex: '0 0 105px' }}>
+            <Select value={analysisFilter} onChange={event => { setAnalysisFilter(event.target.value as AnalysisFilter); setSelectedId(null); closeDrawer(); setVisibleCount(20) }} displayEmpty disableUnderline aria-label="Filter by analysis state" renderValue={value => value === 'any' ? 'Analysis: any' : `Analysis: ${String(value).replace('_', ' ')}`} sx={toolbarSelectSx}>
+              <MenuItem value="any">Any analysis</MenuItem>
+              <MenuItem value="not_analyzed">Not analyzed</MenuItem>
+              <MenuItem value="needs_context">Needs context</MenuItem>
+              <MenuItem value="completed">Completed</MenuItem>
+              <MenuItem value="running">Running</MenuItem>
+              <MenuItem value="failed">Failed</MenuItem>
+            </Select>
+          </FormControl>
+          <TextField
+            id="incident-search"
+            variant="standard"
+            size="small"
+            value={search}
+            onChange={event => { setSearch(event.target.value); setSelectedId(null); closeDrawer(); setVisibleCount(20) }}
+            placeholder="Search"
+            aria-label="Search incidents"
+            sx={{ width: 70, flex: '0 1 70px', minWidth: 68, px: 0.4, '& .MuiInputBase-root': { height: 30, fontSize: '0.68rem' } }}
+            slotProps={{ input: { disableUnderline: true, startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: '0.85rem' }} /></InputAdornment> } }}
+          />
+          <FormControl variant="standard" size="small" sx={{ width: 145, flex: '0 0 145px', ml: 'auto' }}>
+            <Select value={sort} onChange={event => setSort(event.target.value as IncidentSort)} displayEmpty disableUnderline aria-label="Sort incidents" renderValue={value => value === 'updated' ? 'Sort: recent activity' : `Sort: ${value}`} sx={toolbarSelectSx}>
               <MenuItem value="updated">Newest activity</MenuItem>
               <MenuItem value="severity">Highest severity</MenuItem>
               <MenuItem value="resource">Resource name</MenuItem>
               <MenuItem value="namespace">Namespace</MenuItem>
             </Select>
           </FormControl>
-        )}
-        {checkedIds.size > 0 && (
-          <>
-            <Typography variant="caption" sx={{ color: 'primary.light', fontWeight: 700 }}>{checkedIds.size} selected</Typography>
-            {!bulkConfirm ? (
-              <Button size="small" variant="outlined" color="success" onClick={() => setBulkConfirm(true)}>Resolve selected</Button>
-            ) : (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="caption" color="text.secondary">Resolve open incidents?</Typography>
-                <Button size="small" variant="contained" color="success" disabled={bulkBusy} onClick={bulkResolve}>{bulkBusy ? 'Resolving…' : 'Confirm'}</Button>
-                <Button size="small" variant="text" onClick={() => setBulkConfirm(false)}>Cancel</Button>
-              </Box>
-            )}
-            <Button size="small" variant="text" color="inherit" onClick={() => setCheckedIds(new Set())}>Clear</Button>
-          </>
-        )}
+        </Box>
       </Box>
+
+      {checkedIds.size > 0 && <Box sx={{ display: 'flex', alignItems: 'center', minHeight: 34, mb: 1, gap: 1 }}>
+        <Typography variant="caption" sx={{ color: 'primary.light', fontWeight: 700 }}>{checkedIds.size} selected</Typography>
+        {!bulkConfirm ? (
+          <Button size="small" variant="outlined" color="success" onClick={() => setBulkConfirm(true)}>Resolve selected</Button>
+        ) : (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Typography variant="caption" color="text.secondary">Resolve open incidents?</Typography>
+            <Button size="small" variant="contained" color="success" disabled={bulkBusy} onClick={bulkResolve}>{bulkBusy ? 'Resolving…' : 'Confirm'}</Button>
+            <Button size="small" variant="text" onClick={() => setBulkConfirm(false)}>Cancel</Button>
+          </Box>
+        )}
+        <Button size="small" variant="text" color="inherit" onClick={() => setCheckedIds(new Set())}>Clear</Button>
+      </Box>}
 
       {filtered.length === 0 ? (
         <Box sx={{ textAlign: 'center', py: 7, border: '1px dashed', borderColor: 'divider', borderRadius: 2 }}>
@@ -1134,9 +1089,9 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
           <Typography color="text.secondary">No incidents match this view</Typography>
         </Box>
       ) : (
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(360px, 0.82fr) minmax(460px, 1.18fr)' }, border: '1px solid', borderColor: 'divider', minHeight: 520, alignItems: 'start' }}>
-          <Box sx={{ borderRight: { lg: '1px solid' }, borderColor: { lg: 'divider' }, minWidth: 0 }}>
-            <Box sx={{ position: 'sticky', top: 0, zIndex: 2, display: 'grid', gridTemplateColumns: '32px 5px minmax(150px, 1fr) 88px 74px', gap: 1.25, px: 0, height: 32, alignItems: 'center', borderBottom: '1px solid', borderColor: 'divider', background: '#141815' }}>
+        <Box ref={tableRef} sx={{ position: 'relative', border: '1px solid', borderColor: 'divider', height: tableHeight, overflow: 'hidden' }}>
+          <Box sx={{ height: 'calc(100% - 42px)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <Box sx={{ position: 'sticky', top: 0, zIndex: 2, display: 'grid', gridTemplateColumns: { xs: '28px 4px minmax(105px,1fr) minmax(70px,.6fr) 58px', sm: '28px 4px minmax(130px,1.3fr) minmax(100px,.8fr) minmax(100px,.9fr) minmax(120px,1fr) 62px' }, gap: 1.25, px: 0, height: 35, alignItems: 'center', borderBottom: '1px solid', borderColor: 'divider', background: '#141815' }}>
               <Checkbox
                 size="small"
                 checked={filtered.length > 0 && filtered.every(incident => checkedIds.has(incident.metadata.name))}
@@ -1150,45 +1105,99 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
                 sx={{ p: 0.5, ml: 0.25 }}
               />
               <Box />
-              <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.6rem' }}>Resource</Typography>
+              <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.6rem' }}>Incident / resource</Typography>
               <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.6rem' }}>Signal</Typography>
-              <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.6rem', textAlign: 'right', pr: 1.25 }}>Age</Typography>
+              <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.6rem', display: { xs: 'none', sm: 'block' } }}>Symptoms</Typography>
+              <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.6rem', display: { xs: 'none', sm: 'block' } }}>Latest analysis</Typography>
+              <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.6rem', textAlign: 'right', pr: 1.25 }}>Updated</Typography>
             </Box>
-          <Stack spacing={0} sx={{ maxHeight: { lg: 'calc(100vh - 235px)' }, overflowY: { lg: 'auto' } }}>
+          <Stack spacing={0} onScroll={event => {
+            const list = event.currentTarget
+            if (list.scrollHeight - list.scrollTop - list.clientHeight < 100 && visibleCount < filtered.length) setVisibleCount(count => Math.min(count + 20, filtered.length))
+          }} sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pb: 0.5 }}>
             {visibleIncidents.map(incident => (
               <Box key={incident.metadata.name}>
                 <IncidentInboxRow
                   incident={incident}
                   severity={incidentSeverity(incident, problemCases)}
                   selected={incident.metadata.name === selected?.metadata.name}
+                  expanded={drawerOpen && incident.metadata.name === drawerIncidentId}
                   checked={checkedIds.has(incident.metadata.name)}
-                  onClick={() => setSelectedId(incident.metadata.name)}
+                  run={runs.filter(run => run.incidentId === incident.metadata.name).sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))[0]}
+                  signal={activeProblemCases(incident, problemCases)[0]?.spec.detector.replace(/([a-z])([A-Z])/g, '$1 $2') ?? ''}
+                  symptoms={activeProblemCases(incident, problemCases)[0]?.spec.symptoms?.[0] ?? ''}
+                  onClick={() => selectIncident(incident)}
                   onCheck={() => toggleChecked(incident.metadata.name)}
                 />
-                {incident.metadata.name === selected?.metadata.name && (
-                  <Box sx={{ display: { xs: 'block', lg: 'none' }, borderBottom: '1px solid', borderColor: 'divider' }}>
-                    {renderIncidentCard(incident)}
+              </Box>
+            ))}
+          </Stack>
+          </Box>
+          <Box sx={{ position: 'absolute', inset: 0, bottom: 42, pointerEvents: 'none', overflow: 'hidden', zIndex: 5 }}>
+            <Box component="aside" id="incident-drawer" role="dialog" aria-modal="false" aria-label="Incident details" aria-hidden={!drawerOpen} inert={!drawerOpen || switching}
+              sx={{ pointerEvents: drawerOpen ? 'auto' : 'none', position: { xs: 'fixed', sm: 'absolute' }, right: 0, top: { xs: 60, sm: 0 }, bottom: 0, width: { xs: 'calc(100vw - 55px)', sm: 360 }, maxWidth: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#171b18', borderLeft: '1px solid', borderColor: 'divider', boxShadow: '-16px 0 36px rgba(0,0,0,.42)', transform: !drawerOpen || switching ? 'translateX(105%)' : 'translateX(0)', transition: 'transform 220ms ease', '@media (prefers-reduced-motion: reduce)': { transition: 'none' } }}>
+              <Box ref={drawerBodyRef} sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1.5, py: 0.5, minHeight: 42, borderBottom: '1px solid', borderColor: 'divider', position: 'sticky', top: 0, zIndex: 2, bgcolor: '#171b18' }}>
+                  <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: drawerIncident?.status.state === 'resolved' ? 'success.main' : 'error.main' }} />
+                  <Typography sx={{ fontSize: '0.62rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.08em', color: drawerIncident?.status.state === 'resolved' ? 'success.main' : 'error.main' }}>
+                    {drawerIncident?.status.state ?? 'Incident'} · {drawerIncident ? incidentSeverity(drawerIncident, problemCases) : ''}
+                  </Typography>
+                  <Typography sx={{ ml: 'auto', minWidth: 0, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.61rem', color: 'text.disabled', fontFamily: 'monospace' }}>{drawerIncident?.metadata.name}</Typography>
+                  <IconButton aria-label="Close incident details" onClick={closeDrawer} size="small"><CloseIcon fontSize="small" /></IconButton>
+                </Box>
+                {drawerIncident && renderIncidentCard(drawerIncident)}
+                {drawerIncident && drawerRun?.analysisResultId && (
+                  <Box component="section" sx={{ px: 1.1, pt: 1.1, pb: 1.5, mt: 0.3, borderTop: '1px solid #3b443c' }} aria-live="polite">
+                    <Typography sx={{ px: 0.9, mb: 0.6, fontSize: '0.68rem', fontWeight: 700 }}>Evidence used</Typography>
+                    {(evidenceLoading || analysisLoading) && <Typography variant="caption" sx={{ display: 'block' }}>Loading evidence and assessment…</Typography>}
+                    {(evidenceError || (!analysisLoading && !drawerAnalysis && !evidenceLoading)) && <Alert severity="warning" sx={{ mt: 0.5 }}>Run result or evidence is unavailable.</Alert>}
+                    {drawerAnalysis?.diagnosticRunId === drawerRun?.diagnosticRunId && drawerEvidence?.diagnosticRunId === drawerRun?.diagnosticRunId && (() => {
+                      const sourceMap = new Map((drawerEvidence.payload.sources ?? []).map(source => [source.id, source]))
+                      const assessment = drawerAnalysis.payload.assessment
+                      const seenSources = new Set<string>()
+                      const citations = (assessment?.claims.flatMap(claim => claim.citations) ?? [])
+                        .filter(citation => {
+                          if (!sourceMap.has(citation.sourceId) || seenSources.has(citation.sourceId)) return false
+                          seenSources.add(citation.sourceId)
+                          return true
+                        })
+                      return <Box>
+                        <Typography variant="caption" color="text.disabled" sx={{ display: 'block', px: 0.9, mb: 0.7, fontSize: '0.61rem' }}>{citations.length ? `${Math.min(2, citations.length)} of ${citations.length} citations from this run` : 'No addressable citations in this run'}</Typography>
+                        {citations.slice(0, 2).map((citation, index) => {
+                          const source = sourceMap.get(citation.sourceId)!
+                          const fieldValue = typeof source.value === 'string' ? source.value : source.value == null ? '' : JSON.stringify(source.value)
+                          const value = source.line?.text ?? source.event?.message ?? fieldValue ?? 'Source record available in full assessment'
+                          const sourceLabel = source.type === 'resource_field' ? 'RESOURCE FIELD' : source.type === 'log_line' ? 'LOG' : source.type === 'collection_error' ? 'COLLECTION ERROR' : 'EVENT'
+                          const sourceColor = source.type === 'collection_error' ? '#d96b68' : source.type === 'resource_field' ? '#d5a64a' : source.type === 'log_line' ? '#6da985' : '#80a5bd'
+                          return <Box key={`${citation.sourceId}-${index}`} sx={{ mb: 0.55, px: 0.9, py: 0.8, border: '1px solid #343c35', borderLeft: `2px solid ${sourceColor}`, background: '#141815' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.65, minWidth: 0 }}>
+                              <Typography sx={{ flexShrink: 0, fontSize: '0.56rem', fontWeight: 800, letterSpacing: '.06em', color: sourceColor }}>{sourceLabel}</Typography>
+                              <Typography sx={{ minWidth: 0, fontSize: '0.6rem', color: 'text.secondary', overflowWrap: 'anywhere' }}>{source.resource.kind}/{source.resource.name}</Typography>
+                            </Box>
+                            {source.path && <Typography sx={{ mt: 0.35, fontFamily: 'monospace', fontSize: '0.61rem', lineHeight: 1.35, color: 'text.secondary', overflowWrap: 'anywhere' }}>{source.path}</Typography>}
+                            <Typography sx={{ mt: 0.4, fontFamily: source.type === 'resource_field' ? 'monospace' : 'inherit', fontSize: '0.65rem', lineHeight: 1.4, color: 'text.primary', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{String(value) || 'Source record available in full assessment'}</Typography>
+                            {(source.redacted || source.truncated) && <Typography sx={{ mt: 0.35, fontSize: '0.57rem', color: 'warning.main' }}>{source.redacted ? 'Redacted' : ''}{source.redacted && source.truncated ? ' · ' : ''}{source.truncated ? 'Truncated' : ''}</Typography>}
+                          </Box>
+                        })}
+                      </Box>
+                    })()}
                   </Box>
                 )}
               </Box>
-            ))}
-            {visibleCount < filtered.length && (
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => setVisibleCount(count => count + 20)}
-                sx={{ mt: 0.5 }}
-              >
-                Load 20 more · {filtered.length - visibleCount} remaining
-              </Button>
-            )}
-          </Stack>
-          </Box>
-          {selected && (
-            <Box sx={{ display: { xs: 'none', lg: 'block' }, position: 'sticky', top: 0, minWidth: 0 }}>
-              {renderIncidentCard(selected)}
+              {drawerIncident && <Box sx={{ px: 1.25, py: 1, borderTop: '1px solid', borderColor: 'divider', bgcolor: '#151916', display: 'flex', gap: 0.75, alignItems: 'center', zIndex: 2, flexWrap: 'wrap' }}>
+                {drawerNeedsMoreInfo && drawerIncident.status.state !== 'resolved' && <Button size="small" variant="contained" disabled={footerBusy} onClick={() => openAugment?.()}>Add context &amp; re-analyze</Button>}
+                {drawerRun?.analysisResultId && <Button size="small" variant={drawerNeedsMoreInfo ? 'outlined' : 'contained'} onClick={() => navigate(`/incidents/${encodeURIComponent(drawerIncident.metadata.name)}/assessments/${encodeURIComponent(drawerRun.diagnosticRunId)}`)}>Full assessment</Button>}
+                {drawerIncident.status.state !== 'resolved' && !drawerNeedsMoreInfo && <Button size="small" variant={drawerRun?.analysisResultId ? 'outlined' : 'contained'} disabled={footerBusy || drawerRunActive} onClick={() => startAnalysis(drawerIncident)}>{footerBusy ? 'Starting…' : drawerRunActive ? 'Analysis running…' : drawerRun?.analysisResultId ? 'Run again' : 'Run diagnostic analysis'}</Button>}
+                {footerError === drawerIncident.metadata.name && <Typography role="alert" variant="caption" color="error.main">Could not start analysis. Try again.</Typography>}
+              </Box>}
             </Box>
-          )}
+          </Box>
+          <Box sx={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3, minHeight: 42, px: 1.5, display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#141815', borderTop: '1px solid', borderColor: 'divider' }}>
+            <Typography variant="caption" color="text.secondary" aria-live="polite">Showing {Math.min(visibleCount, filtered.length)} of {filtered.length} incidents</Typography>
+            <Box sx={{ flex: 1 }} />
+            {visibleCount < filtered.length && <Button size="small" variant="outlined" onClick={() => setVisibleCount(count => Math.min(count + 20, filtered.length))}>Load more</Button>}
+            <Typography variant="caption" color="text.disabled" sx={{ display: { xs: 'none', sm: 'block' }, fontSize: '0.64rem' }}>{visibleCount < filtered.length ? 'Scroll list to browse' : 'All loaded'}</Typography>
+          </Box>
         </Box>
       )}
     </Box>

@@ -1,0 +1,71 @@
+# Level 9: the database crashes, then the API fails readiness and disappears from Service endpoints.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubechan-incident-09
+  labels: {kubechan.io/test-incident: "09"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: kubechan-incident-09
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args: ["echo 'FATAL database files are incompatible with server'; exit 1"]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres, namespace: kubechan-incident-09}
+spec:
+  selector: {app: postgres}
+  ports: [{name: postgres, port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: customer-api, namespace: kubechan-incident-09}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: customer-api}}
+  template:
+    metadata: {labels: {app: customer-api}}
+    spec:
+      containers:
+        - name: customer-api
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args: ["echo 'ERROR postgres:5432 connection refused; readiness disabled'; sleep 3600"]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe:
+            tcpSocket: {port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata: {name: customer-api, namespace: kubechan-incident-09}
+spec:
+  selector: {app: customer-api}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: customer-api, namespace: kubechan-incident-09}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: incident-09.kubechan.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: customer-api, port: {number: 80}}

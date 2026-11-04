@@ -1,6 +1,7 @@
 import { createApi } from '@reduxjs/toolkit/query/react'
 import { baseQuery } from './baseQuery'
 import type { Incident, ProblemCase, AnalyzeResponse, ManualIncidentResponse } from '../../api/index'
+import { diagnosticsApi } from './diagnosticsApi'
 
 export const incidentsApi = createApi({
   reducerPath: 'incidentsApi',
@@ -23,6 +24,12 @@ export const incidentsApi = createApi({
     }),
     analyze: build.mutation<AnalyzeResponse, string>({
       query: (id) => ({ url: `/incidents/${encodeURIComponent(id)}/analyze`, method: 'POST' }),
+      async onQueryStarted(_, { dispatch, queryFulfilled }) {
+        try {
+          await queryFulfilled
+          dispatch(diagnosticsApi.util.invalidateTags([{ type: 'DiagnosticRun', id: 'LIST' }]))
+        } catch { /* The caller handles a failed start. */ }
+      },
     }),
     resolveIncident: build.mutation<Incident, string>({
       query: (id) => ({ url: `/incidents/${encodeURIComponent(id)}/resolve`, method: 'POST' }),
@@ -41,6 +48,12 @@ export const incidentsApi = createApi({
     }>({
       query: (body) => ({ url: '/incidents/manual', method: 'POST', body }),
       invalidatesTags: [{ type: 'Incident', id: 'LIST' }],
+      async onQueryStarted(_, { dispatch, queryFulfilled }) {
+        try {
+          await queryFulfilled
+          dispatch(diagnosticsApi.util.invalidateTags([{ type: 'DiagnosticRun', id: 'LIST' }]))
+        } catch { /* The modal handles a failed start. */ }
+      },
     }),
     augmentIncident: build.mutation<AnalyzeResponse, {
       incidentId: string
@@ -51,6 +64,16 @@ export const incidentsApi = createApi({
         method: 'POST',
         body: { relatedResources },
       }),
+      invalidatesTags: (_, __, { incidentId }) => [
+        { type: 'Incident', id: incidentId },
+        { type: 'Incident', id: 'LIST' },
+      ],
+      async onQueryStarted(_, { dispatch, queryFulfilled }) {
+        try {
+          await queryFulfilled
+          dispatch(diagnosticsApi.util.invalidateTags([{ type: 'DiagnosticRun', id: 'LIST' }]))
+        } catch { /* The modal handles a failed start. */ }
+      },
     }),
   }),
 })

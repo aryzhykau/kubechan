@@ -18,8 +18,10 @@ type LLMSettings struct {
 // Non-listed keys are returned as their actual stored values so the frontend can
 // pre-populate non-sensitive form fields (region, modelId, temperature, etc.).
 var providerSecretFields = map[string]map[string]bool{
-	"bedrock": {"bearerToken": true, "accessKeyId": true, "secretAccessKey": true},
-	"copilot": {"token": true},
+	"bedrock":   {"bearerToken": true, "accessKeyId": true, "secretAccessKey": true, "sessionToken": true},
+	"copilot":   {"token": true},
+	"openai":    {"apiKey": true},
+	"anthropic": {"apiKey": true},
 }
 
 // llmSettingsResponse is returned by GET /api/v1/me/llm-settings.
@@ -84,8 +86,7 @@ type llmSettingsPutRequest struct {
 }
 
 var allowedProviders = map[string]bool{
-	"bedrock": true,
-	"copilot": true,
+	"bedrock": true, "copilot": true, "openai": true, "anthropic": true,
 }
 
 // Put handles PUT /api/v1/me/llm-settings
@@ -98,7 +99,7 @@ func (h *LLMSettings) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowedProviders[req.Provider] {
-		writeError(w, http.StatusBadRequest, "provider must be one of: bedrock, copilot")
+		writeError(w, http.StatusBadRequest, "provider must be one of: bedrock, copilot, openai, anthropic")
 		return
 	}
 	if req.Credentials == nil {
@@ -107,11 +108,11 @@ func (h *LLMSettings) Put(w http.ResponseWriter, r *http.Request) {
 
 	// Merge: if a secret field is absent from the request (user left it blank to
 	// keep the stored value), preserve the existing stored value rather than wiping it.
-	var existingCredsJSON string
+	var existingProvider, existingCredsJSON string
 	_ = h.DB.QueryRowContext(r.Context(),
-		`SELECT credentials FROM user_llm_settings WHERE user_id = ?`, userID,
-	).Scan(&existingCredsJSON)
-	if existingCredsJSON != "" {
+		`SELECT provider, credentials FROM user_llm_settings WHERE user_id = ?`, userID,
+	).Scan(&existingProvider, &existingCredsJSON)
+	if existingCredsJSON != "" && existingProvider == req.Provider {
 		var existing map[string]any
 		if err := json.Unmarshal([]byte(existingCredsJSON), &existing); err == nil {
 			for field := range providerSecretFields[req.Provider] {
@@ -121,6 +122,12 @@ func (h *LLMSettings) Put(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		}
+	}
+	if req.Provider == "openai" || req.Provider == "anthropic" {
+		if key, _ := req.Credentials["apiKey"].(string); key == "" || key == "***" {
+			writeError(w, http.StatusBadRequest, "apiKey is required for this provider")
+			return
 		}
 	}
 

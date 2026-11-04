@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,10 +14,12 @@ from app.models import (
     CitationValidation,
     ExclusionRuleProposal,
     SuggestedResource,
+    TokenUsage,
 )
 from app.parser import parse_llm_json
 from app.prompt import build_prompt
 from app.providers.base import make_provider
+from app.tokenizer import estimate_token_usage
 
 logger = logging.getLogger("llm-gateway")
 
@@ -58,9 +60,12 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     try:
         provider = make_provider(req.provider, req.credentials)
         raw, thinking_tokens = await provider.call(prompt)
+        token_usage = estimate_token_usage(prompt, raw, provider.model_id(), provider.token_usage)
     except Exception as exc:
-        logger.exception("LLM provider call failed | provider=%s", req.provider)
-        raise HTTPException(status_code=502, detail=f"LLM provider error: {exc}") from exc
+        # Provider exceptions can contain request details. Keep credentials and
+        # evidence out of API error bodies and gateway logs.
+        logger.error("LLM provider call failed | provider=%s errorType=%s", req.provider, type(exc).__name__)
+        raise HTTPException(status_code=502, detail=f"LLM provider error ({type(exc).__name__})") from exc
 
     logger.info("=== RAW MODEL RESPONSE ===\n%s\n=== END RESPONSE ===", raw)
 
@@ -109,7 +114,10 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
                 suffixes.setdefault(source_id.rsplit(":", 1)[-1], []).append(source_id)
             total = 0
             invalid_ids: list[str] = []
-            original_verdicts = {id(claim): claim.verdict for claim in [*assessment.claims, *assessment.alternativeHypotheses]}
+            original_verdicts: dict[int, Literal["supported", "partially_supported", "unsupported"]] = {
+                id(claim): claim.verdict
+                for claim in [*assessment.claims, *assessment.alternativeHypotheses]
+            }
             for claim in [*assessment.claims, *assessment.alternativeHypotheses]:
                 total += len(claim.citations)
                 accepted = []
@@ -144,8 +152,22 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
             # Drop any causal path that does not resolve completely against the
             # immutable graph included in this request.
             graph = req.payload.get("graph") or {}
+            node_ids = {str(n.get("id")) for n in graph.get("nodes", []) if isinstance(n, dict) and n.get("id")}
+            claim_ids = {claim.id for claim in assessment.claims if claim.id}
+            validated_insights = []
+            seen_insight_nodes: set[str] = set()
+            for insight in assessment.nodeInsights:
+                if insight.nodeId not in node_ids or insight.nodeId in seen_insight_nodes:
+                    continue
+                insight.sourceIds = sorted({source_id for source_id in insight.sourceIds if source_id in valid_ids})
+                insight.claimIds = sorted({claim_id for claim_id in insight.claimIds if claim_id in claim_ids})
+                if insight.relevance == "relevant" and not insight.sourceIds and not insight.claimIds:
+                    insight.relevance = "context"
+                seen_insight_nodes.add(insight.nodeId)
+                validated_insights.append(insight)
+            assessment.nodeInsights = validated_insights
+
             if assessment.causalPath and graph:
-                node_ids = {str(n.get("id")) for n in graph.get("nodes", []) if isinstance(n, dict) and n.get("id")}
                 edge_ids = {str(e.get("id")) for e in graph.get("edges", []) if isinstance(e, dict) and e.get("id")}
                 candidate_ids = {str(c.get("id")) for c in graph.get("candidates", []) if isinstance(c, dict) and c.get("id")}
                 path = assessment.causalPath
@@ -239,7 +261,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         evidenceChain=_str(parsed.get("evidenceChain")),
         recommendation=_str(parsed.get("recommendation")),
         closingInsult=_str(parsed.get("closingInsult")) if req.personaEnabled else "",
-        confidence=min(max(float(parsed.get("confidence", 0.5)), 0.0), 1.0),
+        confidence=assessment.confidence if assessment else min(max(float(parsed.get("confidence", 0.5)), 0.0), 1.0),
         needsMoreInfo=needs_more_info,
         suggestedResources=suggested,
         suggestExclusionRule=suggest_exclusion_rule,
@@ -247,6 +269,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         assessment=assessment,
         citationValidation=citation_validation,
         thinkingBudgetUsed=thinking_tokens,
+        tokenUsage=token_usage,
         rawResponse=raw,
         prompt=prompt,
     )

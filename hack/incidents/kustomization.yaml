@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 01-image-pull.yaml
+  - 02-startup-crash.yaml
+  - 03-service-selector.yaml
+  - 04-ingress-renamed-service.yaml
+  - 05-configmap-key.yaml
+  - 06-missing-secret.yaml
+  - 07-pending-pvc.yaml
+  - 08-probe-and-endpoints.yaml
+  - 09-cascading-api-db.yaml
+  - 10-multi-point-outage.yaml

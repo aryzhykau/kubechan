@@ -245,6 +245,18 @@ class TestBuildPrompt:
         result = build_prompt(_MINIMAL_PAYLOAD, incident_source="auto")
         assert "AUTO-DETECTED" in result
 
+    def test_node_insights_use_tsundere_voice_when_persona_enabled(self):
+        result = build_prompt(_MINIMAL_PAYLOAD, persona_enabled=True)
+        assert "nodeInsights" in result
+        assert "concise tsundere voice" in result
+        assert "humiliating edge" in result
+
+    def test_node_insights_use_neutral_voice_when_persona_disabled(self):
+        result = build_prompt(_MINIMAL_PAYLOAD, persona_enabled=False)
+        assert "nodeInsights" in result
+        assert "neutral, professional engineering voice" in result
+        assert '"openingRant"' not in result
+
 
 # ---------------------------------------------------------------------------
 # _build_workload_sections

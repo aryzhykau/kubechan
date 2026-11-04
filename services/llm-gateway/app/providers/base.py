@@ -6,6 +6,11 @@ from typing import Any
 
 
 class LLMProvider(ABC):
+    @property
+    def token_usage(self) -> dict[str, int] | None:
+        """Provider-reported token counts, when the SDK exposes them."""
+        return None
+
     @abstractmethod
     async def call(self, prompt: str) -> tuple[str, int]:
         """Call the LLM. Returns (raw_text, thinking_tokens_used)."""
@@ -16,12 +21,13 @@ class LLMProvider(ABC):
 
 
 def make_provider(provider_name: str, credentials: dict[str, Any]) -> LLMProvider:
-    """Instantiate the appropriate LLMProvider from provider name + credentials."""
-    # Import here to avoid circular imports and keep provider modules independent.
-    from app.providers.copilot import CopilotProvider  # noqa: PLC0415
-    from app.providers.bedrock import BedrockProvider  # noqa: PLC0415
-
+    """Instantiate a provider adapter from provider name + user settings."""
     if provider_name == "copilot":
+        from app.providers.copilot import CopilotProvider  # noqa: PLC0415
+
         return CopilotProvider(credentials)
-    # Default: bedrock (even if provider_name is empty or "bedrock")
-    return BedrockProvider(credentials)
+    if provider_name in {"bedrock", "openai", "anthropic"}:
+        from app.providers.litellm_provider import LiteLLMProvider  # noqa: PLC0415
+
+        return LiteLLMProvider(provider_name, credentials)
+    raise ValueError(f"Unsupported LLM provider: {provider_name}")
