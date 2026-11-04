@@ -1,27 +1,24 @@
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAppDispatch } from '../../store/hooks'
 import { setSpeaking, setIdle } from '../../store/slices/kubechanSlice'
 import {
-  Box, Typography, Button, Tab, Tabs, Chip,
+  Box, Typography, Button, Chip,
   Table, TableHead, TableBody, TableRow, TableCell,
   Paper, Skeleton,
+  Accordion, AccordionSummary, AccordionDetails,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useGetDiagnosticRunEvidenceQuery } from '../../store/api/diagnosticsApi'
 import { useGetDiagnosticRunAnalysisResultQuery } from '../../store/api/analysisApi'
 import { fmtDate } from '../../components/shared/utils'
-import type { Evidence, K8sEvent, PodLog } from '../../api/index'
+import type { K8sEvent } from '../../api/index'
 import type { ChatterEvent } from '../../hooks/useKubeChan'
+import { buildResourceCards } from './buildResourceCards'
+import type { FieldEntry, ResourceCard } from './buildResourceCards'
 
-const TABS = [
-  { id: 'logs', label: 'Logs' },
-  { id: 'events', label: 'Events' },
-  { id: 'config', label: 'Config' },
-  { id: 'pvcs', label: 'PVCs' },
-]
-
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Field sub-components ──────────────────────────────────────────────────────
 
 function EventsTable({ events }: { events: K8sEvent[] }) {
   if (!events?.length) return <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>No events.</Typography>
@@ -53,137 +50,112 @@ function EventsTable({ events }: { events: K8sEvent[] }) {
   )
 }
 
-function LogsTab({ evidence }: { evidence: Evidence | null }) {
-  const pods = evidence?.payload?.workloadPodLogs ?? []
-  if (!pods.length) return <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>No pod logs collected.</Typography>
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      {pods.map((pod: PodLog) => (
-        <Box key={pod.podName}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-            <Typography sx={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.85rem' }}>{pod.podName}</Typography>
-            <Chip label={pod.phase} size="small" sx={{ fontSize: '0.65rem', height: 18 }} />
-          </Box>
-          {pod.logs
-            ? <Paper component="pre" elevation={0} sx={{ p: 2, fontFamily: 'monospace', fontSize: '0.75rem', overflowX: 'auto', background: '#0d0f17', border: '1px solid #2a2f4a', borderRadius: '8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 400, overflowY: 'auto' }}>{pod.logs}</Paper>
-            : <Typography variant="body2" color="text.secondary">No logs.</Typography>
-          }
-          {pod.prevLogs && (
-            <>
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, mb: 0.5, display: 'block', fontWeight: 600 }}>Previous container logs</Typography>
-              <Paper component="pre" elevation={0} sx={{ p: 2, fontFamily: 'monospace', fontSize: '0.75rem', overflowX: 'auto', background: '#0d0f17', border: '1px solid #2a2f4a', borderRadius: '8px', opacity: 0.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflowY: 'auto' }}>{pod.prevLogs}</Paper>
-            </>
-          )}
+function FieldRenderer({ field }: { field: FieldEntry }) {
+  switch (field.type) {
+    case 'text':
+      return (
+        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'baseline' }}>
+          <Typography variant="caption" sx={{ color: '#818cf8', fontFamily: 'monospace', minWidth: 130, flexShrink: 0 }}>{field.key}</Typography>
+          <Typography sx={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{field.value}</Typography>
         </Box>
-      ))}
-    </Box>
-  )
-}
-
-function EventsTab({ evidence }: { evidence: Evidence | null }) {
-  const rootEvents = evidence?.payload?.rootResourceEvents ?? []
-  const pods = evidence?.payload?.workloadPodLogs ?? []
-  const root = evidence?.payload?.rootResource
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {rootEvents.length > 0 && (
+      )
+    case 'logs':
+      return (
         <Box>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700, mb: 1, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            {root ? `${root.kind}/${root.name}` : 'Root resource events'}
-          </Typography>
-          <EventsTable events={rootEvents} />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 600, mb: 0.5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{field.key}</Typography>
+          <Paper component="pre" elevation={0} sx={{ p: 2, fontFamily: 'monospace', fontSize: '0.75rem', overflowX: 'auto', background: '#0d0f17', border: '1px solid #2a2f4a', borderRadius: '8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 400, overflowY: 'auto', m: 0 }}>{field.value}</Paper>
         </Box>
-      )}
-      {pods.map((pod: PodLog) =>
-        pod.events?.length > 0 && (
-          <Box key={pod.podName}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700, mb: 1, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              Pod: {pod.podName}
-            </Typography>
-            <EventsTable events={pod.events} />
-          </Box>
-        )
-      )}
-      {rootEvents.length === 0 && pods.every(p => !p.events?.length) && (
-        <Typography variant="body2" color="text.secondary">No events collected.</Typography>
-      )}
-    </Box>
-  )
-}
-
-function ConfigTab({ evidence }: { evidence: Evidence | null }) {
-  const pods = evidence?.payload?.workloadPodLogs ?? []
-  const allCMs = pods.flatMap(p => (p.dependencies?.configMaps ?? []).map(cm => ({ pod: p.podName, ...cm })))
-  const allSecrets = pods.flatMap(p => (p.dependencies?.secrets ?? []).map(s => ({ pod: p.podName, ...s })))
-
-  if (!allCMs.length && !allSecrets.length) {
-    return <Typography variant="body2" color="text.secondary">No ConfigMap or Secret dependencies collected.</Typography>
-  }
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      {allCMs.length > 0 && (
+      )
+    case 'events':
+      return (
         <Box>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700, mb: 1.5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>ConfigMaps</Typography>
-          {allCMs.map((cm, i) => (
-            <Box key={i} sx={{ mb: 1.5, background: '#161923', border: '1px solid #2a2f4a', borderRadius: '8px', p: 1.5 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: cm.data ? 1 : 0 }}>
-                <Typography sx={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 600 }}>{cm.name}</Typography>
-                {cm.missing && <Chip label="missing" size="small" color="error" sx={{ fontSize: '0.65rem', height: 18 }} />}
-                {(cm.mountPaths?.length ?? 0) > 0 && (
-                  <Typography variant="caption" color="text.secondary">{cm.mountPaths?.join(', ')}</Typography>
-                )}
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700, mb: 1, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{field.key}</Typography>
+          <EventsTable events={field.value} />
+        </Box>
+      )
+    case 'kv':
+      return (
+        <Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700, mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{field.key}</Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+            {Object.entries(field.value).map(([k, v]) => (
+              <Box key={k}>
+                <Typography variant="caption" sx={{ color: '#818cf8', fontFamily: 'monospace', display: 'block', mb: 0.25 }}>{k}</Typography>
+                <Paper component="pre" elevation={0} sx={{ p: 1, fontFamily: 'monospace', fontSize: '0.75rem', background: '#0d0f17', border: '1px solid #2a2f4a', borderRadius: '6px', m: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{v}</Paper>
               </Box>
-              {cm.data && Object.keys(cm.data).length > 0 && (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  {Object.entries(cm.data).map(([k, v]) => (
-                    <Box key={k}>
-                      <Typography variant="caption" sx={{ color: '#818cf8', fontFamily: 'monospace', display: 'block', mb: 0.25 }}>{k}</Typography>
-                      <Paper component="pre" elevation={0} sx={{ p: 1, fontFamily: 'monospace', fontSize: '0.75rem', background: '#0d0f17', border: '1px solid #2a2f4a', borderRadius: '6px', m: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{v}</Paper>
-                    </Box>
-                  ))}
-                </Box>
-              )}
-            </Box>
-          ))}
-        </Box>
-      )}
-      {allSecrets.length > 0 && (
-        <Box>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700, mb: 1.5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Secrets</Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-            {allSecrets.map((s, i) => (
-              <Chip
-                key={i}
-                label={s.name}
-                size="small"
-                color={s.missing ? 'error' : 'default'}
-                variant="outlined"
-                sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}
-              />
             ))}
           </Box>
         </Box>
-      )}
-    </Box>
-  )
+      )
+    case 'chips':
+      return (
+        <Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700, mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{field.key}</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+            {field.value.map((s, i) => (
+              <Chip key={i} label={s} size="small" variant="outlined" sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }} />
+            ))}
+          </Box>
+        </Box>
+      )
+    case 'json':
+      return (
+        <Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700, mb: 0.5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{field.key}</Typography>
+          <Paper component="pre" elevation={0} sx={{ p: 2, fontFamily: 'monospace', fontSize: '0.75rem', overflowX: 'auto', background: '#0d0f17', border: '1px solid #2a2f4a', borderRadius: '8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 500, overflowY: 'auto', m: 0 }}>{JSON.stringify(field.value, null, 2)}</Paper>
+        </Box>
+      )
+  }
 }
 
-function PVCsTab({ evidence }: { evidence: Evidence | null }) {
-  const pvcs = evidence?.payload?.pvcInfos ?? []
-  if (!pvcs.length) return <Typography variant="body2" color="text.secondary">No PVC data collected.</Typography>
+function ResourceCardList({ cards }: { cards: ResourceCard[] }) {
+  if (!cards.length) {
+    return <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>No evidence collected.</Typography>
+  }
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      {pvcs.map(pvc => (
-        <Box key={pvc.name} sx={{ background: '#161923', border: '1px solid #2a2f4a', borderRadius: '8px', p: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: pvc.events?.length ? 1 : 0 }}>
-            <Typography sx={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.85rem' }}>{pvc.name}</Typography>
-            <Chip label={pvc.phase} size="small" sx={{ fontSize: '0.65rem', height: 18 }} />
-            {pvc.storageClass && <Typography variant="caption" color="text.secondary">{pvc.storageClass}</Typography>}
-            {pvc.requestedStorage && <Typography variant="caption" color="text.secondary">{pvc.requestedStorage}</Typography>}
-          </Box>
-          {pvc.events?.length > 0 && <EventsTable events={pvc.events} />}
-        </Box>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      {cards.map((card, i) => (
+        <Accordion
+          key={card.id}
+          defaultExpanded={i === 0}
+          disableGutters
+          sx={{
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px solid #2a2f4a',
+            borderRadius: '10px !important',
+            boxShadow: 'none',
+            '&:before': { display: 'none' },
+            '&.Mui-expanded': { borderColor: '#3d4470' },
+          }}
+        >
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon sx={{ color: 'text.secondary', fontSize: '1rem' }} />}
+            sx={{ minHeight: 48, '& .MuiAccordionSummary-content': { alignItems: 'center', gap: 1, my: 0 } }}
+          >
+            <Chip
+              label={card.kind}
+              size="small"
+              sx={{ fontFamily: 'monospace', fontSize: '0.65rem', height: 18, background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}
+            />
+            <Typography sx={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 600 }}>{card.name}</Typography>
+            {card.namespace && (
+              <Typography variant="caption" color="text.secondary">{card.namespace}</Typography>
+            )}
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto', mr: 0.5 }}>
+              {card.fields.length} {card.fields.length === 1 ? 'field' : 'fields'}
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails sx={{ pt: 0, pb: 2, px: 2 }}>
+            {card.fields.length === 0
+              ? <Typography variant="body2" color="text.secondary">No data collected.</Typography>
+              : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {card.fields.map((f, fi) => <FieldRenderer key={`${f.type}-${f.key}-${fi}`} field={f} />)}
+                </Box>
+              )
+            }
+          </AccordionDetails>
+        </Accordion>
       ))}
     </Box>
   )
@@ -200,7 +172,6 @@ export function DiagnosticRunDetail({ onResultLoaded, onAction }: Props) {
   const { id: runId } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const dispatch = useAppDispatch()
-  const [activeTab, setActiveTab] = useState(0)
 
   const { data: evidence, isLoading: evidenceLoading } = useGetDiagnosticRunEvidenceQuery(runId!, { skip: !runId })
   const { data: analysisResult, isLoading: analysisLoading } = useGetDiagnosticRunAnalysisResultQuery(runId!, { skip: !runId })
@@ -218,6 +189,7 @@ export function DiagnosticRunDetail({ onResultLoaded, onAction }: Props) {
   }, [evidenceLoading, analysisLoading])
 
   const isLoading = evidenceLoading || analysisLoading
+  const cards = buildResourceCards(evidence?.payload ?? {})
 
   return (
     <Box>
@@ -241,29 +213,12 @@ export function DiagnosticRunDetail({ onResultLoaded, onAction }: Props) {
 
       {isLoading ? (
         <Box>
-          <Skeleton variant="rectangular" height={44} sx={{ borderRadius: '8px', mb: 2 }} />
-          <Skeleton variant="rectangular" height={300} sx={{ borderRadius: '8px' }} />
+          <Skeleton variant="rectangular" height={48} sx={{ borderRadius: '10px', mb: 1 }} />
+          <Skeleton variant="rectangular" height={48} sx={{ borderRadius: '10px', mb: 1 }} />
+          <Skeleton variant="rectangular" height={48} sx={{ borderRadius: '10px' }} />
         </Box>
       ) : (
-        <>
-          <Tabs
-            value={activeTab}
-            onChange={(_, v) => setActiveTab(v)}
-            sx={{
-              mb: 2,
-              borderBottom: '1px solid #2a2f4a',
-              '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.875rem', minHeight: 44, minWidth: 80 },
-            }}
-          >
-            {TABS.map((tab, i) => <Tab key={tab.id} label={tab.label} value={i} />)}
-          </Tabs>
-          <Box sx={{ py: 1 }}>
-            {activeTab === 0 && <LogsTab evidence={evidence ?? null} />}
-            {activeTab === 1 && <EventsTab evidence={evidence ?? null} />}
-            {activeTab === 2 && <ConfigTab evidence={evidence ?? null} />}
-            {activeTab === 3 && <PVCsTab evidence={evidence ?? null} />}
-          </Box>
-        </>
+        <ResourceCardList cards={cards} />
       )}
     </Box>
   )

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,10 +14,12 @@ from app.models import (
     CitationValidation,
     ExclusionRuleProposal,
     SuggestedResource,
+    TokenUsage,
 )
 from app.parser import parse_llm_json
 from app.prompt import build_prompt
 from app.providers.base import make_provider
+from app.tokenizer import estimate_token_usage
 
 logger = logging.getLogger("llm-gateway")
 
@@ -58,9 +60,12 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     try:
         provider = make_provider(req.provider, req.credentials)
         raw, thinking_tokens = await provider.call(prompt)
+        token_usage = estimate_token_usage(prompt, raw, provider.model_id(), provider.token_usage)
     except Exception as exc:
-        logger.exception("LLM provider call failed | provider=%s", req.provider)
-        raise HTTPException(status_code=502, detail=f"LLM provider error: {exc}") from exc
+        # Provider exceptions can contain request details. Keep credentials and
+        # evidence out of API error bodies and gateway logs.
+        logger.error("LLM provider call failed | provider=%s errorType=%s", req.provider, type(exc).__name__)
+        raise HTTPException(status_code=502, detail=f"LLM provider error ({type(exc).__name__})") from exc
 
     logger.info("=== RAW MODEL RESPONSE ===\n%s\n=== END RESPONSE ===", raw)
 
@@ -109,7 +114,10 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
                 suffixes.setdefault(source_id.rsplit(":", 1)[-1], []).append(source_id)
             total = 0
             invalid_ids: list[str] = []
-            original_verdicts = {id(claim): claim.verdict for claim in [*assessment.claims, *assessment.alternativeHypotheses]}
+            original_verdicts: dict[int, Literal["supported", "partially_supported", "unsupported"]] = {
+                id(claim): claim.verdict
+                for claim in [*assessment.claims, *assessment.alternativeHypotheses]
+            }
             for claim in [*assessment.claims, *assessment.alternativeHypotheses]:
                 total += len(claim.citations)
                 accepted = []
@@ -253,7 +261,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         evidenceChain=_str(parsed.get("evidenceChain")),
         recommendation=_str(parsed.get("recommendation")),
         closingInsult=_str(parsed.get("closingInsult")) if req.personaEnabled else "",
-        confidence=min(max(float(parsed.get("confidence", 0.5)), 0.0), 1.0),
+        confidence=assessment.confidence if assessment else min(max(float(parsed.get("confidence", 0.5)), 0.0), 1.0),
         needsMoreInfo=needs_more_info,
         suggestedResources=suggested,
         suggestExclusionRule=suggest_exclusion_rule,
@@ -261,6 +269,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         assessment=assessment,
         citationValidation=citation_validation,
         thinkingBudgetUsed=thinking_tokens,
+        tokenUsage=token_usage,
         rawResponse=raw,
         prompt=prompt,
     )

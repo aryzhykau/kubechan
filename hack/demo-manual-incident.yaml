@@ -13,7 +13,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx
-  namespace: demo
+  namespace: kubechan-demo
 spec:
   replicas: 2
   selector:
@@ -34,7 +34,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nginx-svc        # current name
-  namespace: demo
+  namespace: kubechan-demo
   annotations:
     kubechan.io/renamed-from: nginx   # was renamed from "nginx"
 spec:
@@ -48,7 +48,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: nginx
-  namespace: demo
+  namespace: kubechan-demo
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:

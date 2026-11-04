@@ -86,7 +86,9 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 
 	const baseQuery = `
 		SELECT ar.diagnostic_run_id, ar.incident_id, ar.requested_at, ar.status,
-		       res.id, res.likely_root_cause, res.confidence, res.model, res.created_at,
+		       res.id, res.likely_root_cause,
+		       COALESCE(json_extract(res.payload, '$.assessment.confidence'), res.confidence),
+		       res.model, res.created_at,
 		       res.needs_more_info, res.suggested_resources,
 		       json_extract(res.payload, '$.suggestFalsePositive'),
 		       json_extract(res.payload, '$.suggestExclusionRule')
@@ -133,12 +135,20 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.IncidentID = incidentNullStr.String
+		s.RequestedAt = requestedAt.String
+		s.Status = status.String
 		dr := &v1alpha1.DiagnosticRun{}
 		if err := h.K8s.Get(r.Context(), client.ObjectKey{Namespace: h.DefaultNamespace, Name: s.DiagnosticRunID}, dr); err == nil {
 			s.ProblemCaseRef = dr.Spec.ProblemCaseRef
+			// Older requests may still say "pending" after the run has settled.
+			// The DiagnosticRun lifecycle is authoritative for those rows.
+			switch dr.Status.AnalysisState {
+			case v1alpha1.DiagnosticRunAnalysisStateInProgress,
+				v1alpha1.DiagnosticRunAnalysisStateCompleted,
+				v1alpha1.DiagnosticRunAnalysisStateFailed:
+				s.Status = string(dr.Status.AnalysisState)
+			}
 		}
-		s.RequestedAt = requestedAt.String
-		s.Status = status.String
 		if analysisID.Valid {
 			s.AnalysisResultID = &analysisID.String
 		}
@@ -214,7 +224,8 @@ func (h *DiagnosticRuns) GetAnalysisResult(w http.ResponseWriter, r *http.Reques
 	id := chi.URLParam(r, "id")
 	row := h.DB.QueryRowContext(r.Context(),
 		`SELECT id, incident_id, diagnostic_run_id, model, status, likely_root_cause,
-		        confidence, payload, created_at, COALESCE(user_rating, '') as user_rating
+		        COALESCE(json_extract(payload, '$.assessment.confidence'), confidence),
+		        payload, created_at, COALESCE(user_rating, '') as user_rating
 		 FROM analysis_results WHERE diagnostic_run_id = ? ORDER BY created_at DESC LIMIT 1`, id)
 
 	var (

@@ -96,6 +96,7 @@ class TestAnalyzeSuccess:
         assert data["assessmentVersion"] == 2
         assert data["citationValidation"]["invalid"] == 1
         assert data["assessment"]["confidence"] == 0.69
+        assert data["confidence"] == 0.69
         assert [c["sourceId"] for c in data["assessment"]["claims"][0]["citations"]] == ["field:valid"]
         assert data["assessment"]["causalPath"]["rootCauseEntityId"] == "resource:networking.k8s.io:Ingress:demo:web"
 

@@ -1,0 +1,43 @@
+# Level 5: the mounted ConfigMap exists, but the application reads the wrong key/path.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubechan-incident-05
+  labels: {kubechan.io/test-incident: "05"}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: checkout-config
+  namespace: kubechan-incident-05
+data:
+  application.yaml: |
+    server:
+      port: 8080
+    featureFlags:
+      fastCheckout: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: kubechan-incident-05
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: checkout}}
+  template:
+    metadata: {labels: {app: checkout}}
+    spec:
+      volumes:
+        - name: config
+          configMap: {name: checkout-config}
+      containers:
+        - name: checkout
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo 'INFO loading /etc/checkout/app.yaml'
+              test -f /etc/checkout/app.yaml || { echo 'FATAL open /etc/checkout/app.yaml: no such file'; exit 1; }
+              sleep 3600
+          volumeMounts: [{name: config, mountPath: /etc/checkout}]

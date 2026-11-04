@@ -99,6 +99,19 @@ func (h *Internal) ReceiveEvidence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("inserting evidence: %s", err))
 		return
 	}
+	if h.LLMGatewayURL != "" {
+		if _, err := h.DB.ExecContext(r.Context(),
+			`UPDATE analysis_requests SET status = 'in_progress', dispatched_at = ?
+			 WHERE diagnostic_run_id = ? AND status IN ('pending', 'dispatched')`,
+			time.Now().UTC().Format(time.RFC3339), req.DiagnosticRunID,
+		); err != nil {
+			logger := h.Logger
+			if logger == nil {
+				logger = slog.Default()
+			}
+			logger.Error("updating analysis request status", "diagnosticRunId", req.DiagnosticRunID, "error", err)
+		}
+	}
 
 	// Patch the DiagnosticRun CRD status.
 	dr := &v1alpha1.DiagnosticRun{}
@@ -138,6 +151,12 @@ func (h *Internal) ReceiveEvidence(w http.ResponseWriter, r *http.Request) {
 
 	// Dispatch analysis asynchronously so we don't block the response.
 	if h.LLMGatewayURL != "" {
+		if h.Hub != nil {
+			msg, _ := json.Marshal(map[string]string{
+				"type": "Analysis.InProgress", "diagnosticRunId": req.DiagnosticRunID,
+			})
+			h.Hub.Broadcast(msg)
+		}
 		go h.dispatchAnalysis(evidenceID, req)
 	}
 }
@@ -145,16 +164,27 @@ func (h *Internal) ReceiveEvidence(w http.ResponseWriter, r *http.Request) {
 // patchAnalysisState updates the AnalysisState (and optionally AnalysisResultRef) on a DiagnosticRun.
 func (h *Internal) patchAnalysisState(drName string, state v1alpha1.DiagnosticRunAnalysisState, resultRef string) {
 	ctx := context.Background()
+	if _, err := h.DB.ExecContext(ctx,
+		`UPDATE analysis_requests SET status = ?, completed_at = ? WHERE diagnostic_run_id = ?`,
+		string(state), time.Now().UTC().Format(time.RFC3339), drName,
+	); err != nil {
+		slog.Error("updating analysis request status", "diagnosticRunId", drName, "error", err)
+	}
 	dr := &v1alpha1.DiagnosticRun{}
-	if err := h.K8s.Get(ctx, client.ObjectKey{Namespace: h.DefaultNamespace, Name: drName}, dr); err != nil {
-		return
+	if err := h.K8s.Get(ctx, client.ObjectKey{Namespace: h.DefaultNamespace, Name: drName}, dr); err == nil {
+		patch := client.MergeFrom(dr.DeepCopy())
+		dr.Status.AnalysisState = state
+		if resultRef != "" {
+			dr.Status.AnalysisResultRef = resultRef
+		}
+		_ = h.K8s.Status().Patch(ctx, dr, patch)
 	}
-	patch := client.MergeFrom(dr.DeepCopy())
-	dr.Status.AnalysisState = state
-	if resultRef != "" {
-		dr.Status.AnalysisResultRef = resultRef
+	if state == v1alpha1.DiagnosticRunAnalysisStateFailed && h.Hub != nil {
+		msg, _ := json.Marshal(map[string]string{
+			"type": "Analysis.Failed", "diagnosticRunId": drName,
+		})
+		h.Hub.Broadcast(msg)
 	}
-	_ = h.K8s.Status().Patch(ctx, dr, patch)
 }
 
 func nullStr(s string) any {
@@ -219,6 +249,7 @@ type llmAnalyzeResponse struct {
 	Assessment           json.RawMessage        `json:"assessment,omitempty"`
 	CitationValidation   json.RawMessage        `json:"citationValidation,omitempty"`
 	ThinkingBudget       int                    `json:"thinkingBudgetUsed"`
+	TokenUsage           json.RawMessage        `json:"tokenUsage,omitempty"`
 	Prompt               string                 `json:"prompt,omitempty"`
 }
 
@@ -232,6 +263,7 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	var payloadMap map[string]any
 	if err := json.Unmarshal(req.Payload, &payloadMap); err != nil {
 		logger.Error("dispatchAnalysis: unmarshal payload", "err", err)
+		h.patchAnalysisState(req.DiagnosticRunID, v1alpha1.DiagnosticRunAnalysisStateFailed, "")
 		return
 	}
 
@@ -371,7 +403,7 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 	// Patch analysisState → completed on the DiagnosticRun CRD.
 	h.patchAnalysisState(req.DiagnosticRunID, v1alpha1.DiagnosticRunAnalysisStateCompleted, analysisID)
 
-	logger.Info("analysis completed", "evidenceId", evidenceID, "analysisId", analysisID, "confidence", result.Confidence)
+	logger.Info("analysis completed", "evidenceId", evidenceID, "analysisId", analysisID, "confidence", result.Confidence, "tokenUsage", string(result.TokenUsage))
 
 	// Broadcast WS event so the frontend can update.
 	if h.Hub != nil {

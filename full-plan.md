@@ -1,4 +1,6 @@
-# KubeChan: Full Planning Document
+# KubeChan: Full Planning Document (Archived)
+
+> Historical implementation plan, retained for decision context. It is not the current specification. Use [`AGENTS.md`](AGENTS.md), [`README.md`](README.md), [`docs/codebase/ARCHITECTURE.md`](docs/codebase/ARCHITECTURE.md), and [`docs/contracts/investigation-analysis.md`](docs/contracts/investigation-analysis.md) before changing the product.
 
 ## 1. Business Requirements
 

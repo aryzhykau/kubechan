@@ -7,34 +7,17 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestMakeProvider:
-    def test_returns_bedrock_provider_for_bedrock(self):
+    def test_returns_litellm_provider_for_supported_api_providers(self):
         from app.providers.base import make_provider
+        from app.providers.litellm_provider import LiteLLMProvider
 
-        mock_bedrock_cls = MagicMock()
-        mock_instance = MagicMock()
-        mock_bedrock_cls.return_value = mock_instance
+        for name in ("bedrock", "openai", "anthropic"):
+            assert isinstance(make_provider(name, {}), LiteLLMProvider)
 
-        with patch("app.providers.bedrock.BedrockProvider", mock_bedrock_cls):
-            # Reload make_provider logic using the real import path
-            from app.providers import bedrock as bedrock_mod
-            original_cls = bedrock_mod.BedrockProvider
-            bedrock_mod.BedrockProvider = mock_bedrock_cls
-            try:
-                provider = make_provider("bedrock", {})
-            finally:
-                bedrock_mod.BedrockProvider = original_cls
-
-    def test_returns_bedrock_for_unknown_provider(self):
-        """Unknown provider names should fall back to Bedrock."""
+    def test_unknown_provider_is_rejected(self):
         from app.providers.base import make_provider
-
-        with patch("app.providers.bedrock.BedrockProvider") as mock_cls:
-            mock_cls.return_value = MagicMock()
-            # We just verify it doesn't raise
-            try:
-                make_provider("unknown-provider", {})
-            except Exception:
-                pass  # boto3 may fail in test env — that's OK, factory logic tested
+        with pytest.raises(ValueError, match="Unsupported LLM provider"):
+            make_provider("unknown-provider", {})
 
     def test_copilot_provider_requires_token(self):
         from app.providers.copilot import CopilotProvider
@@ -55,6 +38,50 @@ class TestMakeProvider:
         from app.providers.copilot import CopilotProvider
         p = CopilotProvider({"token": "abc123", "modelId": "o3"})
         assert p.model_id() == "o3"
+
+
+class TestLiteLLMProvider:
+    def test_api_model_names_are_provider_qualified(self):
+        from app.providers.litellm_provider import LiteLLMProvider
+        assert LiteLLMProvider("openai", {"modelId": "gpt-4.1"}).model_id() == "openai/gpt-4.1"
+        assert LiteLLMProvider("anthropic", {"modelId": "claude-sonnet-4-6"}).model_id() == "anthropic/claude-sonnet-4-6"
+
+    def test_bedrock_alias_is_resolved(self):
+        from app.providers.litellm_provider import LiteLLMProvider
+        assert LiteLLMProvider("bedrock", {"modelId": "qwen3-32b"}).model_id() == "bedrock/qwen.qwen3-32b-v1:0"
+
+    def test_api_key_is_passed_per_call_not_environment(self):
+        from app.providers.litellm_provider import LiteLLMProvider
+        provider = LiteLLMProvider("openai", {"apiKey": "test-secret", "modelId": "gpt-4.1"})
+        params = provider._call_params()
+        assert params["api_key"] == "test-secret"
+        assert "OPENAI_API_KEY" not in __import__("os").environ
+
+    def test_bedrock_iam_credentials_and_region_are_call_local(self):
+        from app.providers.litellm_provider import LiteLLMProvider
+        provider = LiteLLMProvider("bedrock", {
+            "accessKeyId": "AKIA", "secretAccessKey": "secret", "region": "eu-west-1",
+        })
+        params = provider._call_params()
+        assert params["aws_access_key_id"] == "AKIA"
+        assert params["aws_secret_access_key"] == "secret"
+        assert params["aws_region_name"] == "eu-west-1"
+
+    def test_bedrock_bearer_key_uses_litellm_api_key(self):
+        from app.providers.litellm_provider import LiteLLMProvider
+        assert LiteLLMProvider("bedrock", {"bearerToken": "br-key"})._call_params()["api_key"] == "br-key"
+
+    def test_call_extracts_text_and_reasoning_usage(self):
+        from app.providers.litellm_provider import LiteLLMProvider
+        from types import SimpleNamespace
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="assessment JSON"))],
+            usage=SimpleNamespace(completion_tokens_details=SimpleNamespace(reasoning_tokens=17)),
+        )
+        provider = LiteLLMProvider("openai", {"apiKey": "k"})
+        with patch("app.providers.litellm_provider.acompletion", new=AsyncMock(return_value=response)) as call:
+            assert asyncio.run(provider.call("prompt")) == ("assessment JSON", 17)
+        assert call.call_args.kwargs["messages"] == [{"role": "user", "content": "prompt"}]
 
 
 # ---------------------------------------------------------------------------

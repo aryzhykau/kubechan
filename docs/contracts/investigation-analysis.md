@@ -132,6 +132,10 @@ The model returns:
 
 The gateway accepts a citation only if its `sourceId` exists in `payload.sources`. It accepts a causal path only if the entry resource and every node, edge, and candidate ID exist in `payload.graph`. A node insight is retained only when its `nodeId`, `claimIds`, and `sourceIds` resolve against the same immutable request snapshot; duplicate or unknown node annotations are removed. Invalid topology annotations are removed.
 
+For Assessment v2 responses, the validated assessment confidence is also the top-level analysis confidence. The API uses the validated assessment confidence when listing or returning historical results whose stored top-level confidence differs.
+
+Each successful analysis result also records `tokenUsage` in its stored response payload: `inputTokens`, `outputTokens`, and `totalTokens`. LiteLLM provider usage is used when available. Missing counts are filled with a `tiktoken` estimate and marked with `inputSource` or `outputSource: "tokenizer_estimate"`; counts reported by the provider use `"provider"`. The estimate uses the model's known tiktoken encoding when available and `cl100k_base` otherwise. Estimates for non-OpenAI tokenizers are approximate. Historical results without `tokenUsage` remain valid and display no count.
+
 Node relevance is `relevant`, `context`, or `not_relevant`. Persona-disabled runs use neutral engineering comments. Persona-enabled runs use a concise tsundere voice while preserving the same evidence constraints. Persona selection is part of the immutable analysis result; changing it requires a new analysis.
 
 Graph schema v2 records the effective bounded-discovery policy and distinguishes `observed` edges from `inferred` edges. Observed edges come only from literal Kubernetes references or exact selectors. Inferred edges are deterministic, scored, source-backed discovery hints; they are amber and dashed and never become observed topology. The default snapshot is bounded to four observed hops, one inferred hop, 50 nodes, 150 edges, and five candidates per gap.

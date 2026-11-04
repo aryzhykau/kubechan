@@ -229,6 +229,8 @@ export interface AssessmentV2 {
   version: 2
   summary: string
   confidence: number
+  needsMoreInfo?: boolean
+  suggestedResources?: SuggestedResource[]
   claims: AssessmentClaim[]
   alternativeHypotheses: AssessmentClaim[]
   missingEvidence: Array<{ resource?: ResourceRef; description: string; reason?: string }>
@@ -332,6 +334,14 @@ export interface AnalysisResult {
     confidence?: number
     model?: string
     thinkingBudgetUsed?: number
+    tokenUsage?: {
+      inputTokens: number
+      outputTokens: number
+      totalTokens: number
+      inputSource: 'provider' | 'tokenizer_estimate'
+      outputSource: 'provider' | 'tokenizer_estimate'
+      tokenizer?: string | null
+    }
     needsMoreInfo?: boolean
     suggestedResources?: SuggestedResource[]
     suggestFalsePositive?: boolean

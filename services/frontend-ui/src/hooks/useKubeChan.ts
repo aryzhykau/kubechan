@@ -3,6 +3,7 @@ import { useAppDispatch, useAppSelector } from '../store/hooks'
 import {
   selectMoodLevel,
   selectPose,
+  selectKubeChan,
   setChatter,
   clearChatter,
   setReaction,
@@ -24,6 +25,7 @@ export function useKubeChan() {
   const dispatch = useAppDispatch()
   const moodLevel = useAppSelector(selectMoodLevel)
   const pose = useAppSelector(selectPose)
+  const kubechan = useAppSelector(selectKubeChan)
   const currentUser = useAppSelector(selectCurrentUser)
 
   const moodLevelRef = useRef(moodLevel)
@@ -31,6 +33,8 @@ export function useKubeChan() {
 
   const poseRef = useRef(pose)
   useEffect(() => { poseRef.current = pose }, [pose])
+  const kubechanRef = useRef(kubechan)
+  useEffect(() => { kubechanRef.current = kubechan }, [kubechan])
 
   const chatterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rantTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -87,6 +91,7 @@ export function useKubeChan() {
       clearTimeout(rantTimerRef.current)
       rantTimerRef.current = null
     }
+    kubechanRef.current = { ...kubechanRef.current, pose: 'thinking', incidentName }
     dispatch(setThinking(incidentName))
   }, [dispatch])
 
@@ -105,6 +110,12 @@ export function useKubeChan() {
         reactionTimerRef.current = null
         dispatch(clearReaction())
       }, 4_500)
+    }
+  }, [dispatch])
+
+  const handleAnalysisFailed = useCallback((incidentName: string) => {
+    if (kubechanRef.current.pose === 'thinking' && kubechanRef.current.incidentName === incidentName) {
+      dispatch(setIdle())
     }
   }, [dispatch])
 
@@ -166,6 +177,7 @@ export function useKubeChan() {
     handlePoke,
     handleAnalysisStart,
     handleAnalysisComplete,
+    handleAnalysisFailed,
     handleRunResultLoaded,
     handleRate,
     handleIncidentResolved,

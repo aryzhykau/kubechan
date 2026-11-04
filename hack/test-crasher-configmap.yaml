@@ -4,7 +4,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: api-gateway-config
-  namespace: test-incidents
+  namespace: kubechan-demo
 data:
   config.yaml: |
     server:
@@ -36,7 +36,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: api-gateway
-  namespace: test-incidents
+  namespace: kubechan-demo
 spec:
   replicas: 1
   selector:

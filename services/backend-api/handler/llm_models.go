@@ -17,6 +17,18 @@ type llmModelEntry struct {
 
 var llmModels = llmModelsResponse{
 	Providers: map[string][]llmModelEntry{
+		"openai": {
+			{ID: "gpt-4.1", Label: "GPT-4.1"},
+			{ID: "gpt-4.1-mini", Label: "GPT-4.1 mini"},
+			{ID: "gpt-4.1-nano", Label: "GPT-4.1 nano"},
+			{ID: "gpt-4o", Label: "GPT-4o"},
+		},
+		"anthropic": {
+			{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6"},
+			{ID: "claude-sonnet-4-5", Label: "Claude Sonnet 4.5"},
+			{ID: "claude-haiku-4-5", Label: "Claude Haiku 4.5"},
+			{ID: "claude-opus-4-6", Label: "Claude Opus 4.6"},
+		},
 		"copilot": {
 			{ID: "gpt-4.1", Label: "GPT-4.1"},
 			{ID: "gpt-5-mini", Label: "GPT-5 mini"},

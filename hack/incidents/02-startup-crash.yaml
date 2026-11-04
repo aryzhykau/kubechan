@@ -1,0 +1,27 @@
+# Level 2: logs contain the direct cause of a CrashLoopBackOff.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubechan-incident-02
+  labels: {kubechan.io/test-incident: "02"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  namespace: kubechan-incident-02
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: payments}}
+  template:
+    metadata: {labels: {app: payments}}
+    spec:
+      containers:
+        - name: payments
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo 'INFO starting payments-api'
+              echo 'FATAL PAYMENT_PROVIDER_URL is required'
+              exit 1

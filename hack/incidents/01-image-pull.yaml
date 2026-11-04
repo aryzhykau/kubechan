@@ -1,0 +1,21 @@
+# Level 1: one workload, one unambiguous failure.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubechan-incident-01
+  labels: {kubechan.io/test-incident: "01"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: kubechan-incident-01
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: catalog}}
+  template:
+    metadata: {labels: {app: catalog}}
+    spec:
+      containers:
+        - name: catalog
+          image: registry.invalid/kubechan/catalog:does-not-exist

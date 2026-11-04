@@ -4,8 +4,9 @@ import { getToken } from '../../api/index'
 import { setMoodLevel, setChatter } from '../slices/kubechanSlice'
 import { incidentsApi } from '../api/incidentsApi'
 import { analysisApi } from '../api/analysisApi'
+import { diagnosticsApi } from '../api/diagnosticsApi'
 import { pickChatterLine, pickChatterExpression } from '../../persona/chatter'
-import { notifyAnalysisDone } from '../../analysis/tracker'
+import { notifyAnalysisDone, notifyAnalysisFailed } from '../../analysis/tracker'
 import { clearUser } from '../slices/authSlice'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,7 +56,11 @@ export const wsMiddleware: Middleware<object, any> = (store) => {
           const runId = event.diagnosticRunId as string | undefined
           if (runId) notifyAnalysisDone(runId)
           store.dispatch(analysisApi.util.invalidateTags([{ type: 'AnalysisResult', id: 'LIST' }]))
+          store.dispatch(diagnosticsApi.util.invalidateTags([{ type: 'DiagnosticRun', id: 'LIST' }]))
           store.dispatch(incidentsApi.util.invalidateTags([{ type: 'Incident', id: 'LIST' }]))
+        } else if (event.type === 'Analysis.Failed' || event.type === 'Analysis.InProgress') {
+          if (event.type === 'Analysis.Failed' && typeof event.diagnosticRunId === 'string') notifyAnalysisFailed(event.diagnosticRunId)
+          store.dispatch(diagnosticsApi.util.invalidateTags([{ type: 'DiagnosticRun', id: 'LIST' }]))
         } else if (event.type?.startsWith('Incident.') || event.type?.startsWith('ProblemCase.')) {
           store.dispatch(incidentsApi.util.invalidateTags([{ type: 'Incident', id: 'LIST' }]))
         }

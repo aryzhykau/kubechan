@@ -1,111 +1,108 @@
-# Testing Patterns
+# Testing and verification
 
-## Core Sections (Required)
+Validation is layered. Unit tests prove deterministic behavior; production builds prove language integration; Tilt proves image, chart, cluster, and ingress integration.
 
-### 1) Test Stack and Commands
+## Canonical commands
 
-**Go:**
-- Primary test framework: `go test` (standard library)
-- Assertion library: standard `testing.T` (no third-party assertion library found)
-- Mocking: controller-runtime `sigs.k8s.io/controller-runtime/pkg/client/fake` (fake Kubernetes client)
-- Coverage: `vladopajic/go-test-coverage` action with thresholds from `.github/go-coverage.yml`
-
-**Python (llm-gateway):**
-- Primary test framework: `pytest` ≥8.0
-- Coverage: `pytest-cov` ≥7.1.0 with `--cov-fail-under=70`
-- Type checking (dev): `pyright` ≥1.1
+Run from the repository root unless a command changes directories.
 
 ```bash
-# Run all Go tests
-make test-go        # → go test ./...
+# All Go packages
+go test ./...
 
-# Run Go tests with coverage
+# CI-equivalent Go race and coverage run
 go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
 
-# Run Python tests
-make test-python    # → cd services/llm-gateway && python -m pytest -v
-
-# Run Python tests with coverage (default — pyproject.toml addopts)
+# LLM gateway with configured coverage threshold
 cd services/llm-gateway && uv run pytest -v
 
-# Run all tests
-make test
+# LLM gateway type checking
+cd services/llm-gateway && uv run pyright .
+
+# Frontend TypeScript and production bundle
+cd services/frontend-ui && npm ci && npm run build
+
+# Helm
+helm lint helm/kubechan --values helm/kubechan/values-dev.yaml
+
+# Non-interactive local deployment and readiness check
+tilt ci
 ```
 
----
+Convenience targets:
 
-### 2) Test Layout
+```bash
+make test       # Go + Python tests
+make build      # Go builds + uv sync + frontend build
+make lint       # golangci-lint + pyright
+make e2e        # kind context check + tilt ci
+```
 
-**Go:**
-- Test files are **co-located** with source files: `foo.go` + `foo_test.go` in the same directory
-- Naming convention: `*_test.go`; test functions `TestXxx(t *testing.T)`
-- Some packages have multiple test files grouped by concern (e.g., `handler/handler_test.go`, `handler/handler2_test.go`, `handler/auth2_test.go`)
+The frontend currently has no unit-test runner or lint script. Do not document or invoke `npm test` or `npm run lint` until those scripts exist.
 
-**Python:**
-- Test files in `services/llm-gateway/tests/` directory
-- Naming convention: `test_*.py` (pytest discovery default)
+## Scope matrix
 
-**No setup files** (e.g., `TestMain`) observed — each test is self-contained.
+| Change | Minimum iteration check | Required before handoff |
+|---|---|---|
+| Go helper or detector | Target package `go test` | `go test ./...` |
+| Reconciler or CRD | Target controller tests | `make generate`, `go test ./...`, Helm lint |
+| Source catalog | collector tests | diagnostics-worker tests plus fresh-run E2E |
+| GraphEngine | graphengine tests | diagnostics-worker tests, frontend build, fresh-run E2E |
+| Prompt/model schema | focused pytest | full gateway pytest and fresh-run E2E |
+| Gateway validation | route tests | full gateway pytest |
+| Frontend | `npm run build` | production build and browser verification |
+| Helm/Tilt | Helm lint | `tilt ci` |
+| Cross-service contract | relevant unit suites | all affected builds plus fresh-run E2E |
 
----
+## Test organization
 
-### 3) Test Scope Matrix
+### Go
 
-| Scope | Covered? | Typical target | Notes |
-|-------|----------|----------------|-------|
-| Unit (Go) | Yes | `detector/`, `debounce/`, `exclusion/`, `problemcase/`, `handler/`, `db/`, `ws/`, `watcherconfig/` | Most packages have `*_test.go`; fake k8s client used for CRD operations |
-| Unit (Python) | Yes | `llm-gateway/app/` modules | `tests/` directory; coverage ≥70% enforced |
-| Integration | Partial | `backend-api/k8s/k8s_test.go`, `startup/startup_test.go` | Uses fake client; no real k8s cluster in CI |
-| E2E | No | — | No e2e framework configured; `make e2e` target exists in Makefile but is [TODO] |
+- Standard `testing` package; tests are co-located.
+- controller-runtime fake client is used for Kubernetes behavior that does not require a live API server.
+- backend database tests use isolated temporary/in-memory SQLite state.
+- GraphEngine tests assert deterministic IDs, ordering, missing references, candidate ranking, and source attachment.
 
----
+CI requires global Go coverage and runs the race detector. Thresholds are configured in `.github/go-coverage.yml`.
 
-### 4) Mocking and Isolation Strategy
+### Python
 
-**Go:**
-- Kubernetes API interactions mocked via `sigs.k8s.io/controller-runtime/pkg/client/fake.NewClientBuilder().Build()` — no real cluster required
-- `*sql.DB` used directly in tests with an in-memory SQLite database (`:memory:`) [TODO — not explicitly verified, likely pattern given `db_test.go` exists]
-- No test fixtures directory; setup is inline per test function
-- Common failure mode: tests that rely on `KUBECONFIG` (e.g., pod log collection) tolerate failures with a log message (`"tolerate pod-log errors in collect tests (no kubeconfig in unit env)"` — from CI commit history)
+- pytest tests live in `services/llm-gateway/tests/`.
+- FastAPI `TestClient`, `unittest.mock`, and async mocks isolate provider calls.
+- `pyproject.toml` enforces branch coverage and a 70% minimum.
+- Route tests must cover invalid citations, invalid causal paths, model variants, and provider failures.
 
-**Python:**
-- Mock strategy: [TODO — not verified from test source files]
-- FastAPI `TestClient` likely used (standard pattern for FastAPI apps) — [TODO]
+### Frontend
 
----
+The current automated gate is `tsc -b && vite build`. Browser behavior is verified against the Tilt deployment. When a frontend test framework is introduced, add scripts to `package.json`, CI, Makefile, and this document together.
 
-### 5) Coverage and Quality Signals
+## Runtime E2E procedure
 
-**Go:**
-- Coverage tool: `vladopajic/go-test-coverage` with profile `coverage.out`
-- Thresholds (`.github/go-coverage.yml`):
-  - Global: ≥65%
-  - `cluster-watcher/detector`: ≥80%
-- Generated code excluded: `api/v1alpha1/zz_generated.*`
-- `main.go` files excluded (nothing testable in entry points)
-- Badge: `.badges/main/coverage.svg` auto-updated on `main` branch pushes
-- Race detector: enabled (`-race` flag in CI)
+`tilt ci` proves that local images build, load into kind, deploy through the Helm-rendered manifests, and reach readiness. It does not create or inspect an incident automatically.
 
-**Python:**
-- Coverage tool: `pytest-cov` with branch coverage (`branch = true`)
-- Threshold: ≥70% (enforced in CI — `--cov-fail-under=70` in `pyproject.toml` addopts)
-- Coverage report: `services/llm-gateway/coverage.xml` (uploaded as CI artifact)
-- Badge: `.badges/main/coverage.svg` (shared with Go badge)
+For evidence/analysis changes:
 
-**Known gaps:**
-- E2E tests do not exist
-- No envtest-based integration tests for controllers (noted in `.github/go-coverage.yml` comment: "Target: raise this to 50% once backend-api and cluster-watcher controllers have envtest-based tests")
-- `handler/` package tests were primarily added to reach coverage thresholds (commit history shows series of coverage-improving commits)
-- Python mock strategy details [TODO]
+1. Ensure the active context starts with `kind-`.
+2. Run `tilt ci` or keep `tilt up` running.
+3. Apply the relevant fixture, such as `hack/demo-manual-incident.yaml`.
+4. Trigger a new analysis. Do not reuse an old DiagnosticRun for a new schema.
+5. Verify evidence `schemaVersion`, source paths, graph nodes/edges/candidates, and citation validation.
+6. Open `/incidents/:incidentId/assessments/:runId`.
+7. Select the broken relationship and candidate relationship.
+8. Confirm the inspector shows the exact metadata/log/event source and that proposed topology is not presented as observed topology.
 
----
+## Generated-code check
 
-### 6) Evidence
+CI runs controller-gen and fails if it changes tracked output. After touching CRD types:
 
-- `.github/go-coverage.yml` — Go coverage thresholds and exclusions
-- `.github/workflows/ci.yml` — Go `-race` flag, `vladopajic/go-test-coverage` action, pytest invocation
-- `services/llm-gateway/pyproject.toml` — `[tool.pytest.ini_options]` with `--cov-fail-under=70`
-- `services/backend-api/db/db_test.go` — Go DB test example
-- `services/cluster-watcher/detector/crashloopbackoff_test.go` — detector unit test example
-- `services/backend-api/handler/handler_test.go` — handler unit test example
-- `Makefile` — `test-go`, `test-python`, `e2e` targets
+```bash
+make generate
+git diff -- api/v1alpha1/zz_generated.deepcopy.go helm/kubechan/crds/
+```
+
+## Known gaps
+
+- No automated browser E2E suite.
+- No comprehensive envtest suite for every controller.
+- No frontend component/unit test framework.
+- Tilt E2E validates readiness, while scenario assertions remain manual.

@@ -125,7 +125,8 @@ func (h *Analysis) GetAnalysisResult(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	row := h.DB.QueryRowContext(r.Context(),
 		`SELECT id, incident_id, diagnostic_run_id, model, status, likely_root_cause,
-		        confidence, payload, created_at, COALESCE(user_rating, '') as user_rating
+		        COALESCE(json_extract(payload, '$.assessment.confidence'), confidence),
+		        payload, created_at, COALESCE(user_rating, '') as user_rating
 		 FROM analysis_results WHERE id = ?`, id)
 
 	var (

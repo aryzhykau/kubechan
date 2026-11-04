@@ -1,4 +1,4 @@
-.PHONY: generate generate-objects generate-crds dev-check dev-up dev-down dev-clean lint lint-go lint-python test test-go test-python build build-go build-python build-frontend e2e e2e-clean
+.PHONY: generate generate-objects generate-crds dev-check dev-up dev-down dev-clean lint lint-go lint-python test test-go test-python build build-go build-python build-frontend install-tools install-hooks e2e e2e-clean help
 
 # ─── Variables ────────────────────────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ lint-go:
 
 ## lint-python: Run pyright on llm-gateway
 lint-python:
-	cd services/llm-gateway && pyright .
+	cd services/llm-gateway && uv run pyright .
 
 # ─── Testing ─────────────────────────────────────────────────────────────────
 
@@ -74,7 +74,7 @@ test-go:
 
 ## test-python: Run Python unit tests for llm-gateway
 test-python:
-	cd services/llm-gateway && python -m pytest -v
+	cd services/llm-gateway && uv run pytest -v
 
 # ─── Build (local verification) ──────────────────────────────────────────────
 
@@ -87,9 +87,9 @@ build-go:
 	go build ./services/diagnostics-worker/
 	go build ./services/backend-api/
 
-## build-python: Install llm-gateway dependencies
+## build-python: Synchronize locked llm-gateway dependencies
 build-python:
-	pip install -r services/llm-gateway/requirements.txt
+	cd services/llm-gateway && uv sync --frozen --group dev
 
 ## build-frontend: Build the frontend-ui static assets
 build-frontend:
@@ -110,17 +110,18 @@ install-hooks:
 	  echo "installed .git/hooks/$$name -> ../../$$hook"; \
 	done
 
-# ─── E2E (Phase 5) ───────────────────────────────────────────────────────────
+# ─── E2E ─────────────────────────────────────────────────────────────────────
 
-## e2e: Run end-to-end tests against Docker Desktop cluster
-e2e:
-	@echo "E2E tests are implemented in Phase 5."
-	@exit 1
+## e2e: Build, deploy, and wait for all workloads in the active kind cluster
+e2e: dev-check
+	tilt ci
 
 ## e2e-clean: Uninstall kubechan and delete CRDs for a clean slate
 e2e-clean:
 	helm uninstall kubechan --namespace kubechan --ignore-not-found || true
-	kubectl delete crd problemcases.kubechan.io diagnosticruns.kubechan.io \
+	kubectl delete crd problemcases.kubechan.io incidents.kubechan.io \
+	    diagnosticruns.kubechan.io kubechanstates.kubechan.io \
+	    kubechanexclusionrules.kubechan.io \
 	    --ignore-not-found || true
 
 # ─── Help ─────────────────────────────────────────────────────────────────────

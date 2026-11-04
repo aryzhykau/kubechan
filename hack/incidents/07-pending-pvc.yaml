@@ -1,0 +1,37 @@
+# Level 7: an unbound PVC blocks scheduling and produces storage events.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubechan-incident-07
+  labels: {kubechan.io/test-incident: "07"}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache
+  namespace: kubechan-incident-07
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: kubechan-nonexistent-storage-class
+  resources: {requests: {storage: 20Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendations
+  namespace: kubechan-incident-07
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: recommendations}}
+  template:
+    metadata: {labels: {app: recommendations}}
+    spec:
+      volumes:
+        - name: cache
+          persistentVolumeClaim: {claimName: model-cache}
+      containers:
+        - name: recommendations
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args: ["echo model loaded; sleep 3600"]
+          volumeMounts: [{name: cache, mountPath: /models}]

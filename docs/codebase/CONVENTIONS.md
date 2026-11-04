@@ -29,9 +29,9 @@
 | Item | Rule | Example | Evidence |
 |------|------|---------|----------|
 | Component files | `PascalCase.tsx` | `IncidentList.tsx`, `KubeChanSidebar.tsx` | `services/frontend-ui/src/` |
-| Hook files | `camelCase.ts` | `useWebSocket.ts` | `services/frontend-ui/src/useWebSocket.ts` |
-| Utility files | `camelCase.ts` | `api.ts`, `chatter.ts` | `services/frontend-ui/src/` |
-| Exported types/interfaces | `PascalCase` | `WSEvent`, `CurrentUser`, `Incident` | `services/frontend-ui/src/api.ts` |
+| Hooks and middleware | `camelCase.ts` | `useIncidentFilters.ts`, `wsMiddleware.ts` | `services/frontend-ui/src/` |
+| Utility files | `camelCase.ts` | `buildResourceCards.ts`, `chatter.ts` | `services/frontend-ui/src/` |
+| Exported types/interfaces | `PascalCase` | `CurrentUser`, `Incident`, `DiagnosticRun` | `services/frontend-ui/src/api/index.ts` |
 | Functions/variables | `camelCase` | `getToken`, `clearToken`, `moodLevel` | `services/frontend-ui/src/App.tsx` |
 
 ---
@@ -47,13 +47,13 @@
 **Python:**
 - Formatter: none explicitly configured (no `ruff`, `black`, or `.flake8` found in `pyproject.toml`)
 - Type checker: `pyright` (configured as dev dependency)
-- Run: `make lint-python` → `cd services/llm-gateway && pyright .`
-- [TODO] No formatter enforced for Python — code style consistency is type-checker only
+- Run: `make lint-python` → `cd services/llm-gateway && uv run pyright .`
+- No Python formatter is currently enforced; preserve the style of the surrounding module.
 
 **TypeScript:**
 - Formatter: none explicitly configured (no `.prettierrc`, `.eslintrc` found)
 - Compiler: `tsc -b` as part of Vite build
-- [TODO] No ESLint or Prettier config found; TypeScript strictness settings not verified beyond default Vite template
+- No ESLint or Prettier command is currently configured. `npm run build` runs `tsc -b` and is the required frontend check.
 
 ---
 
@@ -121,7 +121,7 @@
 - `services/backend-api/main.go` — `log/slog` JSON logger initialization
 - `services/cluster-watcher/main.go` — `ctrl.SetLogger(zap.New(...))`
 - `services/llm-gateway/app/models.py` — Pydantic models, naming rules
-- `services/frontend-ui/src/api.ts` — TypeScript naming, relative imports
+- `services/frontend-ui/src/api/index.ts` and `src/store/api/` — transport types and endpoint modules
 - `.github/go-coverage.yml` — coverage thresholds
 - `services/llm-gateway/pyproject.toml` — pytest-cov config
 - `Makefile` — lint commands

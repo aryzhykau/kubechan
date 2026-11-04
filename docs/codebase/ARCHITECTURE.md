@@ -1,159 +1,135 @@
 # Architecture
 
-## Core Sections (Required)
+This document describes the current runtime architecture. Historical implementation proposals live under `docs/plans/`.
 
-### 1) Architectural Style
+## Architectural style
 
-- **Primary style:** Event-driven microservices pipeline with Kubernetes CRDs as the event bus
-- **Why this classification:** Services do not call each other directly (except diagnostics-worker → backend-api POST, and backend-api → llm-gateway POST). State transitions are communicated by writing or watching Kubernetes CRDs (`ProblemCase`, `Incident`, `DiagnosticRun`). Each service reconciles CRD state changes via controller-runtime.
-- **Primary constraints:**
-  1. Read-only toward user workloads — no service may modify Pods, Deployments, or other user-owned resources.
-  2. CRDs are the only shared state between cluster-watcher, diagnostics-worker, and backend-api. No direct service-to-service calls for events.
-  3. SQLite single-writer in backend-api — no horizontal scaling of that service without replacing the data store.
+KubeChan is an event-driven Kubernetes application with five deployable services. Kubernetes CRDs carry operational state between controllers; backend-api provides persistence and browser-facing APIs; llm-gateway is an isolated model boundary.
 
----
+Core constraints:
 
-### 2) System Flow
+1. KubeChan never mutates user workloads. Remediation is advisory.
+2. KubeChan-owned CRDs may be created and updated by controllers and backend-api.
+3. Evidence and graph topology are deterministic. The model may interpret them but cannot extend them.
+4. backend-api uses SQLite and is a single-replica, single-writer service.
+5. A DiagnosticRun is an immutable evidence and analysis snapshot.
 
-#### Auto incident flow
+## Runtime topology
 
-```
-cluster-watcher reconciler
-  → detects anomaly (CrashLoopBackOff / ImagePullBackOff / PendingTooLong / etc.)
-  → creates ProblemCase CRD
-
-CorrelationReconciler (cluster-watcher)
-  → watches ProblemCase events
-  → walks owner-reference chain to find workload root
-  → creates or reuses an Incident CRD
-
-diagnostics-worker DiagnosticRunReconciler
-  → watches DiagnosticRun CRDs (created by backend-api on user "Analyze" action)
-  → collects evidence (logs, events, ConfigMaps, Secrets metadata, PVCs, Ingresses)
-  → POST /internal/evidence to backend-api
-
-backend-api Internal.ReceiveEvidence
-  → stores evidence in SQLite
-  → creates analysis_request record
-  → dispatches goroutine: POST /analyze to llm-gateway
-
-llm-gateway /analyze
-  → builds Jinja2 prompt from evidence payload
-  → calls AWS Bedrock or GitHub Copilot LLM
-  → parses structured JSON response
-  → returns AnalyzeResponse to backend-api
-
-backend-api
-  → stores analysis_result in SQLite
-  → broadcasts Analysis.Completed event via WebSocket Hub
-
-frontend-ui useWebSocket hook
-  → receives WS event
-  → renders 5-section analysis in KubeChanSidebar
+```text
+Kubernetes API
+  │
+  ├── cluster-watcher
+  │     ├── detectors
+  │     ├── ProblemCase CRDs
+  │     └── Incident CRDs
+  │
+  ├── diagnostics-worker
+  │     ├── watches DiagnosticRun CRDs
+  │     ├── collects evidence
+  │     ├── builds atomic source catalog
+  │     └── builds deterministic investigation graph
+  │              │
+  │              └── POST /internal/evidence
+  │                         │
+  └────────────────── backend-api ───── POST /analyze ───── llm-gateway
+                         │                                      │
+                         ├── SQLite                              ├── prompt builder
+                         ├── REST API                            ├── LiteLLM SDK / Copilot adapter
+                         ├── WebSocket hub                       └── assessment validation
+                         │
+                         └── frontend-ui
+                               ├── incident operations
+                               ├── diagnostics
+                               └── assessment workspace
 ```
 
-#### Manual incident flow
+## Incident and analysis flow
 
-```
-User fills ManualIncidentModal
-  → POST /api/v1/incidents/manual
-  → backend-api creates Incident CRD (source=manual) + DiagnosticRun CRD + analysis_request
-  → same evidence collection and LLM pipeline runs
-```
+### Automatic incident
 
-#### Needs-more-info flow
+1. cluster-watcher evaluates Pods, Deployments, Services, Nodes, and related events.
+2. A detector creates or updates a ProblemCase after the debounce threshold.
+3. CorrelationReconciler follows ownership to the workload root and creates or reuses an Incident.
+4. A user requests analysis; backend-api creates a DiagnosticRun.
+5. diagnostics-worker collects an immutable evidence snapshot.
+6. `collector.BuildSourceCatalog` normalizes fields, log lines, and events into citation-safe sources.
+7. `graphengine.Build` derives observed topology, missing references, and ranked candidates from that snapshot.
+8. diagnostics-worker POSTs the snapshot to backend-api.
+9. backend-api stores evidence and dispatches the analysis request to llm-gateway.
+10. llm-gateway builds the prompt, invokes the selected provider, parses Assessment v2, validates citations, and validates the causal path against the supplied graph.
+11. backend-api stores the result and broadcasts `Analysis.Completed`.
+12. frontend-ui opens the dedicated Assessment route with graph, source inspector, evidence ledger, and remediation runbook.
 
-```
-LLM returns needsMoreInfo=true (confidence < 0.65) + suggestedResources
-  → frontend renders AugmentIncidentModal
-  → User selects additional resources
-  → POST /api/v1/incidents/{id}/augment
-  → backend-api merges resources into Incident CRD, creates new DiagnosticRun
-  → full pipeline re-runs with augmented evidence
-```
+The diagnostic-run list is refreshed as soon as a start request succeeds. The backend records `pending`, `in_progress`, `completed`, or `failed` on the analysis request and broadcasts `Analysis.InProgress`, `Analysis.Completed`, or `Analysis.Failed` so the browser refreshes the run list at each transition. For older request rows with stale status, the list uses the DiagnosticRun analysis state. The assistant panel also polls the list to recover from missed WebSocket events. Components waiting for one run poll its DiagnosticRun status as a fallback when the completion event is missed.
 
-#### Exclusion rule flow
+OpenAI, Anthropic, and Bedrock requests use LiteLLM's async Python SDK. Provider keys and AWS credentials are passed as per-call parameters, not process-wide environment variables. GitHub Copilot remains on its dedicated SDK adapter. Account-subscription OAuth flows are outside the current integration.
 
-```
-LLM returns suggestExclusionRule (ExclusionRuleProposal) in AnalyzeResponse
-  → frontend renders ExclusionRuleModal with pre-filled proposal
-  → User confirms (optionally edits detectors, target resources, time window)
-  → POST /api/v1/exclusion-rules
-  → backend-api creates KubechanExclusionRule CRD in control namespace
+Successful analysis responses include provider-reported input/output token usage when available. The gateway estimates missing counts with tiktoken and marks those fields as estimates. The backend stores this metadata in the analysis response payload, which is shown with the model in the incident analysis UI.
 
-ExclusionRuleReconciler (cluster-watcher) watches KubechanExclusionRule events
-  → on create/update of an enabled rule: scans all open Incidents
-  → auto-resolves Incidents whose root resource + detector match the rule
+### Manual incident
 
-exclusion.IsExcluded() called inside every detector reconciler
-  → if a matching enabled rule exists → ProblemCase is not created / is suppressed
-  → time window respected (rule only active during configured recurrence periods)
+The user selects a root resource, describes the issue, and optionally adds related resources. backend-api creates an Incident, ownership record, analysis request, and DiagnosticRun. Collection and analysis then follow the same path as automatic incidents.
 
-User can also manage rules manually:
-  GET  /api/v1/exclusion-rules        → list all rules (ExclusionRulesPage)
-  POST /api/v1/exclusion-rules        → create a new rule
-  PATCH /api/v1/exclusion-rules/{name} → enable/disable a rule
-  DELETE /api/v1/exclusion-rules/{name} → delete a rule
-```
+### More-information loop
 
----
+When a valid response requests more information and names suggested resource kinds, the user may add resources through the augment flow. backend-api updates the Incident and creates a new DiagnosticRun. Prior snapshots remain unchanged.
 
-### 3) Layer/Module Responsibilities
+### Exclusion rules
 
-| Layer or module | Owns | Must not own | Evidence |
-|-----------------|------|--------------|----------|
-| `api/v1alpha1/` | CRD type structs, scheme registration, generated DeepCopy | HTTP, DB, business logic | `api/v1alpha1/incident_types.go` |
-| `cluster-watcher/detector/` | Stateless anomaly detection from k8s object state | ProblemCase writes, debounce state | `services/cluster-watcher/detector/interface.go` |
-| `cluster-watcher/controllers/` | Reconcile loop, debounce management, ProblemCase/Incident CRD writes | Detection logic, evidence collection | `services/cluster-watcher/controllers/correlation_reconciler.go` |
-| `cluster-watcher/exclusion/` | Rule evaluation — `IsExcluded()` checks `KubechanExclusionRule` CRDs (by resource, detector name, time window) | Detection logic, CRD writes | `services/cluster-watcher/exclusion/matcher.go` |
-| `cluster-watcher/controllers/exclusionrule_reconciler.go` | Watches `KubechanExclusionRule` events; on enable auto-resolves matching open Incidents + ProblemCases | Exclusion matching logic | `services/cluster-watcher/controllers/exclusionrule_reconciler.go` |
-| `backend-api/handler/exclusion_rules.go` | REST CRUD for `KubechanExclusionRule` CRDs (list, create, patch enabled, delete) | Kubernetes watch/reconcile | `services/backend-api/handler/exclusion_rules.go` |
-| `diagnostics-worker/controllers/` | DiagnosticRun reconciliation, evidence collection orchestration, POST to backend-api | Detection logic, LLM calls | `services/diagnostics-worker/main.go` |
-| `backend-api/handler/` | HTTP request handling, input validation, CRD reads/writes, DB queries, LLM dispatch goroutine | Business logic shared across handlers | `services/backend-api/handler/internal.go` |
-| `backend-api/db/` | SQLite open, schema migrations, pruner | HTTP layer, Kubernetes client | `services/backend-api/db/db.go` |
-| `backend-api/ws/` | WebSocket Hub (broadcast to all clients), per-client goroutines | Business logic | `services/backend-api/ws/hub.go` |
-| `backend-api/k8s/` | Kubernetes client wrapper, informer cache Watcher, MoodSyncer | HTTP handlers | `services/backend-api/k8s/` |
-| `backend-api/startup/` | Admin user bootstrap, pending analysis_request recovery on restart | Request handling | `services/backend-api/startup/admin_bootstrap.go` |
-| `llm-gateway/app/` | Prompt building, provider selection, LLM call, response parsing | Kubernetes API access | `services/llm-gateway/app/routes.py` |
-| `frontend-ui/src/` | React UI, state management, WebSocket client, API client | Server logic | `services/frontend-ui/src/App.tsx` |
+`KubechanExclusionRule` CRDs suppress matching detectors and can resolve matching open Incidents when enabled. Rules may target exact resources, selectors, detectors, and recurring time windows. The LLM may propose a rule; only the user can confirm its creation.
 
----
+## Service ownership
 
-### 4) Reused Patterns
+| Module | Owns | Must not own |
+|---|---|---|
+| `api/v1alpha1/` | CRD schemas and generated Kubernetes code | HTTP, persistence, analysis logic |
+| `cluster-watcher/detector/` | Stateless anomaly evaluation | Evidence collection or writes |
+| `cluster-watcher/controllers/` | Reconciliation, correlation, and KubeChan CRD writes | LLM calls |
+| `cluster-watcher/exclusion/` | Rule matching | Detector-specific logic |
+| `diagnostics-worker/collector/` | Evidence types and atomic source catalog | Model interpretation |
+| `diagnostics-worker/graphengine/` | Deterministic topology and candidate ranking | Kubernetes reads or model calls |
+| `diagnostics-worker/controllers/` | Kubernetes collection and DiagnosticRun lifecycle | Analysis conclusions |
+| `backend-api/handler/` | REST boundary, orchestration, persistence calls | Prompt construction |
+| `backend-api/db/` | SQLite lifecycle, migrations, retention | Kubernetes reconciliation |
+| `backend-api/ws/` | Authenticated event fan-out | Business logic |
+| `llm-gateway/app/prompt.py` | Prompt construction and context budgeting | Kubernetes access |
+| `llm-gateway/app/providers/litellm_provider.py` | LiteLLM-backed OpenAI, Anthropic, and Bedrock calls | Prompt construction or evidence validation |
+| `llm-gateway/app/routes.py` | Provider dispatch and trust-boundary validation | Graph construction |
+| `frontend-ui/src/store/` | Shared browser state, RTK Query, WebSocket events | Server-side policy |
+| `frontend-ui/src/pages/` | Route-level presentation and interaction | Authoritative evidence generation |
 
-| Pattern | Where found | Why it exists |
-|---------|-------------|---------------|
-| **Strategy (interface)** | `cluster-watcher/detector/interface.go` — `Detector` interface with `Name()` + `Evaluate()` | Allows each anomaly type to be independently implemented and tested without changing reconciler logic |
-| **Controller/Reconciler** | All controllers in cluster-watcher and diagnostics-worker via controller-runtime | Standard Kubernetes controller pattern; level-triggered reconciliation with cache-backed reads |
-| **Hub-and-spoke WebSocket broadcast** | `backend-api/ws/hub.go` | Fan-out to all connected frontend clients; slow-consumer protection via non-blocking channel send |
-| **Embedded SQL migrations** | `backend-api/db/db.go` with `//go:embed migrations/*.sql` | Schema migrations applied at startup from embedded FS; tracked in `schema_migrations` table |
-| **Startup recovery** | `backend-api/startup/recovery.go` — re-dispatches pending analysis requests | Compensates for lack of a durable job queue; handles crashes mid-pipeline |
-| **Provider adapter** | `llm-gateway/app/providers/base.py` `LLMProvider` ABC with `BedrockProvider` and `CopilotProvider` | Decouples LLM backend selection from prompt building and response parsing |
-| **Debounce** | `cluster-watcher/debounce/debouncer.go` | Suppresses transient cluster states (e.g., rolling-update restarts) to avoid false ProblemCases |
-| **Singleton CRD** | `KubeChanState` — one per namespace, managed by `MoodSyncer` | Persists mood level across backend-api restarts without a separate DB field |
+## Investigation trust boundary
 
----
+The contract is detailed in `docs/contracts/investigation-analysis.md`.
 
-### 5) Known Architectural Risks
+- Source IDs are produced before the model call.
+- Node, edge, and candidate IDs are produced before the model call.
+- Claims may cite only supplied source IDs.
+- A causal path may reference only supplied graph IDs.
+- Invalid citations are removed and reflected in citation validation.
+- Candidate topology is proposed, not observed, and must be visually distinct.
 
-- **SQLite single-writer:** `backend-api` uses WAL-mode SQLite on a volume. Multiple replicas are not supported. Evidence writes during burst analysis can create write contention. See CONCERNS.md.
-- **No durable job queue:** LLM dispatch uses an in-memory goroutine launched by `ReceiveEvidence`. On crash, `startup.RecoverPendingRequests` replays pending requests, but any in-flight work is lost. If the backend-api crashes after evidence is stored but before dispatch, recovery relies on correct DB state.
-- **Internal endpoint unauthenticated:** `POST /internal/evidence` has no auth check. It relies on network-level isolation (cluster-internal DNS). If cluster network policy is not enforced, any pod can inject evidence.
-- **WebSocket token in URL:** Token is passed as `?token=` query parameter. This is logged by most HTTP servers/proxies in access logs. See CONCERNS.md.
+## Persistence and recovery
 
----
+backend-api stores users, settings, evidence, requests, prompts, and analysis results in SQLite using embedded migrations. Analysis dispatch is asynchronous. Pending requests are recovered on backend startup, but there is no durable external job queue.
 
-### 6) Evidence
+## Primary patterns
 
-- `services/backend-api/main.go` — full wiring of handlers, informer cache, WebSocket hub, MoodSyncer
-- `services/cluster-watcher/controllers/correlation_reconciler.go` — ProblemCase → Incident correlation
-- `services/cluster-watcher/detector/interface.go` — `Detector` strategy interface
-- `services/backend-api/handler/internal.go` — `ReceiveEvidence` → LLM dispatch goroutine
-- `services/backend-api/ws/hub.go` — broadcast hub implementation
-- `services/llm-gateway/app/providers/base.py` — provider factory pattern
-- `services/backend-api/startup/recovery.go` — startup recovery pattern
-- `services/cluster-watcher/controllers/exclusionrule_reconciler.go` — ExclusionRuleReconciler auto-resolves Incidents on rule creation
-- `services/cluster-watcher/exclusion/matcher.go` — `IsExcluded()` with time-window evaluation
-- `api/v1alpha1/exclusionrule_types.go` — `KubechanExclusionRule` CRD spec (TargetResources, Selector, TimeWindow)
-- `services/llm-gateway/app/models.py` — `ExclusionRuleProposal` in `AnalyzeResponse`
-- `docs/project-description.md` — end-to-end flow description
+- Kubernetes controller/reconciler for level-triggered state handling.
+- Strategy interfaces for detectors and LLM providers.
+- Deterministic builders for source catalog and graph topology.
+- Validation boundary around non-deterministic model output.
+- RTK Query for browser server state and WebSocket invalidation/update events.
+- Embedded SQL migrations and startup recovery.
+
+## Known risks
+
+- SQLite prevents safe horizontal scaling of backend-api.
+- `/internal/evidence` relies on cluster network isolation rather than application authentication.
+- LLM dispatch has startup recovery but no durable queue or exactly-once guarantee.
+- WebSocket JWT query parameters can be exposed by proxy access logs.
+- Full prompts and raw model responses are currently logged and stored; production retention and redaction need explicit policy.
+- There is no automated browser E2E suite; Tilt validation is currently an operator-driven runtime check.
+
+See `docs/codebase/CONCERNS.md` for the broader risk register.

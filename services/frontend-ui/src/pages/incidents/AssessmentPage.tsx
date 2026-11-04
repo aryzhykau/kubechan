@@ -287,7 +287,7 @@ export function AssessmentPage() {
       <div className="assessment-confidence"><strong>{confidence}%</strong><span>confidence</span><i><b style={{ width: `${confidence}%` }} /></i></div>
     </header>
 
-    <section className="assessment-diagnosis"><span>Diagnosis</span><h2>{assessment.summary}</h2><div><strong>{assessment.claims.filter(claim => claim.verdict === 'supported').length}</strong> supported claims <b>·</b> <strong>{graph.nodes.length}</strong> resources <b>·</b> <strong>{graph.edges.length}</strong> relationships</div></section>
+    <section className="assessment-diagnosis"><span>Diagnosis</span><h2>{assessment.summary}</h2><div><strong>{assessment.claims.filter(claim => claim.verdict === 'supported').length}</strong> supported claims <b>·</b> <strong>{graph.nodes.length}</strong> resources <b>·</b> <strong>{graph.edges.length}</strong> relationships</div>{analysis.payload.tokenUsage && <small>{analysis.payload.tokenUsage.totalTokens.toLocaleString()} tokens · input {analysis.payload.tokenUsage.inputTokens.toLocaleString()} · output {analysis.payload.tokenUsage.outputTokens.toLocaleString()}{analysis.payload.tokenUsage.inputSource === 'tokenizer_estimate' || analysis.payload.tokenUsage.outputSource === 'tokenizer_estimate' ? ' · tokenizer estimate' : ' · provider reported'}</small>}</section>
 
     <section className="assessment-workspace">
       <div className="assessment-workspace__main">

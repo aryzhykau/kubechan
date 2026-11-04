@@ -32,6 +32,12 @@ func TestGetLLMModels(t *testing.T) {
 	if _, ok := resp.Providers["bedrock"]; !ok {
 		t.Error("expected 'bedrock' provider in response")
 	}
+	if _, ok := resp.Providers["openai"]; !ok {
+		t.Error("expected 'openai' provider in response")
+	}
+	if _, ok := resp.Providers["anthropic"]; !ok {
+		t.Error("expected 'anthropic' provider in response")
+	}
 	foundClaudeSonnet := false
 	for _, model := range resp.Providers["bedrock"] {
 		if model.ID == "claude-sonnet-6" && model.Label == "Claude Sonnet 4.6" {
