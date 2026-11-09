@@ -1,0 +1,9 @@
+.investigation-feed { padding: 14px; border-top: 1px solid var(--border); color: var(--text); }
+.investigation-feed h3 { margin: 0; font-size: .75rem; }
+.investigation-feed > p { font-size: .65rem; color: var(--muted); line-height: 1.5; }
+.investigation-feed ol { list-style: none; margin: 0; padding: 0; }
+.investigation-feed li { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: .72rem; line-height: 1.6; overflow-wrap: anywhere; }
+.investigation-feed time { display: block; font: .61rem ui-monospace, monospace; color: var(--muted); margin-bottom: 3px; }
+.investigation-feed__finding { border-left: 2px solid var(--mui-palette-primary-main, #d5a64a); padding-left: 10px !important; }
+.investigation-feed button { display: block; margin-top: 6px; background: transparent; border: 1px solid var(--border); color: var(--text); font-size: .65rem; padding: 4px 7px; cursor: pointer; }
+.investigation-feed button:focus-visible { outline: 2px solid var(--mui-palette-primary-main, #d5a64a); outline-offset: 2px; }

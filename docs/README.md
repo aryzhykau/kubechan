@@ -16,6 +16,11 @@ Use this index to distinguish current documentation from historical plans.
 | [`codebase/CONVENTIONS.md`](codebase/CONVENTIONS.md) | Language and repository conventions |
 | [`releases/v1.8.0.md`](releases/v1.8.0.md) | v1.8.0 release notes and upgrade considerations |
 
+## Snapshot agent and improvement ideas
+
+- [Snapshot agent contract](contracts/snapshot-agent.md)
+- [Improvement backlog](ideas.md)
+
 ## Point-in-time audits
 
 [`codebase/CONCERNS.md`](codebase/CONCERNS.md) is a risk register captured during a codebase audit. Validate every item against the current implementation before acting on it; it is not an executable contract.

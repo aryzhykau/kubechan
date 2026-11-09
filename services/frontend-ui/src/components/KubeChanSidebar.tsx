@@ -1,10 +1,14 @@
 import { useRef, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useMatch, useNavigate } from 'react-router-dom'
 import { Button, CircularProgress } from '@mui/material'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import { useListIncidentsQuery } from '../store/api/incidentsApi'
 import { useListDiagnosticRunsQuery } from '../store/api/diagnosticsApi'
 import type { AnalysisResult } from '../api/index'
+import { useAnalysisProgress } from '../analysis/useAnalysisProgress'
+import { analysisProgressLabel } from '../analysis/progress'
+import { InvestigationFeed } from './InvestigationFeed'
+import { assessmentPath } from '../analysis/investigation'
 
 const THINKING_FRAMES: { image: string; phrase: string }[] = [
   { image: '/kubechan-looking.png',    phrase: "H-hmph… give me a second, I'm scanning your dumb cluster…" },
@@ -37,7 +41,11 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onDismiss }: {
   const navigate = useNavigate()
   const { data: incidents = [], isLoading: incidentsLoading, isError: incidentsError } = useListIncidentsQuery(undefined, { pollingInterval: 15000, refetchOnMountOrArgChange: true })
   const { data: runs = [], isLoading: runsLoading, isError: runsError } = useListDiagnosticRunsQuery(undefined, { pollingInterval: 10000, refetchOnMountOrArgChange: true })
-  const { pose, result, incidentName, reactionLine, chatterImage } = state
+  const activeRun = runs.find(run => run.status === 'in_progress')
+  const assessmentRoute = useMatch('/incidents/:incidentId/assessments/:runId')
+  const { data: agentProgress } = useAnalysisProgress(assessmentRoute?.params.runId ?? activeRun?.diagnosticRunId ?? '')
+  const { pose: storedPose, result, incidentName, reactionLine, chatterImage } = state
+  const pose = assessmentRoute ? (!agentProgress?.available || agentProgress.status === 'running' ? 'thinking' : 'idle') : storedPose
   const contentRef = useRef<HTMLDivElement>(null)
   const [shaking, setShaking] = useState(false)
   const [thinkingFrameIdx, setThinkingFrameIdx] = useState(0)
@@ -110,7 +118,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onDismiss }: {
     <aside className="kubechan-sidebar">
       {/* scrollable top zone */}
       <div className="kubechan-scroll-zone">
-        <div className="assistant-overview">
+        {!assessmentRoute && <div className="assistant-overview">
           <div className="assistant-overview-counts">
             <button type="button" onClick={() => navigate('/')}><strong>{openIncidents.length}</strong><span>Open incidents</span></button>
             <div><strong>{activeRuns.length}</strong><span>Active analyses</span></div>
@@ -127,7 +135,8 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onDismiss }: {
                 <strong title={title}>{title}</strong>
                 <span>{incident?.spec.rootResource.namespace ?? incident?.metadata.namespace ?? 'Unknown namespace'} · {runStatus(run.status)}</span>
                 <span>Started {elapsed(run.requestedAt)} ago</span>
-                <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate(`/diagnostics/${encodeURIComponent(run.diagnosticRunId)}`)}>Open run</Button>
+                {agentProgress?.runId === run.diagnosticRunId && agentProgress.available && <span role="status" aria-live="polite">{analysisProgressLabel(agentProgress)}</span>}
+                <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate(assessmentPath(run.incidentId, run.diagnosticRunId))}>Open analysis</Button>
               </article>
             })}
             {activeRuns.length > 5 && <button className="assistant-more" onClick={() => navigate('/diagnostics')}>View all runs ({activeRuns.length - 5} more)</button>}
@@ -141,14 +150,16 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onDismiss }: {
               const title = incident ? `${incident.spec.rootResource.kind}/${incident.spec.rootResource.name}` : run.incidentId || 'Incident'
               return <article className="assistant-run assistant-run--recent" key={run.diagnosticRunId}>
                 <strong title={title}>{title}</strong>
-                <span>{isFailed ? 'Analysis failed' : !hasResult ? 'Result unavailable' : run.needsMoreInfo ? 'More evidence needed' : 'Analysis ready'}</span>
+                <span>{run.agentStatus && run.agentStatus !== 'completed' ? analysisProgressLabel({ available: true, runId: run.diagnosticRunId, stage: run.agentStatus, events: [] }) : isFailed ? 'Analysis failed' : !hasResult ? 'Result unavailable' : run.needsMoreInfo ? 'More evidence needed' : 'Analysis ready'}</span>
                 <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => hasResult ? navigate(`/incidents/${encodeURIComponent(run.incidentId)}/assessments/${encodeURIComponent(run.diagnosticRunId)}`) : navigate(`/diagnostics/${encodeURIComponent(run.diagnosticRunId)}`)}>{hasResult ? 'Open assessment' : 'Open run'}</Button>
               </article>
             })}
           </section>
           {openIncidents.length > 0 && <button className="assistant-more" onClick={() => navigate('/')}>View all open incidents ({openIncidents.length})</button>}
-        </div>
-        {pose !== 'idle' && (
+        </div>}
+        {assessmentRoute && <InvestigationFeed progress={agentProgress} />}
+        {assessmentRoute && <div className="sidebar-bubble-wrap"><div className="speech-bubble"><p className="speech-neutral" role="status">{agentProgress?.available ? analysisProgressLabel(agentProgress) : 'Waiting for the collected evidence to begin the investigation.'}</p></div></div>}
+        {!assessmentRoute && pose !== 'idle' && (
           <div className="sidebar-bubble-wrap">
             <div className="speech-bubble">
               {/* scrollable content */}
@@ -157,7 +168,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onDismiss }: {
                   <span className="speech-thinking">
                     <span className="spinner" />
                     <span key={thinkingFrameIdx} className="speech-thinking-text">
-                      {THINKING_FRAMES[thinkingFrameIdx].phrase}
+                      {agentProgress?.available ? analysisProgressLabel(agentProgress) : assessmentRoute ? 'Waiting for the collected evidence to begin the investigation.' : THINKING_FRAMES[thinkingFrameIdx].phrase}
                     </span>
                   </span>
                 )}
@@ -188,7 +199,7 @@ export function KubeChanSidebar({ state, onPoke, moodLevel = 0, onDismiss }: {
       </div>
       {/* fixed character zone — always visible */}
       <div className="kubechan-char-zone">
-        {pose === 'idle' && (
+        {pose === 'idle' && !assessmentRoute && (
           <p className="kubechan-idle-hint">click an incident<br />to ask me for help</p>
         )}
         {reactionLine && (

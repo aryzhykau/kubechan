@@ -77,6 +77,9 @@ diagnosticsWorker:
 # backend-api — REST API, WebSocket hub, SQLite store
 # ---------------------------------------------------------------------------
 backendApi:
+  # Opt in to bounded Kubernetes snapshot traversal with PydanticAI.
+  # Existing/provider-specific single-shot analysis remains the default.
+  analysisMode: single-shot
   enabled: true
   replicaCount: 1  # Must remain 1 — SQLite single-writer constraint
   image:

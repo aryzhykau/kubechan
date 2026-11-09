@@ -47,6 +47,10 @@ func main() {
 		logger.Error("startup recovery failed", "error", err)
 		os.Exit(1)
 	}
+	if err := startup.RecoverAgentAttempts(ctx, database); err != nil {
+		logger.Error("agent recovery failed", "error", err)
+		os.Exit(1)
+	}
 
 	if err := handler.ValidateJWTSecret(); err != nil {
 		logger.Error("JWT secret validation failed", "error", err)
@@ -115,6 +119,11 @@ func main() {
 	// ── Handlers ──────────────────────────────────────────────────────────────
 
 	personaAllowed := envOr("PERSONA_ALLOWED", "true") != "false"
+	analysisMode := envOr("ANALYSIS_MODE", "single-shot")
+	if analysisMode != "single-shot" && analysisMode != "snapshot-agent-v1" {
+		logger.Error("invalid ANALYSIS_MODE")
+		os.Exit(1)
+	}
 
 	incidents := &handler.Incidents{K8s: k8s, DB: database, DefaultNamespace: defaultNS}
 	problemcases := &handler.ProblemCases{K8s: k8s, DefaultNamespace: defaultNS}
@@ -134,6 +143,7 @@ func main() {
 		MoodSyncer:       moodSyncer,
 		PersonaAllowed:   personaAllowed,
 		Logger:           logger,
+		AnalysisMode:     analysisMode,
 	}
 	authHandler := &handler.Auth{DB: database, Logger: logger}
 	usersHandler := &handler.Users{DB: database}
@@ -182,6 +192,8 @@ func main() {
 			r.Delete("/diagnosticruns/{id}", diagnosticruns.Delete)
 			r.Get("/diagnosticruns/{id}/evidence", diagnosticruns.GetEvidence)
 			r.Get("/diagnosticruns/{id}/analysisresult", diagnosticruns.GetAnalysisResult)
+			r.Get("/diagnosticruns/{id}/analysisprogress", diagnosticruns.GetAnalysisProgress)
+			r.Post("/diagnosticruns/{id}/analysis/cancel", internal.CancelAnalysis)
 			r.Get("/analysisresults/{id}", analysis.GetAnalysisResult)
 			r.Post("/analysisresults/{id}/rate", analysis.RateAnalysisResult)
 

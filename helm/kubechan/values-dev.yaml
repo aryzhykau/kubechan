@@ -2,6 +2,7 @@
 ## Images are built and injected by Tilt; do not use registry tags here.
 
 backendApi:
+  analysisMode: snapshot-agent-v1
   image:
     repository: kubechan/backend-api
     tag: latest

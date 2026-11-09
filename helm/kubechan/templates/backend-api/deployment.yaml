@@ -44,6 +44,8 @@ spec:
               value: {{ .Release.Namespace }}
             - name: LLM_GATEWAY_URL
               value: "http://{{ include "kubechan.fullname" . }}-llm-gateway:{{ .Values.llmGateway.service.port }}"
+            - name: ANALYSIS_MODE
+              value: {{ .Values.backendApi.analysisMode | default "single-shot" | quote }}
             - name: EVIDENCE_RETENTION_DAYS
               value: {{ .Values.backendApi.retention.evidenceDays | quote }}
             - name: ANALYSIS_RETENTION_DAYS

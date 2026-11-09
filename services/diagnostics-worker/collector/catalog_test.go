@@ -37,6 +37,34 @@ func TestBuildSourceCatalogDeterministicAndAtomic(t *testing.T) {
 	}
 }
 
+func TestBuildSourceCatalogIncludesWorkloadPodLabelsAndClaimReferences(t *testing.T) {
+	ref := ResourceRef{Kind: "Pod", Namespace: "demo", Name: "gateway-1"}
+	ev := &Evidence{
+		RootResource: ResourceRef{Kind: "Service", Namespace: ref.Namespace, Name: "gateway-public"},
+		WorkloadPodLogs: []PodLogs{{
+			PodName: ref.Name, Phase: "Pending",
+			Labels:   map[string]string{"track": "stable", "app.example.com/name": "gateway"},
+			PVCNames: []string{"uploads"},
+		}},
+	}
+	sources := BuildSourceCatalog(ev)
+	want := []struct{ path, value string }{
+		{"/status/phase", "Pending"},
+		{"/labels/app.example.com~1name", "gateway"},
+		{"/labels/track", "stable"},
+		{"/pvcNames/0", "uploads"},
+	}
+	if len(sources) != len(want) {
+		t.Fatalf("got %d sources, want %d", len(sources), len(want))
+	}
+	for i, expected := range want {
+		source := sources[i]
+		if source.Resource != ref || source.Type != "resource_field" || source.Path != expected.path || source.Value != expected.value {
+			t.Errorf("source %d = %#v, want %s = %s on %v", i, source, expected.path, expected.value, ref)
+		}
+	}
+}
+
 func TestSecretSourceNeverContainsContent(t *testing.T) {
 	ev := &Evidence{
 		RootResource:    ResourceRef{Kind: "Deployment", Namespace: "demo", Name: "api"},

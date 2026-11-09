@@ -25,6 +25,8 @@ import { ResourcePill } from '../../components/shared/ResourcePill'
 import { timeAgo } from '../../components/shared/utils'
 import { AugmentIncidentModal } from './AugmentIncidentModal'
 import { waitForAnalysis } from '../../analysis/tracker'
+import { useAnalysisProgress } from '../../analysis/useAnalysisProgress'
+import { AnalysisProgressPanel } from '../../components/AnalysisProgressPanel'
 import type { Incident, ProblemCase, DiagnosticRunSummary, ExclusionRuleProposal, AnalysisResult } from '../../api/index'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -788,6 +790,7 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
   const selected = filtered.find(i => i.metadata.name === selectedId) ?? filtered[0]
   const drawerIncident = allIncidents.find(i => i.metadata.name === drawerIncidentId)
   const drawerRun = drawerIncident ? priorRuns[drawerIncident.metadata.name] : undefined
+  const { data: drawerProgress } = useAnalysisProgress(drawerRun?.diagnosticRunId ?? '', drawerOpen)
   const drawerRunActive = !!drawerRun && !drawerRun.analysisResultId && !['completed', 'failed', 'error'].includes(drawerRun.status.toLowerCase())
   const { data: drawerEvidence, isLoading: evidenceLoading, isError: evidenceError } = useGetDiagnosticRunEvidenceQuery(drawerRun?.diagnosticRunId ?? '', { skip: !drawerOpen || !drawerRun?.analysisResultId })
   const [drawerAnalysis, setDrawerAnalysis] = useState<AnalysisResult | null>(null)
@@ -968,7 +971,7 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
         key={incident.metadata.name}
         incident={incident}
         previousRun={priorRuns[incident.metadata.name]}
-        analysisSummary={drawerAnalysis?.diagnosticRunId === priorRuns[incident.metadata.name]?.diagnosticRunId ? drawerAnalysis.payload.assessment?.summary : undefined}
+        analysisSummary={drawerAnalysis && drawerAnalysis.diagnosticRunId === priorRuns[incident.metadata.name]?.diagnosticRunId ? drawerAnalysis.payload.assessment?.summary : undefined}
         problemCases={problemCases}
         onAction={onAction}
         onResolved={onResolved}
@@ -1146,12 +1149,13 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
                   <IconButton aria-label="Close incident details" onClick={closeDrawer} size="small"><CloseIcon fontSize="small" /></IconButton>
                 </Box>
                 {drawerIncident && renderIncidentCard(drawerIncident)}
+                {drawerIncident && <Box sx={{ px: 1.5 }}><AnalysisProgressPanel progress={drawerProgress} /></Box>}
                 {drawerIncident && drawerRun?.analysisResultId && (
                   <Box component="section" sx={{ px: 1.1, pt: 1.1, pb: 1.5, mt: 0.3, borderTop: '1px solid #3b443c' }} aria-live="polite">
                     <Typography sx={{ px: 0.9, mb: 0.6, fontSize: '0.68rem', fontWeight: 700 }}>Evidence used</Typography>
                     {(evidenceLoading || analysisLoading) && <Typography variant="caption" sx={{ display: 'block' }}>Loading evidence and assessment…</Typography>}
                     {(evidenceError || (!analysisLoading && !drawerAnalysis && !evidenceLoading)) && <Alert severity="warning" sx={{ mt: 0.5 }}>Run result or evidence is unavailable.</Alert>}
-                    {drawerAnalysis?.diagnosticRunId === drawerRun?.diagnosticRunId && drawerEvidence?.diagnosticRunId === drawerRun?.diagnosticRunId && (() => {
+                    {drawerAnalysis && drawerEvidence && drawerRun && drawerAnalysis.diagnosticRunId === drawerRun.diagnosticRunId && drawerEvidence.diagnosticRunId === drawerRun.diagnosticRunId && (() => {
                       const sourceMap = new Map((drawerEvidence.payload.sources ?? []).map(source => [source.id, source]))
                       const assessment = drawerAnalysis.payload.assessment
                       const seenSources = new Set<string>()
@@ -1187,7 +1191,7 @@ export function IncidentList({ onAction, onResolved, onMarkFalsePositive }: Inci
               {drawerIncident && <Box sx={{ px: 1.25, py: 1, borderTop: '1px solid', borderColor: 'divider', bgcolor: '#151916', display: 'flex', gap: 0.75, alignItems: 'center', zIndex: 2, flexWrap: 'wrap' }}>
                 {drawerNeedsMoreInfo && drawerIncident.status.state !== 'resolved' && <Button size="small" variant="contained" disabled={footerBusy} onClick={() => openAugment?.()}>Add context &amp; re-analyze</Button>}
                 {drawerRun?.analysisResultId && <Button size="small" variant={drawerNeedsMoreInfo ? 'outlined' : 'contained'} onClick={() => navigate(`/incidents/${encodeURIComponent(drawerIncident.metadata.name)}/assessments/${encodeURIComponent(drawerRun.diagnosticRunId)}`)}>Full assessment</Button>}
-                {drawerIncident.status.state !== 'resolved' && !drawerNeedsMoreInfo && <Button size="small" variant={drawerRun?.analysisResultId ? 'outlined' : 'contained'} disabled={footerBusy || drawerRunActive} onClick={() => startAnalysis(drawerIncident)}>{footerBusy ? 'Starting…' : drawerRunActive ? 'Analysis running…' : drawerRun?.analysisResultId ? 'Run again' : 'Run diagnostic analysis'}</Button>}
+                {drawerIncident.status.state !== 'resolved' && <Button size="small" variant={drawerRun?.analysisResultId ? 'outlined' : 'contained'} disabled={footerBusy || drawerRunActive} onClick={() => startAnalysis(drawerIncident)}>{footerBusy ? 'Starting…' : drawerRunActive ? 'Analysis running…' : drawerNeedsMoreInfo ? 'Run again without adding resources' : drawerRun?.analysisResultId ? 'Run again' : 'Run diagnostic analysis'}</Button>}
                 {footerError === drawerIncident.metadata.name && <Typography role="alert" variant="caption" color="error.main">Could not start analysis. Try again.</Typography>}
               </Box>}
             </Box>

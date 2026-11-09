@@ -115,3 +115,11 @@
 .assessment-runbook article > b { color: #d5a64a; font-size: 1rem; }.assessment-runbook h3 { margin: 0; font-size: .82rem; }.assessment-runbook p { margin: 5px 0; color: #879089; font-size: .7rem; }.assessment-runbook article code { display: block; padding: 9px; color: #cbd2cc; background: #0d100e; border: 1px solid #282e29; font-size: .68rem; }.assessment-runbook small { display: block; margin-top: 8px; color: #69716b; }
 
 @media (max-width: 980px) { .assessment-page__header { grid-template-columns: 1fr auto; }.assessment-page__header > button { grid-column: 1 / -1; justify-self: start; }.assessment-workspace { grid-template-columns: 1fr; }.assessment-workspace__main { border-right: 0; }.assessment-inspector { min-height: 180px; border-top: 1px solid rgba(255,255,255,.1); } }
+
+.graph-node__review { font-size: 9px; fill: var(--muted, #8e978f); }
+.graph-node__review--relevant { fill: var(--mui-palette-primary-main, #d5a64a); }
+.graph-node__review--not_relevant { fill: var(--muted, #8e978f); }
+.graph-node__explanation { font-size: 9px; fill: var(--text, #dfe4e0); }
+.assessment-graph-waiting { display: grid; place-items: center; min-height: 430px; padding: 32px; color: var(--muted); font-size: .8rem; text-align: center; }
+.assessment-gaps { padding: 16px 0; color: var(--muted); font-size: .76rem; }
+.assessment-workspace--graph-only { grid-template-columns: minmax(0, 1fr); }

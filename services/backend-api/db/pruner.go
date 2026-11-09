@@ -51,6 +51,12 @@ func prune(ctx context.Context, db *sql.DB, logger *slog.Logger) {
 		strconv.Itoa(-analysisDays),
 	)
 	logPruneResult(logger, "analysis_requests", res, err)
+
+	// Explicit cleanup also works on pooled connections without FK enforcement.
+	res, err = db.ExecContext(ctx, `DELETE FROM analysis_attempts WHERE analysis_request_id NOT IN (SELECT id FROM analysis_requests)`)
+	logPruneResult(logger, "analysis_attempts", res, err)
+	res, err = db.ExecContext(ctx, `DELETE FROM analysis_progress WHERE attempt_id NOT IN (SELECT id FROM analysis_attempts)`)
+	logPruneResult(logger, "analysis_progress", res, err)
 }
 
 func readSettingInt(db *sql.DB, key string, fallback int) int {

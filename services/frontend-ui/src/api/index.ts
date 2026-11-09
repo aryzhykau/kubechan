@@ -72,6 +72,7 @@ export interface DiagnosticRunSummary {
   problemCaseRef?: string
   requestedAt: string
   status: string
+  agentStatus?: string
   analysisResultId?: string
   likelyRootCause?: string
   confidence?: number
@@ -347,10 +348,81 @@ export interface AnalysisResult {
     suggestFalsePositive?: boolean
     suggestExclusionRule?: ExclusionRuleProposal | null
     assessmentVersion?: number
+    analysisMode?: 'single-shot' | 'snapshot-agent-v1'
+    agentExecution?: {
+      version: number
+      analysisRequestId: string
+      attemptId: string
+      snapshotHash: string
+      status: 'completed' | 'partial'
+      stopReason: string
+      requests: number
+      toolCalls: number
+      citationQuotes?: { policy: 'snapshot-excerpt-v1'; maxChars: number; count: number; ignoredModelQuotes: number }
+      assessmentBuilder?: 'incremental-v1'
+      draft?: AssessmentDraft
+      investigationGraph?: InvestigationScope
+      exposed: { nodeIds: string[]; edgeIds: string[]; candidateIds: string[]; sourceIds: string[] }
+    }
     assessment?: AssessmentV2
     citationValidation?: { valid: boolean; total: number; invalid: number; invalidSourceIds?: string[] }
   }
   createdAt: string
+}
+
+export interface AnalysisProgressEvent {
+  version: number
+  type: 'Analysis.Progress'
+  runId: string
+  analysisRequestId: string
+  attemptId: string
+  seq: number
+  stage: string
+  phase: 'started' | 'completed' | 'failed'
+  occurredAt: string
+  recordedAt: string
+  toolCallId?: string
+  returnedCount?: number
+  reasonCode?: string
+  turn?: number
+  target?: { nodeId: string; resource: ResourceRef }
+  previousLogs?: boolean
+  availability?: 'collected' | 'not_collected'
+  validationFields?: Array<{ path: string; kind: string }>
+  executionLimit?: { kind: 'requests' | 'input_tokens' | 'output_tokens' | 'tool_calls'; used: number; maximum: number }
+  exposed?: InvestigationScope
+  investigationGraph?: InvestigationScope
+  turnTokens?: { input: number; output: number }
+  draft?: AssessmentDraft
+  change?: { kind: 'claim' | 'hypothesis' | 'gap' | 'remediation' | 'review' | 'graph' | 'conclusion' | 'path' | 'retracted'; id: string }
+}
+
+export interface InvestigationScope {
+  nodeIds: string[]
+  edgeIds: string[]
+  candidateIds: string[]
+  sourceIds?: string[]
+}
+
+export interface AssessmentDraft {
+  version: 1
+  revision: number
+  hasConclusion: boolean
+  assessment: AssessmentV2
+  graph: InvestigationScope
+}
+
+export interface AnalysisProgress {
+  available: boolean
+  runId: string
+  analysisRequestId?: string
+  attemptId?: string
+  status?: string
+  stage?: string
+  reasonCode?: string
+  updatedAt?: string
+  lastSeq?: number
+  events: AnalysisProgressEvent[]
 }
 
 export interface User {
