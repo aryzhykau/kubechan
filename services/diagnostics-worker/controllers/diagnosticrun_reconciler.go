@@ -598,6 +598,16 @@ func (r *DiagnosticRunReconciler) templateDependencyFields(ctx context.Context, 
 func (r *DiagnosticRunReconciler) collectResourceSpec(ctx context.Context, ns, kind, name, apiGroup string) (map[string]any, error) {
 	key := client.ObjectKey{Namespace: ns, Name: name}
 	switch kind {
+	case "Pod":
+		obj := &corev1.Pod{}
+		if err := r.Get(ctx, key, obj); err != nil {
+			return nil, err
+		}
+		dependencies := r.templateDependencyFields(ctx, ns, obj.Spec)
+		for _, dependency := range dependencies {
+			dependency["fieldPath"] = "/spec"
+		}
+		return map[string]any{"uid": string(obj.UID), "resourceVersion": obj.ResourceVersion, "phase": obj.Status.Phase, "labels": obj.Labels, "dependencies": dependencies}, nil
 	case "Ingress":
 		obj := &networkingv1.Ingress{}
 		if err := r.Get(ctx, key, obj); err != nil {

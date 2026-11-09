@@ -40,6 +40,17 @@ func BuildSourceCatalog(ev *Evidence) []EvidenceSource {
 	for _, pod := range ev.WorkloadPodLogs {
 		ref := ResourceRef{Kind: "Pod", Name: pod.PodName, Namespace: root.Namespace}
 		out = append(out, fieldSource(ref, "/status/phase", pod.Phase, ev.CollectedAt))
+		labels := make([]string, 0, len(pod.Labels))
+		for key := range pod.Labels {
+			labels = append(labels, key)
+		}
+		sort.Strings(labels)
+		for _, key := range labels {
+			out = append(out, fieldSource(ref, "/labels/"+escapeJSONPointer(key), pod.Labels[key], ev.CollectedAt))
+		}
+		for i, claim := range pod.PVCNames {
+			out = append(out, fieldSource(ref, "/pvcNames/"+strconv.Itoa(i), claim, ev.CollectedAt))
+		}
 		for _, event := range pod.Events {
 			out = append(out, eventSource(ref, event, ev.CollectedAt))
 		}

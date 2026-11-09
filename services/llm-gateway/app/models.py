@@ -24,6 +24,9 @@ class AnalyzeRequest(BaseModel):
     provider: str = "bedrock"
     credentials: dict[str, Any] = {}
     personaEnabled: bool = True
+    analysisMode: Literal["single-shot", "snapshot-agent-v1"] = "single-shot"
+    analysisRequestId: str = ""
+    attemptId: str = ""
     payload: dict[str, Any]
 
 
@@ -91,7 +94,8 @@ class CausalPath(BaseModel):
 class NodeInsight(BaseModel):
     nodeId: str
     relevance: Literal["relevant", "context", "not_relevant"]
-    comment: str
+    # Optional display text; relevance and evidence references remain validated.
+    comment: str = ""
     claimIds: list[str] = []
     sourceIds: list[str] = []
 
@@ -118,6 +122,9 @@ class AssessmentV2(BaseModel):
         if not isinstance(value, dict):
             return value
         normalized = dict(value)
+        path = normalized.get("causalPath")
+        if isinstance(path, dict) and path.get("rootCauseEntityId") is None and path.get("steps") == []:
+            normalized["causalPath"] = None
         for field_name in ("claims", "alternativeHypotheses"):
             normalized_claims = []
             for item in normalized.get(field_name) or []:
@@ -183,3 +190,5 @@ class AnalyzeResponse(BaseModel):
     tokenUsage: TokenUsage | None = None
     rawResponse: str | None = None
     prompt: str | None = None
+    analysisMode: Literal["single-shot", "snapshot-agent-v1"] = "single-shot"
+    agentExecution: dict[str, Any] | None = None

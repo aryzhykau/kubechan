@@ -24,9 +24,10 @@ export const incidentsApi = createApi({
     }),
     analyze: build.mutation<AnalyzeResponse, string>({
       query: (id) => ({ url: `/incidents/${encodeURIComponent(id)}/analyze`, method: 'POST' }),
-      async onQueryStarted(_, { dispatch, queryFulfilled }) {
+      async onQueryStarted(incidentId, { dispatch, queryFulfilled }) {
         try {
-          await queryFulfilled
+          const { data } = await queryFulfilled
+          window.dispatchEvent(new CustomEvent('kubechan:analysis-started', { detail: { incidentId, runId: data.diagnosticRunId } }))
           dispatch(diagnosticsApi.util.invalidateTags([{ type: 'DiagnosticRun', id: 'LIST' }]))
         } catch { /* The caller handles a failed start. */ }
       },
@@ -48,9 +49,10 @@ export const incidentsApi = createApi({
     }>({
       query: (body) => ({ url: '/incidents/manual', method: 'POST', body }),
       invalidatesTags: [{ type: 'Incident', id: 'LIST' }],
-      async onQueryStarted(_, { dispatch, queryFulfilled }) {
+      async onQueryStarted({ namespace, resourceKind, resourceName }, { dispatch, queryFulfilled }) {
         try {
-          await queryFulfilled
+          const { data } = await queryFulfilled
+          window.dispatchEvent(new CustomEvent('kubechan:analysis-started', { detail: { incidentId: data.incidentId, runId: data.diagnosticRunId, rootResource: { namespace, kind: resourceKind, name: resourceName } } }))
           dispatch(diagnosticsApi.util.invalidateTags([{ type: 'DiagnosticRun', id: 'LIST' }]))
         } catch { /* The modal handles a failed start. */ }
       },
@@ -68,9 +70,10 @@ export const incidentsApi = createApi({
         { type: 'Incident', id: incidentId },
         { type: 'Incident', id: 'LIST' },
       ],
-      async onQueryStarted(_, { dispatch, queryFulfilled }) {
+      async onQueryStarted({ incidentId }, { dispatch, queryFulfilled }) {
         try {
-          await queryFulfilled
+          const { data } = await queryFulfilled
+          window.dispatchEvent(new CustomEvent('kubechan:analysis-started', { detail: { incidentId, runId: data.diagnosticRunId } }))
           dispatch(diagnosticsApi.util.invalidateTags([{ type: 'DiagnosticRun', id: 'LIST' }]))
         } catch { /* The modal handles a failed start. */ }
       },

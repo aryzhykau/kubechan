@@ -106,3 +106,5 @@ git diff -- api/v1alpha1/zz_generated.deepcopy.go helm/kubechan/crds/
 - No comprehensive envtest suite for every controller.
 - No frontend component/unit test framework.
 - Tilt E2E validates readiness, while scenario assertions remain manual.
+
+Run the frontend investigation and progress tests with `cd services/frontend-ui && node --test tests/*.mjs`.

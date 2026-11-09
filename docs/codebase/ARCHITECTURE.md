@@ -73,6 +73,23 @@ The user selects a root resource, describes the issue, and optionally adds relat
 
 ### More-information loop
 
+`backendApi.analysisMode=snapshot-agent-v1` opts Bedrock runs into
+PydanticAI traversal of the frozen snapshot. The model starts with the complete compact snapshot graph and reads exact
+resource, event and log sources as needed. Gateway owns
+the bounded loop and delivery-aware validation; backend owns persisted attempts,
+progress, cancellation and terminal settlement. REST restores progress after a
+WebSocket reconnect. Lost agent attempts become interrupted after restart and are
+not automatically replayed. The canonical evidence/graph remains unchanged.
+See [snapshot-agent contract](../contracts/snapshot-agent.md).
+
+The runner exposes tools to inspect resources, continue specific sections,
+record cited findings and verify the draft. After verification it exposes only
+`finish` to persist the frozen assessment. It keeps bounded evidence and read receipts
+in model context, builds the visible graph from inspected resources and validates
+each draft revision before publishing it. The backend persists revisions and
+broadcasts progress. Browser starts open the Assessment workspace at the root
+and restore findings and activity after reload or an interrupted attempt.
+
 When a valid response requests more information and names suggested resource kinds, the user may add resources through the augment flow. backend-api updates the Incident and creates a new DiagnosticRun. Prior snapshots remain unchanged.
 
 ### Exclusion rules

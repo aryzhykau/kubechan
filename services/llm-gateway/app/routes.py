@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import logging
+import asyncio
+from contextlib import suppress
+from datetime import datetime, timezone
+import json
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.models import (
     AnalyzeRequest,
@@ -38,6 +43,17 @@ def readyz() -> dict:
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
+    if req.analysisMode == "snapshot-agent-v1":
+        from app.investigation import run_incremental_agent as run_snapshot_agent
+
+        async def ignore_progress(_event: dict) -> None:
+            pass
+
+        try:
+            return await run_snapshot_agent(req, ignore_progress)
+        except Exception as exc:
+            logger.error("snapshot agent failed | errorType=%s", type(exc).__name__)
+            raise HTTPException(status_code=502, detail="Snapshot agent failed; no validated assessment available") from exc
     logger.info(
         "analyzing evidence | evidenceId=%s incidentId=%s provider=%s",
         req.evidenceId,
@@ -273,3 +289,55 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         rawResponse=raw,
         prompt=prompt,
     )
+
+
+@router.post("/analyze/stream")
+async def analyze_stream(req: AnalyzeRequest) -> StreamingResponse:
+    """Internal NDJSON transport. Backend persists events before browser fan-out."""
+    if req.analysisMode != "snapshot-agent-v1" or not req.analysisRequestId or not req.attemptId:
+        raise HTTPException(status_code=422, detail="snapshot-agent-v1 and request/attempt IDs are required")
+
+    async def frames():
+        from app.investigation import run_incremental_agent as run_snapshot_agent
+        from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+
+        queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+        sequence = 0
+
+        async def progress(event: dict) -> None:
+            nonlocal sequence
+            sequence += 1
+            await queue.put({"type": "progress", "event": {
+                "version": 1, "runId": req.diagnosticRunId, "analysisRequestId": req.analysisRequestId,
+                "attemptId": req.attemptId, "producerSeq": sequence,
+                "occurredAt": datetime.now(timezone.utc).isoformat(), **event,
+            }})
+
+        async def produce() -> None:
+            try:
+                result = await run_snapshot_agent(req, progress)
+                await queue.put({"type": "result", "result": result.model_dump()})
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                code = "timeout" if isinstance(exc, TimeoutError) else "budget_exhausted" if isinstance(exc, UsageLimitExceeded) else "validation_failed" if isinstance(exc, UnexpectedModelBehavior) else "unsupported_request" if isinstance(exc, ValueError) else "provider_error"
+                logger.error("snapshot agent stream failed | errorType=%s", type(exc).__name__)
+                await queue.put({"type": "error", "code": code})
+            finally:
+                current = asyncio.current_task()
+                if current is None or not current.cancelling():
+                    await queue.put(None)
+
+        task = asyncio.create_task(produce())
+        try:
+            while True:
+                frame = await queue.get()
+                if frame is None:
+                    break
+                yield json.dumps(frame, ensure_ascii=False, separators=(",", ":")) + "\n"
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    return StreamingResponse(frames(), media_type="application/x-ndjson")

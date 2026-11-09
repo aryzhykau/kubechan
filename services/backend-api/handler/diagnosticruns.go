@@ -36,6 +36,17 @@ func (h *DiagnosticRuns) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve triggered_by attribution from analysis_requests.
+	// Recover missed CRD patches from durable agent state for polling clients.
+	var agentStatus string
+	if h.DB.QueryRowContext(r.Context(), `SELECT status FROM analysis_attempts WHERE diagnostic_run_id = ? ORDER BY created_at DESC LIMIT 1`, name).Scan(&agentStatus) == nil {
+		dr.Status.AnalysisState = coarseAgentState(agentStatus)
+		if dr.Status.AnalysisState == v1alpha1.DiagnosticRunAnalysisStateCompleted {
+			var resultID string
+			if h.DB.QueryRowContext(r.Context(), `SELECT id FROM analysis_results WHERE diagnostic_run_id = ? ORDER BY created_at DESC LIMIT 1`, name).Scan(&resultID) == nil {
+				dr.Status.AnalysisResultRef = resultID
+			}
+		}
+	}
 	type triggeredByInfo struct {
 		UserID   string `json:"userId"`
 		Username string `json:"username"`
@@ -69,6 +80,7 @@ type runSummary struct {
 	ProblemCaseRef       string          `json:"problemCaseRef,omitempty"`
 	RequestedAt          string          `json:"requestedAt"`
 	Status               string          `json:"status"`
+	AgentStatus          string          `json:"agentStatus,omitempty"`
 	AnalysisResultID     *string         `json:"analysisResultId"`
 	LikelyRootCause      *string         `json:"likelyRootCause"`
 	Confidence           *float64        `json:"confidence"`
@@ -150,7 +162,13 @@ func (h *DiagnosticRuns) List(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if analysisID.Valid {
+			// Results exist only after an atomic successful settlement.
 			s.AnalysisResultID = &analysisID.String
+		}
+		// Agent state is durable in SQLite; a CRD status patch may have been
+		// missed during a backend restart. Preserve the legacy coarse status.
+		if h.DB.QueryRowContext(r.Context(), `SELECT status FROM analysis_attempts WHERE diagnostic_run_id = ? ORDER BY created_at DESC LIMIT 1`, s.DiagnosticRunID).Scan(&s.AgentStatus) == nil {
+			s.Status = string(coarseAgentState(s.AgentStatus))
 		}
 		if rootCause.Valid {
 			s.LikelyRootCause = &rootCause.String
@@ -263,6 +281,8 @@ func (h *DiagnosticRuns) GetAnalysisResult(w http.ResponseWriter, r *http.Reques
 // deleteRunFromDB removes all DB records for a single diagnostic run ID.
 func (h *DiagnosticRuns) deleteRunFromDB(tx *sql.Tx, runID string) error {
 	for _, stmt := range []string{
+		`DELETE FROM analysis_progress WHERE attempt_id IN (SELECT id FROM analysis_attempts WHERE diagnostic_run_id = ?)`,
+		`DELETE FROM analysis_attempts WHERE diagnostic_run_id = ?`,
 		`DELETE FROM analysis_results  WHERE diagnostic_run_id = ?`,
 		`DELETE FROM analysis_requests WHERE diagnostic_run_id = ?`,
 		`DELETE FROM evidence          WHERE diagnostic_run_id = ?`,

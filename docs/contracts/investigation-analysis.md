@@ -15,6 +15,17 @@ This document defines the cross-service contract from collected Kubernetes evide
 
 The LLM never creates graph topology and never supplies authoritative source content.
 
+The opt-in [snapshot agent](snapshot-agent.md) reads this same immutable evidence
+through bounded tools. Its citations and graph annotations must also resolve
+against the journal of context actually delivered to the model. Single-shot
+analysis and historical payloads retain their existing behavior.
+
+The agent's live drawing is a selection of canonical snapshot IDs. The root and
+requested resource nodes are visible during investigation. The model chooses
+relationships and writes source-backed resource cards. An observed broken
+relationship can reveal its missing endpoint after the exact source is delivered.
+Working notes and the most recent tool exchange replace older raw model context.
+
 ## Evidence snapshot
 
 `collector.Evidence` is stored as an immutable DiagnosticRun snapshot. Its `schemaVersion` describes the payload contract. A new run is required to observe collector or GraphEngine changes; previously completed runs are not rewritten.
@@ -38,6 +49,10 @@ Each source has a deterministic ID and identifies one observation:
 - one log line;
 - one event;
 - one collection error when applicable.
+
+Discovered workload Pods include individual label sources under `/labels/` and
+referenced claim names under `/pvcNames/`. These sources allow a Service selector
+comparison and a Pod-to-PVC scheduling diagnosis from the same snapshot.
 
 Example:
 
@@ -132,11 +147,21 @@ The model returns:
 
 The gateway accepts a citation only if its `sourceId` exists in `payload.sources`. It accepts a causal path only if the entry resource and every node, edge, and candidate ID exist in `payload.graph`. A node insight is retained only when its `nodeId`, `claimIds`, and `sourceIds` resolve against the same immutable request snapshot; duplicate or unknown node annotations are removed. Invalid topology annotations are removed.
 
+In `snapshot-agent-v1`, citation IDs must additionally have delivered source values.
+The audited `snapshot-excerpt-v1` quote policy takes display excerpts directly from
+those records after reference validation; model-authored quote text is not used.
+Excerpts are bounded exact prefixes and link to the complete immutable source.
+`agentExecution.citationQuotes` identifies this policy. Other analysis modes and
+historical results keep their existing quoting behavior. See the [agent contract](snapshot-agent.md).
+
 For Assessment v2 responses, the validated assessment confidence is also the top-level analysis confidence. The API uses the validated assessment confidence when listing or returning historical results whose stored top-level confidence differs.
 
 Each successful analysis result also records `tokenUsage` in its stored response payload: `inputTokens`, `outputTokens`, and `totalTokens`. LiteLLM provider usage is used when available. Missing counts are filled with a `tiktoken` estimate and marked with `inputSource` or `outputSource: "tokenizer_estimate"`; counts reported by the provider use `"provider"`. The estimate uses the model's known tiktoken encoding when available and `cl100k_base` otherwise. Estimates for non-OpenAI tokenizers are approximate. Historical results without `tokenUsage` remain valid and display no count.
 
 Node relevance is `relevant`, `context`, or `not_relevant`. Persona-disabled runs use neutral engineering comments. Persona-enabled runs use a concise tsundere voice while preserving the same evidence constraints. Persona selection is part of the immutable analysis result; changing it requires a new analysis.
+An omitted node `comment` is normalized to an empty string; the UI shows its existing
+no-comment fallback. This display-only default does not relax node, claim or source
+validation and does not generate a model annotation.
 
 Graph schema v2 records the effective bounded-discovery policy and distinguishes `observed` edges from `inferred` edges. Observed edges come only from literal Kubernetes references or exact selectors. Inferred edges are deterministic, scored, source-backed discovery hints; they are amber and dashed and never become observed topology. The default snapshot is bounded to four observed hops, one inferred hop, 50 nodes, 150 edges, and five candidates per gap.
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,6 +54,9 @@ type Internal struct {
 	MoodSyncer       *k8s.MoodSyncer
 	PersonaAllowed   bool
 	Logger           *slog.Logger
+	AnalysisMode     string
+	agentMu          sync.Mutex
+	agentCancels     map[string]context.CancelFunc
 }
 
 // ReceiveEvidence handles POST /internal/evidence
@@ -66,7 +70,6 @@ func (h *Internal) ReceiveEvidence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "diagnosticRunId is required")
 		return
 	}
-
 	evidenceID := uuid.New().String()
 	redactionJSON, _ := json.Marshal(req.RedactionSummary)
 	truncationJSON, _ := json.Marshal(req.LogTruncationInfo)
@@ -76,12 +79,19 @@ func (h *Internal) ReceiveEvidence(w http.ResponseWriter, r *http.Request) {
 		logTruncated = 1
 	}
 
-	_, err := h.DB.ExecContext(r.Context(),
+	tx, err := h.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot persist evidence")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	inserted, err := tx.ExecContext(r.Context(),
 		`INSERT INTO evidence
 		 (id, diagnostic_run_id, problem_case_id, incident_id, collected_at, collector_version,
 		  log_truncated, payload, payload_bytes, redaction_summary, log_truncation_info,
 		  collection_errors, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
+		 WHERE (? = 0 OR NOT EXISTS (SELECT 1 FROM evidence WHERE diagnostic_run_id = ?))`,
 		evidenceID,
 		req.DiagnosticRunID,
 		req.ProblemCaseID,
@@ -94,23 +104,47 @@ func (h *Internal) ReceiveEvidence(w http.ResponseWriter, r *http.Request) {
 		nullBytes(redactionJSON),
 		nullBytes(truncationJSON),
 		nullBytes(errorsJSON),
+		h.AnalysisMode == "snapshot-agent-v1", req.DiagnosticRunID,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("inserting evidence: %s", err))
 		return
 	}
+	if count, _ := inserted.RowsAffected(); count == 0 {
+		var existingID, existingPayload string
+		if tx.QueryRowContext(r.Context(), `SELECT id, payload FROM evidence WHERE diagnostic_run_id = ? ORDER BY created_at LIMIT 1`, req.DiagnosticRunID).Scan(&existingID, &existingPayload) != nil {
+			writeError(w, http.StatusInternalServerError, "cannot check existing evidence")
+			return
+		}
+		if !bytes.Equal(bytes.TrimSpace(req.Payload), bytes.TrimSpace([]byte(existingPayload))) {
+			writeError(w, http.StatusConflict, "DiagnosticRun evidence is immutable; create a new run")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{"evidenceId": existingID})
+		return
+	}
 	if h.LLMGatewayURL != "" {
-		if _, err := h.DB.ExecContext(r.Context(),
-			`UPDATE analysis_requests SET status = 'in_progress', dispatched_at = ?
+		analysisMode := h.AnalysisMode
+		if analysisMode == "" {
+			analysisMode = "single-shot"
+		}
+		if _, err := tx.ExecContext(r.Context(),
+			`UPDATE analysis_requests SET status = 'in_progress', dispatched_at = ?, analysis_mode = ?
 			 WHERE diagnostic_run_id = ? AND status IN ('pending', 'dispatched')`,
-			time.Now().UTC().Format(time.RFC3339), req.DiagnosticRunID,
+			time.Now().UTC().Format(time.RFC3339), analysisMode, req.DiagnosticRunID,
 		); err != nil {
 			logger := h.Logger
 			if logger == nil {
 				logger = slog.Default()
 			}
 			logger.Error("updating analysis request status", "diagnosticRunId", req.DiagnosticRunID, "error", err)
+			writeError(w, http.StatusInternalServerError, "cannot persist analysis dispatch state")
+			return
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot commit evidence")
+		return
 	}
 
 	// Patch the DiagnosticRun CRD status.
@@ -203,17 +237,20 @@ func nullBytes(b []byte) any {
 
 // llmAnalyzeRequest is the body sent to llm-gateway POST /analyze.
 type llmAnalyzeRequest struct {
-	EvidenceID      string         `json:"evidenceId"`
-	DiagnosticRunID string         `json:"diagnosticRunId"`
-	IncidentID      string         `json:"incidentId,omitempty"`
-	IncidentSource  string         `json:"incidentSource,omitempty"` // "auto" or "manual"
-	ReanalysisCount int            `json:"reanalysisCount"`
-	MoodLevel       int            `json:"moodLevel"`
-	UserMessage     string         `json:"userMessage,omitempty"`
-	Provider        string         `json:"provider,omitempty"`
-	Credentials     map[string]any `json:"credentials,omitempty"`
-	PersonaEnabled  bool           `json:"personaEnabled"`
-	Payload         map[string]any `json:"payload"`
+	EvidenceID        string         `json:"evidenceId"`
+	DiagnosticRunID   string         `json:"diagnosticRunId"`
+	IncidentID        string         `json:"incidentId,omitempty"`
+	IncidentSource    string         `json:"incidentSource,omitempty"` // "auto" or "manual"
+	ReanalysisCount   int            `json:"reanalysisCount"`
+	MoodLevel         int            `json:"moodLevel"`
+	UserMessage       string         `json:"userMessage,omitempty"`
+	Provider          string         `json:"provider,omitempty"`
+	Credentials       map[string]any `json:"credentials,omitempty"`
+	PersonaEnabled    bool           `json:"personaEnabled"`
+	Payload           map[string]any `json:"payload"`
+	AnalysisMode      string         `json:"analysisMode,omitempty"`
+	AnalysisRequestID string         `json:"analysisRequestId,omitempty"`
+	AttemptID         string         `json:"attemptId,omitempty"`
 }
 
 // suggestedResource mirrors the LLM gateway's SuggestedResource model.
@@ -248,9 +285,13 @@ type llmAnalyzeResponse struct {
 	AssessmentVersion    int                    `json:"assessmentVersion,omitempty"`
 	Assessment           json.RawMessage        `json:"assessment,omitempty"`
 	CitationValidation   json.RawMessage        `json:"citationValidation,omitempty"`
+
+
 	ThinkingBudget       int                    `json:"thinkingBudgetUsed"`
 	TokenUsage           json.RawMessage        `json:"tokenUsage,omitempty"`
 	Prompt               string                 `json:"prompt,omitempty"`
+	AnalysisMode         string                 `json:"analysisMode,omitempty"`
+	AgentExecution       json.RawMessage        `json:"agentExecution,omitempty"`
 }
 
 func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
@@ -325,7 +366,7 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		}
 	}
 
-	body, err := json.Marshal(llmAnalyzeRequest{
+	llmReq := llmAnalyzeRequest{
 		EvidenceID:      evidenceID,
 		DiagnosticRunID: req.DiagnosticRunID,
 		IncidentID:      req.IncidentID,
@@ -337,7 +378,12 @@ func (h *Internal) dispatchAnalysis(evidenceID string, req evidenceRequest) {
 		Credentials:     credentials,
 		PersonaEnabled:  personaEnabled,
 		Payload:         payloadMap,
-	})
+	}
+	if h.AnalysisMode == "snapshot-agent-v1" {
+		h.dispatchSnapshotAgent(llmReq)
+		return
+	}
+	body, err := json.Marshal(llmReq)
 	if err != nil {
 		logger.Error("dispatchAnalysis: marshal request", "err", err)
 		return

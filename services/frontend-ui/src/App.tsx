@@ -94,6 +94,17 @@ function AppShell() {
   const [assistantOpen, setAssistantOpen] = useState(readAssistantOpen)
 
   useEffect(() => {
+    const openAnalysis = (event: Event) => {
+      const detail = (event as CustomEvent<{ incidentId: string; runId: string; rootResource?: import('./api/index').ResourceRef }>).detail
+      if (!detail?.incidentId || !detail.runId) return
+      setAssistantOpen(true)
+      navigate(`/incidents/${encodeURIComponent(detail.incidentId)}/assessments/${encodeURIComponent(detail.runId)}`, { state: { rootResource: detail.rootResource } })
+    }
+    window.addEventListener('kubechan:analysis-started', openAnalysis)
+    return () => window.removeEventListener('kubechan:analysis-started', openAnalysis)
+  }, [navigate])
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(ASSISTANT_OPEN_KEY, String(assistantOpen))
     } catch { /* Browsers may block storage; the panel still works for this session. */ }

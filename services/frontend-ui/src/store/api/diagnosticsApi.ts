@@ -1,12 +1,20 @@
 import { createApi } from '@reduxjs/toolkit/query/react'
 import { baseQuery } from './baseQuery'
-import type { DiagnosticRunSummary, Evidence } from '../../api/index'
+import type { AnalysisProgress, DiagnosticRunSummary, Evidence } from '../../api/index'
 
 export const diagnosticsApi = createApi({
   reducerPath: 'diagnosticsApi',
   baseQuery,
-  tagTypes: ['DiagnosticRun', 'Evidence'],
+  tagTypes: ['DiagnosticRun', 'Evidence', 'AnalysisProgress'],
   endpoints: (build) => ({
+    getAnalysisProgress: build.query<AnalysisProgress, string>({
+      query: (runId) => `/diagnosticruns/${encodeURIComponent(runId)}/analysisprogress`,
+      providesTags: (_, __, runId) => [{ type: 'AnalysisProgress', id: runId }, { type: 'AnalysisProgress', id: 'LIST' }],
+    }),
+    cancelAnalysis: build.mutation<{ status: string }, string>({
+      query: (runId) => ({ url: `/diagnosticruns/${encodeURIComponent(runId)}/analysis/cancel`, method: 'POST' }),
+      invalidatesTags: (_, __, runId) => [{ type: 'AnalysisProgress', id: runId }, { type: 'DiagnosticRun', id: 'LIST' }],
+    }),
     listDiagnosticRuns: build.query<DiagnosticRunSummary[], string | void>({
       query: (incidentId) =>
         incidentId
@@ -39,6 +47,8 @@ export const diagnosticsApi = createApi({
 })
 
 export const {
+  useGetAnalysisProgressQuery,
+  useCancelAnalysisMutation,
   useListDiagnosticRunsQuery,
   useGetDiagnosticRunEvidenceQuery,
   useDeleteDiagnosticRunMutation,

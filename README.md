@@ -6,6 +6,8 @@
 
 A read-only Kubernetes AI troubleshooting assistant. KubeChan watches your cluster, detects broken workloads, collects diagnostic evidence, and calls an LLM to produce a root-cause analysis — surfaced through a web UI with an opinionated tsundere character who will absolutely judge your configuration choices.
 
+The opt-in [snapshot agent](docs/contracts/snapshot-agent.md) investigates saved evidence and streams progress and cited findings to the Assessment page.
+
 > KubeChan never modifies cluster state. It is advisory only.
 
 ---

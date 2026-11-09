@@ -16,6 +16,8 @@ import { fmtDate } from '../../components/shared/utils'
 import type { K8sEvent } from '../../api/index'
 import type { ChatterEvent } from '../../hooks/useKubeChan'
 import { buildResourceCards } from './buildResourceCards'
+import { useAnalysisProgress } from '../../analysis/useAnalysisProgress'
+import { AnalysisProgressPanel } from '../../components/AnalysisProgressPanel'
 import type { FieldEntry, ResourceCard } from './buildResourceCards'
 
 // ── Field sub-components ──────────────────────────────────────────────────────
@@ -172,6 +174,7 @@ export function DiagnosticRunDetail({ onResultLoaded, onAction }: Props) {
   const { id: runId } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const dispatch = useAppDispatch()
+  const { data: progress } = useAnalysisProgress(runId ?? '')
 
   const { data: evidence, isLoading: evidenceLoading } = useGetDiagnosticRunEvidenceQuery(runId!, { skip: !runId })
   const { data: analysisResult, isLoading: analysisLoading } = useGetDiagnosticRunAnalysisResultQuery(runId!, { skip: !runId })
@@ -211,6 +214,7 @@ export function DiagnosticRunDetail({ onResultLoaded, onAction }: Props) {
         </Typography>
       </Box>
 
+      <AnalysisProgressPanel progress={progress} />
       {isLoading ? (
         <Box>
           <Skeleton variant="rectangular" height={48} sx={{ borderRadius: '10px', mb: 1 }} />

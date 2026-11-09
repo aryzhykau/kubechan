@@ -39,13 +39,20 @@ export const wsMiddleware: Middleware<object, any> = (store) => {
       }).catch(() => { /* network error — leave WS reconnect to handle it */ })
     }
 
+    ws.onopen = () => {
+      // REST is authoritative after reconnect, including missed terminal events.
+      store.dispatch(diagnosticsApi.util.invalidateTags([{ type: 'AnalysisProgress', id: 'LIST' }, { type: 'DiagnosticRun', id: 'LIST' }]))
+    }
+
     ws.onmessage = (e: MessageEvent) => {
       try {
         const event = JSON.parse(e.data as string) as { type: string; [key: string]: unknown }
         const state = store.getState()
         const moodLevel = state.kubechan.moodLevel
 
-        if (event.type === 'Incident.Created') {
+        if (event.type === 'Analysis.Progress' && typeof event.runId === 'string') {
+          store.dispatch(diagnosticsApi.util.invalidateTags([{ type: 'AnalysisProgress', id: event.runId }]))
+        } else if (event.type === 'Incident.Created') {
           store.dispatch(incidentsApi.util.invalidateTags([{ type: 'Incident', id: 'LIST' }]))
           store.dispatch(setChatter({ line: pickChatterLine('new-incident', moodLevel), image: pickChatterExpression('new-incident') }))
         } else if (event.type === 'KubeChanState.Updated') {
