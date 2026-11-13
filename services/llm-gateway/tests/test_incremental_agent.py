@@ -1,6 +1,7 @@
 """Offline integration tests for the four-tool snapshot investigation."""
 import asyncio
 import json
+from typing import Any, Protocol, cast
 
 import boto3
 import pytest
@@ -14,10 +15,11 @@ from pydantic_ai.usage import RequestUsage
 
 from app.agent import AgentBudget
 from app.investigation import run_incremental_agent
+from app.models import AssessmentV2
 from tests.test_snapshot_agent import dependency_payload as dependency_payload, payload as payload, request
 
-INVESTIGATION_TOOLS = {"inspect", "read_more", "record_finding", "verify"}
-TOOLS = INVESTIGATION_TOOLS | {"finish"}
+INVESTIGATION_TOOLS = {"inspect", "read_more", "record_finding", "record_branch", "submit_plan", "verify"}
+TOOLS = INVESTIGATION_TOOLS | {"finish", "add_branch", "close_branch"}
 
 
 def inspect(node):
@@ -36,10 +38,19 @@ def finish():
     return "finish", {}
 
 
-def returned(messages, tool):
+def returned(messages, tool) -> dict[str, Any]:
     part = next(part for part in messages[-1].parts if isinstance(part, ToolReturnPart) and part.tool_name == tool)
-    return json.loads(part.content) if isinstance(part.content, str) else part.content
+    value = json.loads(part.content) if isinstance(part.content, str) else part.content
+    assert isinstance(value, dict)
+    return value
 
+
+
+class SnapshotResult(Protocol):
+    assessment: AssessmentV2
+    agentExecution: dict[str, Any]
+    prompt: str
+    needsMoreInfo: bool
 
 def run(payload, actions, budget=None):
     progress, calls = [], []
@@ -51,6 +62,8 @@ def run(payload, actions, budget=None):
         assert {tool.name for tool in info.function_tools} <= TOOLS
         assert turn < len(actions), "unexpected extra model request"
         batch = actions[turn](messages) if callable(actions[turn]) else actions[turn]
+        if asyncio.iscoroutine(batch):
+            batch = await batch
         return ModelResponse(parts=[ToolCallPart(name, args, tool_call_id=f"{turn}-{i}") for i, (name, args) in enumerate(batch)],
                              usage=RequestUsage(input_tokens=100, output_tokens=100))
 
@@ -58,10 +71,19 @@ def run(payload, actions, budget=None):
         progress.append(event)
 
     result = asyncio.run(run_incremental_agent(request(payload), sink, model=FunctionModel(model), budget=budget))
-    return result, progress, calls
+    assert result.assessment is not None
+    assert result.agentExecution is not None
+    assert result.prompt is not None
+    return cast(SnapshotResult, result), progress, calls
 
 
-def test_verification_and_finish_preserve_exact_citations_in_a_cascade(payload):
+@pytest.mark.parametrize(("gaps", "expected_gaps", "confidence"), [
+    ([], [], 0.8),
+    ([" None ", "NO EVIDENCE GAPS.", "N/A"], [], 0.8),
+    (["None", "None of the affected Pods has previous logs."],
+     ["None of the affected Pods has previous logs."], 0.55),
+])
+def test_verification_and_finish_preserve_exact_citations_in_a_cascade(payload, gaps, expected_gaps, confidence):
     def service(messages):
         overview = returned(messages, "inspect")
         assert overview["related"][0] == {"type": "routes_to", "state": "resolved", "origin": "observed", "resourceState": "present",
@@ -71,11 +93,14 @@ def test_verification_and_finish_preserve_exact_citations_in_a_cascade(payload):
     result, events, calls = run(payload, [
         [inspect("ingress")], service, [inspect("pod")],
         [finding("The Pod reports missing DB_HOST.", "log:crash"),
-         verify("The Pod reports missing DB_HOST.", remediation=["Check the expected DB_HOST configuration."])],
+         verify("The Pod reports missing DB_HOST.", gaps=gaps, remediation=["Check the expected DB_HOST configuration."])],
         [finish()],
     ])
     assert {tool.name for tool in calls[0][1].function_tools} == INVESTIGATION_TOOLS
     assert result.agentExecution["toolProtocol"] == "snapshot-verify-v1"
+    assert result.assessment.confidence == confidence
+    assert [gap.description for gap in result.assessment.missingEvidence] == expected_gaps
+    assert result.needsMoreInfo == bool(expected_gaps)
     assert result.assessment.claims[0].citations[0].quote == "required configuration DB_HOST is missing"
     assert result.assessment.remediation[0].title == "Check the expected DB_HOST configuration."
     scopes = [event["investigationGraph"] for event in events if event["phase"] == "completed" and event.get("investigationGraph")]
@@ -156,6 +181,7 @@ def test_preserves_independent_findings_after_checking_another_branch(dependency
     def check_storage(messages):
         assert returned(messages, "inspect")["sections"]["events"]["sourceIds"] == ["event:pod"]
         initial = next(part for part in messages[0].parts if isinstance(part, UserPromptPart))
+        assert isinstance(initial.content, str)
         state = json.loads(initial.content.split("Investigation state (data):\n")[1])
         assert any(item["id"] == "field:selector" and item["value"]["track"] == "canary"
                    for group in state["recentEvidence"] for item in group["items"])
@@ -203,7 +229,7 @@ def test_verify_surfaces_read_but_uncited_relationship_evidence(dependency_paylo
     ])
     assert len(result.assessment.claims) == 2
     assert result.assessment.claims[1].citations[0].quote == "false"
-    assert {tool.name for tool in calls[-2][1].function_tools} == {"record_finding", "verify"}
+    assert {tool.name for tool in calls[-2][1].function_tools} == {"record_finding", "record_branch", "verify"}
     assert {tool.name for tool in calls[-1][1].function_tools} == {"finish"}
     assert sum(event.get("reasonCode") == "verify_review_required" for event in events) == 1
 
@@ -228,9 +254,306 @@ def test_verify_requests_only_linked_unread_failure_leads(payload):
         [finding("The application reports missing DB_HOST.", "log:crash"), verify()],
         [finish()],
     ])
-    assert {tool.name for tool in calls[2][1].function_tools} == {"inspect", "record_finding", "verify"}
+    assert {tool.name for tool in calls[2][1].function_tools} == {"inspect", "record_finding", "record_branch", "verify"}
     assert len(result.assessment.claims) == 2
     assert "isolated" not in result.agentExecution["investigationGraph"]["nodeIds"]
+
+
+def test_verify_requires_an_outcome_for_open_branch(payload):
+    question = "Does the Ingress point at the intended Service?"
+
+    def close_branch(messages):
+        branch = returned(messages, "verify")["openBranches"][0]
+        assert branch["question"] == question
+        return [("record_branch", {
+            "branch_id": branch["id"], "node_id": "ingress", "question": question,
+            "status": "ruled_out", "outcome": "The backend is the intended Service.",
+            "source_ids": ["field:backend"],
+        }), verify()]
+
+    result, events, _ = run(payload, [
+        [inspect("ingress")],
+        [("record_branch", {"node_id": "ingress", "question": question}), verify()],
+        close_branch,
+        [finish()],
+    ])
+    assert result.agentExecution["draft"]["branches"][0]["status"] == "ruled_out"
+    assert any(event.get("change", {}).get("kind") == "branch" for event in events)
+
+
+def test_submitted_plan_runs_ranked_branches_in_separate_sessions(payload):
+    def close(status, outcome, source):
+        def response(messages):
+            assert len(messages) == 3
+            prompt = next(part.content for part in messages[0].parts if isinstance(part, UserPromptPart))
+            assert isinstance(prompt, str)
+            state = json.loads(prompt.split("Investigation state (data):\n")[1])
+            branch = next(branch for branch in state["branches"] if branch["status"] == "checking")
+            assert branch["status"] == "checking"
+            return [("close_branch", {"status": status, "outcome": outcome, "source_ids": [source],
+                    "runbook": [{"action": "Set DB_HOST.", "verification": "Check that the pod becomes ready."}]
+                    if status == "blocker" else []})]
+        return response
+
+    def start_branch(node):
+        def response(messages):
+            assert len(messages) == 1
+            return [inspect(node)]
+        return response
+
+    result, events, calls = run(payload, [
+        [inspect("ingress")],
+        [("submit_plan", {"branches": [
+            {"node_id": "pod", "question": "Does the pod start?", "priority": 2},
+            {"node_id": "ingress", "question": "Does the backend resolve?", "priority": 1},
+        ]})],
+        start_branch("ingress"), close("ruled_out", "Backend matches.", "field:backend"),
+        start_branch("pod"), close("blocker", "The pod lacks DB_HOST.", "log:crash"),
+        [verify()], [finish()],
+    ])
+    assert {tool.name for tool in calls[2][1].function_tools} == {
+        "inspect", "read_more", "add_branch", "close_branch",
+    }
+    assert [b["status"] for b in result.agentExecution["draft"]["branches"]] == ["ruled_out", "confirmed"]
+    assert result.assessment.claims[0].statement == "The pod lacks DB_HOST."
+    assert result.agentExecution["draft"]["branches"][1]["runbook"][0]["action"] == "Set DB_HOST."
+    assert result.agentExecution["requests"] == 8
+    assert len({event["branchId"] for event in events if event["stage"] == "get_resource" and "branchId" in event}) == 2
+
+
+@pytest.mark.parametrize("extra_sources", [
+    ["field:class-exists", "field:pvc-class", "field:config-exists"],
+    ["field:pvc-class", "field:detector-symptom"],
+])
+def test_plan_covers_concrete_relationships_and_reuses_findings(dependency_payload, extra_sources):
+    payload = dependency_payload
+    graph = payload["graph"]
+    workload = next(node for node in graph["nodes"] if node["id"] == "workload")
+    service = {"kind": "Service", "name": "web", "namespace": "demo"}
+    graph["entryResourceId"] = "service"
+    graph["nodes"].append({"id": "service", "type": "resource", "state": "degraded", "resource": service})
+    payload["sources"] += [
+        {"id": "field:selector", "type": "resource_field", "resource": service, "path": "/selector", "value": {"version": "old"}},
+        {"id": "field:labels", "type": "resource_field", "resource": workload["resource"], "path": "/labels", "value": {"version": "new"}},
+        {"id": "field:detector-symptom", "type": "resource_field", "resource": service,
+         "path": "/problemCases/endpoint/symptoms/0", "value": "No ready endpoints"},
+    ]
+    graph["edges"] += [
+        {"id": "edge:selector", "from": "service", "to": "workload", "type": "possible_selector_target",
+         "origin": "inferred", "state": "proposed", "sourceIds": ["field:selector", "field:labels"]},
+        {"id": "edge:config-replica", "from": "pod", "to": "config", "type": "dependency",
+         "origin": "observed", "state": "broken", "sourceIds": ["field:config-exists"]},
+    ]
+
+    def close_from_proof(outcome, *sources):
+        def respond(messages):
+            items = returned(messages, "inspect")["items"]
+            assert set(sources) <= {item["id"] for item in items}
+            return [("close_branch", {"status": "blocker", "outcome": outcome, "source_ids": list(sources)})]
+        return respond
+
+    def reuse_storage(messages):
+        receipt = returned(messages, "close_branch")
+        assert not receipt["accepted"]
+        return [("close_branch", {"status": "blocker", "outcome": "The PVC class prevents traffic recovery.",
+                                  "finding_id": receipt["existingFindingId"]})]
+
+    result, events, _ = run(payload, [
+        [inspect("service")],
+        [("submit_plan", {"branches": [
+            {"nodeId": "service", "edgeId": "edge:selector", "question": "Does the Service select the workload?", "priority": 1},
+            {"node_id": "workload", "question": "Does the dependency relationship from Deployment/web to ConfigMap/web-config need to change for recovery?", "priority": 1},
+            {"node_id": "service", "question": "Why is traffic unavailable?", "priority": 1},
+        ]})],
+        [inspect("service")],
+        close_from_proof("The Service selector differs from the workload labels.", "field:selector", "field:labels"),
+        [inspect("workload")], close_from_proof("The ConfigMap is absent.", "field:config-exists"),
+        [inspect("workload")], close_from_proof("The Secret is absent.", "field:secret-exists"),
+        [inspect("pvc")], close_from_proof("The PVC references an absent class.", "field:pvc-class", "field:class-exists"),
+        [("close_branch", {"status": "blocker", "outcome": "The class referenced by the claim does not exist.",
+                          "source_ids": extra_sources})],
+        reuse_storage,
+        [verify()], [finish()],
+    ])
+    branches = result.agentExecution["draft"]["branches"]
+    assert [b.get("edgeId") for b in branches] == ["edge:selector", "edge:config", "edge:secret", "edge:class", None]
+    assert all(b["status"] == "confirmed" for b in branches)
+    assert len(result.assessment.claims) == 4
+    assert branches[3]["findingId"] == branches[4]["findingId"]
+    assert len({event["branchId"] for event in events if event["stage"] == "get_resource" and "branchId" in event}) == 4
+
+
+def test_verify_cannot_skip_reserved_runtime_check(payload):
+    pod = next(node for node in payload["graph"]["nodes"] if node["id"] == "pod")
+    payload["sources"].append({"id": "event:warning", "resource": pod["resource"], "type": "event",
+                               "event": {"type": "Warning", "reason": "BackOff", "message": "Restarting container"}})
+
+    result, _, calls = run(payload, [
+        [inspect("ingress")],
+        [verify("Traffic routing explains the incident.")],
+        [inspect("pod")],
+        [("close_branch", {"status": "blocker", "outcome": "The application cannot start.",
+                          "source_ids": ["log:crash", "event:warning"]})],
+        [verify()], [finish()],
+    ])
+    assert {"record_branch", "record_finding"}.isdisjoint(tool.name for tool in calls[1][1].function_tools)
+    assert result.agentExecution["status"] == "completed"
+    assert result.agentExecution["draft"]["branches"][0]["nodeId"] == "pod"
+    assert [claim.statement for claim in result.assessment.claims] == ["The application cannot start."]
+
+
+def test_branch_rejection_is_journaled_and_valid_retry_can_close(payload):
+    def retry(messages):
+        failure = returned(messages, "close_branch")
+        assert not failure["accepted"]
+        assert "not delivered" in failure["error"]
+        return [("add_branch", {"node_id": "pod", "question": "Does the Pod start?", "priority": 2}),
+                ("close_branch", {"status": "ruled_out", "outcome": "The backend matches.",
+                                  "source_ids": ["field:backend"]})]
+
+    result, events, _ = run(payload, [
+        [inspect("ingress")],
+        [("submit_plan", {"branches": [
+            {"node_id": "ingress", "question": "Is the backend wrong?", "priority": 1},
+        ]})],
+        [("close_branch", {"status": "invalid-status", "outcome": "The backend is wrong."})],
+        [("close_branch", {"status": "blocker", "outcome": "The backend is wrong.",
+                          "source_ids": ["unseen:source"]})],
+        retry,
+        [inspect("pod")],
+        [("close_branch", {"status": "blocker", "outcome": "The P", "source_ids": ["log:crash"]})],
+        [("close_branch", {"status": "blocker", "outcome": "The Pod lacks DB_HOST.",
+                          "source_ids": ["log:crash"]})],
+        [verify()], [finish()],
+    ])
+    first, second = result.agentExecution["draft"]["branches"]
+    assert first["status"] == "ruled_out"
+    assert second["status"] == "confirmed"
+    assert len(result.assessment.claims) == 1
+    rejected = [event for event in events if event.get("reasonCode") == "draft_change_deferred"]
+    assert len(rejected) == 2
+    assert rejected[1]["branchId"] == second["id"]
+    assert "complete sentence" in rejected[1]["validationDetail"]
+    assert rejected[0]["branchId"] == first["id"]
+    assert "not delivered" in rejected[0]["validationDetail"]
+    assert "unseen:source" not in rejected[0]["validationDetail"]
+    invalid_args = next(event for event in events if event.get("reasonCode") == "tool_arguments_invalid")
+    assert invalid_args["branchId"] == first["id"]
+    assert invalid_args["validationFields"] == [{"path": "status", "kind": "literal_error"}]
+
+
+def test_branch_budget_does_not_stop_the_next_branch(payload):
+    def close_second(messages):
+        prompt = next(part.content for part in messages[0].parts if isinstance(part, UserPromptPart))
+        assert isinstance(prompt, str)
+        state = json.loads(prompt.split("Investigation state (data):\n")[1])
+        branch = next(branch for branch in state["branches"] if branch["status"] == "checking")
+        assert branch["priority"] == 2
+        return [("close_branch", {"status": "blocker", "outcome": "Ingress references this backend.", "source_ids": ["field:backend"]})]
+
+    result, _, _ = run(payload, [
+        [inspect("ingress")],
+        [("submit_plan", {"branches": [
+            {"node_id": "pod", "question": "Does the pod start?", "priority": 1},
+            {"node_id": "ingress", "question": "Which backend is configured?", "priority": 2},
+        ]})],
+        [inspect("pod")],
+        close_second,
+    ], budget=AgentBudget(branch_requests=1))
+    assert result.agentExecution["status"] == "partial"
+    assert [branch["status"] for branch in result.agentExecution["draft"]["branches"]] == ["gap", "confirmed"]
+    assert len(result.assessment.claims) == 1
+
+
+def test_branch_timeout_keeps_findings_and_runs_remaining_checks(payload):
+    async def stall(_):
+        await asyncio.sleep(10)
+
+    def close(outcome, source):
+        return [("close_branch", {"status": "blocker", "outcome": outcome, "source_ids": [source]})]
+
+    result, _, _ = run(payload, [
+        [inspect("ingress")],
+        [("submit_plan", {"branches": [
+            {"node_id": "ingress", "question": "Is the backend wrong?", "priority": 1},
+            {"node_id": "service", "question": "Does endpoint discovery work?", "priority": 2},
+            {"node_id": "pod", "question": "Why does the pod fail?", "priority": 3},
+        ]})],
+        close("Ingress references the configured backend.", "field:backend"),
+        stall,
+        [inspect("pod")],
+        close("The container reports missing DB_HOST.", "log:crash"),
+    ], budget=AgentBudget(branch_seconds=0.2))
+
+    assert result.agentExecution["status"] == "partial"
+    assert [branch["status"] for branch in result.agentExecution["draft"]["branches"]] == ["confirmed", "gap", "confirmed"]
+    assert len(result.assessment.claims) == 2
+    assert [gap.description for gap in result.assessment.missingEvidence] == [
+        "Branch timed out. Unresolved: Does endpoint discovery work?",
+    ]
+
+
+def test_partial_reports_checks_beyond_branch_and_run_budgets(payload):
+    for number in range(10):
+        ref = f"missing-{number}"
+        payload["graph"]["nodes"].append({
+            "id": ref, "type": "reference", "state": "missing",
+            "resource": {"kind": "Service", "name": ref, "namespace": "demo"},
+        })
+        payload["graph"]["edges"].append({
+            "id": f"check-{number}", "from": "ingress", "to": ref,
+            "type": "routes_to", "origin": "observed", "state": "broken", "sourceIds": ["field:backend"],
+        })
+
+    result, _, _ = run(payload, [
+        [inspect("ingress")],
+        [("submit_plan", {"branches": [
+            {"node_id": "ingress", "question": "How can traffic recover?", "priority": 1},
+        ]})],
+        [("close_branch", {"status": "blocker", "outcome": "The first backend reference is broken.",
+                          "source_ids": ["field:backend"]})],
+    ], budget=AgentBudget(requests=6))
+
+    assert result.agentExecution["status"] == "partial"
+    assert len(result.assessment.claims) == 1
+    branches = result.agentExecution["draft"]["branches"]
+    assert sum(branch["status"] == "confirmed" for branch in branches) == 1
+    assert sum(branch["status"] == "gap" for branch in branches) == 4
+    gaps = [gap.description for gap in result.assessment.missingEvidence]
+    assert sum(gap.startswith("Unchecked before the run ended: ") for gap in gaps) == 4
+    assert sum(gap.startswith("Unscheduled snapshot check: ") for gap in gaps) == 4
+    assert "2 more snapshot relationship checks were not scheduled." in gaps
+
+
+def test_branch_priority_and_checking_are_logged(payload, caplog):
+    caplog.set_level("INFO", logger="llm-gateway")
+    first = {"node_id": "ingress", "question": "Check the backend reference", "priority": 1}
+    second = {"node_id": "ingress", "question": "Check the routing configuration", "priority": 2}
+
+    def start_out_of_order(messages):
+        receipts = [part.content for part in messages[-1].parts if isinstance(part, ToolReturnPart)]
+        assert all(isinstance(receipt, dict) for receipt in receipts)
+        first["branch_id"], second["branch_id"] = [receipt["branchId"] for receipt in cast(list[dict], receipts)]
+        return [("record_branch", {**second, "status": "checking"})]
+
+    def start_first(messages):
+        assert not returned(messages, "record_branch")["accepted"]
+        return [("record_branch", {**first, "status": "checking"})]
+
+    result, _, _ = run(payload, [
+        [inspect("ingress")],
+        [("record_branch", first.copy()), ("record_branch", second.copy())],
+        start_out_of_order,
+        start_first,
+        [("record_branch", {**first, "status": "ruled_out", "outcome": "Backend matches.",
+                            "source_ids": ["field:backend"]}),
+         ("record_branch", {**second, "status": "checking"})],
+        [("record_branch", {**second, "status": "gap", "outcome": "Need the routing policy."}), verify()],
+        [finish()],
+    ])
+    assert [branch["status"] for branch in result.agentExecution["draft"]["branches"]] == ["ruled_out", "gap"]
+    assert "hypotheses=2" in caplog.text
+    assert "priority=2 status=checking question='Check the routing configuration'" in caplog.text
 
 
 def test_read_more_continues_a_section_and_can_reread_exact_sources(payload):
@@ -251,6 +574,7 @@ def test_read_more_continues_a_section_and_can_reread_exact_sources(payload):
         page = returned(messages, "read_more")
         assert page["sections"]["previousLogs"]["sourceIds"] == ["previous:2", "previous:1"]
         initial = next(part for part in messages[0].parts if isinstance(part, UserPromptPart))
+        assert isinstance(initial.content, str)
         checks = json.loads(initial.content.split("Investigation state (data):\n")[1])["recentChecks"]
         assert all("cursor" not in check["sections"]["previousLogs"] for check in checks)
         return [("read_more", {"cursor": "previous:4"})]
@@ -395,5 +719,7 @@ def test_native_bedrock_wire_separates_verification_and_finish(payload):
         model = BedrockConverseModel("qwen.qwen3-32b-v1:0", provider=BedrockProvider(bedrock_client=client))
         result = asyncio.run(run_incremental_agent(request(payload), sink, model=model))
         stub.assert_no_pending_responses()
+    assert result.assessment is not None
+    assert result.agentExecution is not None
     assert result.assessment.summary == "Backend is web."
     assert result.agentExecution["requests"] == 3

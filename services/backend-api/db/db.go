@@ -21,7 +21,13 @@ var migrationsFS embed.FS
 // Open opens the SQLite database at the given path, applies pending migrations,
 // and returns the *sql.DB ready for use.
 func Open(path string, logger *slog.Logger) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path)
+	// Apply the writer wait to every pooled connection. A PRAGMA executed
+	// on sql.DB would only configure whichever connection ran that statement.
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	db, err := sql.Open("sqlite", path+separator+"_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite db at %s: %w", path, err)
 	}

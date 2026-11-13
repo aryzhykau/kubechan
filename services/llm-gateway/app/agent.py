@@ -71,7 +71,8 @@ def _schema_fields(error: ValidationError) -> list[dict[str, str]]:
     allowed.update({"claim", "hypothesis", "review", "step", "evidence", "gap_id", "node_id", "source_ids", "item_id", "kind", "path"})
     allowed.update({"memory_patch", "graph_patch", "read", "observations", "leads", "observationIds", "removeObservationIds",
                     "removeLeadIds", "text", "question", "status", "nextCheck", "edgeIds", "candidateIds", "cards",
-                    "tool", "pathPrefix", "contains", "previous", "cursor", "limit"})
+                    "tool", "pathPrefix", "contains", "previous", "cursor", "limit",
+                    "outcome", "runbook", "action", "priority", "branches", "resource_id", "branch_id", "edge_id", "finding_id"})
     fields = []
     for issue in error.errors(include_input=False, include_context=False, include_url=False)[:8]:
         path = ".".join(str(part) if isinstance(part, int) or part in allowed else "?" for part in issue["loc"])
@@ -81,12 +82,17 @@ def _schema_fields(error: ValidationError) -> list[dict[str, str]]:
 
 @dataclass(frozen=True)
 class AgentBudget:
-    requests: int = 40
+    requests: int = 100
     tool_calls: int = 50
     input_tokens: int = 400_000
     output_tokens: int = 75_000
     per_request_output: int = 8_000
     seconds: float = 600
+    branch_seconds: float = 120
+    branch_requests: int = 12
+    branch_reads: int = 10
+    branch_input_tokens: int = 80_000
+    branch_output_tokens: int = 16_000
 
 
 class _RequestTokenSession(Session):

@@ -34,6 +34,13 @@ test('terminal reason and rejected response remain independently visible', () =>
   assert.match(helpers.analysisValidationReason(failed), /summary/)
 })
 
+test('the journal shows the gateway reason for a rejected draft write', () => {
+  const detail = 'A cited source ID was not delivered.'
+  const rejected = event({ stage: 'validating', phase: 'failed', reasonCode: 'draft_change_deferred', validationDetail: detail })
+  assert.equal(helpers.analysisEventLabel(rejected), detail)
+  assert.match(helpers.analysisEventLabel({ ...rejected, validationDetail: undefined }), /draft entry/)
+})
+
 test('execution failures identify the actual budget and numeric usage', () => {
   const failed = progress({ status: 'failed', stage: 'failed', reasonCode: 'budget_exhausted', events: [event({ stage: 'execution_limit', executionLimit: { kind: 'requests', used: 8, maximum: 8 } })] })
   assert.match(helpers.analysisProgressReason(failed), /Model request limit reached · 8 used \/ 8 allowed/)

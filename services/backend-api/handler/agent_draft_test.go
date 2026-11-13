@@ -115,6 +115,42 @@ func TestDraftValidatorRejectsUnknownUnreadAndRegressingState(t *testing.T) {
 	}
 }
 
+func TestBranchLinksRequireDeliveredRelationshipAndSupportedFinding(t *testing.T) {
+	payload, exposed, draft := draftFixture()
+	payload["graph"] = map[string]any{"entryResourceId": "entry", "nodes": []any{
+		map[string]any{"id": "entry"}, map[string]any{"id": "dependency"},
+	}, "edges": []any{map[string]any{"id": "ref", "from": "entry", "to": "dependency"}}}
+	exposed.NodeIDs = append(exposed.NodeIDs, "dependency")
+	exposed.EdgeIDs = []string{"ref"}
+	draft.Branches = []agentBranch{
+		{ID: "a", NodeID: "entry", EdgeID: "ref", FindingID: "c1", Question: "Does the dependency exist?",
+			Status: "confirmed", Outcome: "Dependency is absent.", SourceIDs: []string{"field:entry"}},
+		{ID: "b", NodeID: "entry", FindingID: "c1", Question: "Why is the workload unavailable?",
+			Status: "confirmed", Outcome: "The required dependency is absent.", SourceIDs: []string{"field:entry"}},
+	}
+	v := newAgentDraftValidator(payload)
+	event := agentProgress{Stage: "draft_updated", Draft: draft, Change: &agentDraftChange{Kind: "branch", ID: "a"}}
+	unread := exposed
+	unread.EdgeIDs = nil
+	if err := v.validate(agentProgress{Stage: "context_delivered", Exposed: &unread}); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.validate(event); err == nil || err.Error() != "invalid investigation branch relationship" {
+		t.Fatalf("expected rejection for undelivered edge, got %v", err)
+	}
+	if err := v.validate(agentProgress{Stage: "context_delivered", Exposed: &exposed}); err != nil {
+		t.Fatal(err)
+	}
+	draft.Branches[1].FindingID = "invented"
+	if err := v.validate(event); err == nil || err.Error() != "invalid investigation branch finding" {
+		t.Fatalf("expected rejection for unknown finding, got %v", err)
+	}
+	draft.Branches[1].FindingID = "c1"
+	if err := v.validate(event); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLiveDraftAndReviewsSurviveFailureRESTAndBroadcast(t *testing.T) {
 	h, req := setupAgent(t)
 	payload, exposed, draft := draftFixture()
