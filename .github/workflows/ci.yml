@@ -131,7 +131,7 @@ jobs:
         uses: tj-actions/coverage-badge-py@v2
         with:
           working-directory: services/llm-gateway
-          output: .badges/python-coverage.svg
+          output: ../../.badges/python-coverage.svg
 
       - name: Commit Python coverage badge
         if: github.ref == 'refs/heads/main'
