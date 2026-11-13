@@ -18,6 +18,25 @@ type agentDraft struct {
 	HasConclusion bool            `json:"hasConclusion"`
 	Assessment    json.RawMessage `json:"assessment"`
 	Graph         agentExposure   `json:"graph"`
+	Branches      []agentBranch   `json:"branches,omitempty"`
+}
+
+type agentBranch struct {
+	ID        string                   `json:"id"`
+	NodeID    string                   `json:"nodeId"`
+	EdgeID    string                   `json:"edgeId,omitempty"`
+	FindingID string                   `json:"findingId,omitempty"`
+	Question  string                   `json:"question"`
+	Status    string                   `json:"status"`
+	Priority  int                      `json:"priority,omitempty"`
+	Outcome   string                   `json:"outcome"`
+	SourceIDs []string                 `json:"sourceIds"`
+	Runbook   []agentBranchRunbookStep `json:"runbook,omitempty"`
+}
+
+type agentBranchRunbookStep struct {
+	Action       string `json:"action"`
+	Verification string `json:"verification"`
 }
 
 type agentDraftChange struct {
@@ -33,6 +52,7 @@ type agentDraftValidator struct {
 	shown                             agentExposure
 	entry                             string
 	revision                          int
+	branches                          map[string]bool
 }
 
 func newAgentDraftValidator(payload map[string]any) *agentDraftValidator {
@@ -183,10 +203,13 @@ func (v *agentDraftValidator) validate(event agentProgress) error {
 		v.seen = *event.Exposed
 	}
 	if event.Change != nil {
-		allowed := map[string]bool{"claim": true, "hypothesis": true, "gap": true, "remediation": true, "review": true, "graph": true, "conclusion": true, "path": true, "retracted": true}
+		allowed := map[string]bool{"claim": true, "hypothesis": true, "gap": true, "remediation": true, "review": true, "graph": true, "conclusion": true, "path": true, "retracted": true, "branch": true}
 		if event.Stage != "draft_updated" || !allowed[event.Change.Kind] || event.Change.ID == "" || len(event.Change.ID) > 512 {
 			return errors.New("invalid draft change")
 		}
+	}
+	if event.BranchID != "" && !v.branches[event.BranchID] {
+		return errors.New("unknown investigation branch")
 	}
 	if event.Draft == nil {
 		if event.Stage == "draft_updated" || event.Stage == "context_delivered" && event.Exposed == nil {
@@ -204,6 +227,47 @@ func (v *agentDraftValidator) validate(event agentProgress) error {
 		return errors.New("invalid draft graph scope")
 	}
 	nodes := agentIDSet(d.Graph.NodeIDs)
+	if len(d.Branches) > 8 {
+		return errors.New("too many investigation branches")
+	}
+	branchIDs, branchEdges := map[string]bool{}, map[string]bool{}
+	deliveredEdges := agentIDSet(v.seen.EdgeIDs)
+	deliveredNodes, deliveredSources := agentIDSet(v.seen.NodeIDs), agentIDSet(v.seen.SourceIDs)
+	for _, branch := range d.Branches {
+		switch branch.Status {
+		case "open", "checking", "confirmed", "ruled_out", "gap":
+		default:
+			return errors.New("invalid investigation branch status")
+		}
+		if branch.ID == "" || len(branch.ID) > 512 || branchIDs[branch.ID] || !deliveredNodes[branch.NodeID] ||
+			branch.Question == "" || len([]rune(branch.Question)) > 250 || len([]rune(branch.Outcome)) > 350 ||
+			(branch.Priority < 0 || branch.Priority > 8) ||
+			(branch.Status != "open" && branch.Status != "checking" && branch.Outcome == "") || len(branch.SourceIDs) > 6 ||
+			((branch.Status == "confirmed" || branch.Status == "ruled_out") && len(branch.SourceIDs) == 0) ||
+			!validAgentIDs(branch.SourceIDs, deliveredSources) {
+			return errors.New("invalid investigation branch")
+		}
+		if branch.EdgeID != "" {
+			endpoints := v.endpoints[branch.EdgeID]
+			if !deliveredEdges[branch.EdgeID] || branchEdges[branch.EdgeID] ||
+				len(endpoints) != 2 || endpoints[0] != branch.NodeID {
+				return errors.New("invalid investigation branch relationship")
+			}
+			branchEdges[branch.EdgeID] = true
+		}
+		if len(branch.Runbook) > 3 || (len(branch.Runbook) > 0 && branch.Status != "confirmed") {
+			return errors.New("invalid investigation branch runbook")
+		}
+		for _, step := range branch.Runbook {
+			if step.Action == "" || len([]rune(step.Action)) > 250 || step.Verification == "" || len([]rune(step.Verification)) > 200 {
+				return errors.New("invalid investigation branch runbook step")
+			}
+		}
+		branchIDs[branch.ID] = true
+	}
+	if event.Change != nil && event.Change.Kind == "branch" && !branchIDs[event.Change.ID] {
+		return errors.New("invalid investigation branch change")
+	}
 	if event.Change != nil && event.Change.Kind == "graph" && (event.InvestigationGraph == nil || !validAgentIDs(d.Graph.NodeIDs, agentIDSet(v.shown.NodeIDs))) {
 		return errors.New("model cards must belong to the live drawing")
 	}
@@ -238,12 +302,18 @@ func (v *agentDraftValidator) validate(event agentProgress) error {
 		return errors.New("invalid draft assessment")
 	}
 	sources := agentIDSet(v.seen.SourceIDs)
-	claims := map[string]bool{}
+	claims, supportedClaims := map[string]bool{}, map[string]bool{}
 	for _, c := range assessment.Claims {
 		if c.ID == "" || claims[c.ID] {
 			return errors.New("invalid draft claim ID")
 		}
 		claims[c.ID] = true
+		supportedClaims[c.ID] = c.Verdict == "supported"
+	}
+	for _, branch := range d.Branches {
+		if branch.FindingID != "" && (branch.Status != "confirmed" || !supportedClaims[branch.FindingID]) {
+			return errors.New("invalid investigation branch finding")
+		}
 	}
 	for _, c := range append(assessment.Claims, assessment.AlternativeHypotheses...) {
 		if (c.Verdict != "supported" && c.Verdict != "partially_supported" && c.Verdict != "unsupported") || c.Verdict != "unsupported" && len(c.Citations) == 0 {
@@ -283,6 +353,7 @@ func (v *agentDraftValidator) validate(event agentProgress) error {
 			}
 		}
 	}
+	v.branches = branchIDs
 	v.revision = d.Revision
 	return nil
 }

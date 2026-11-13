@@ -50,7 +50,7 @@ explicitly, and collector truncation is surfaced separately.
 | `inspect(resource_id)` | Read one resource's fields, events, log excerpts, collection errors and nearby relationships |
 | `read_more(cursor)` | Continue a particular section by its returned cursor or reread an exact delivered source by ID |
 | `record_finding(statement, source_ids, finding_id?, verdict?)` | Save one finding, revise it by ID, or retract it by passing only the ID |
-| `verify(summary?, gaps?, remediation?)` | Check citations and the proposed conclusion. It may return one review of already-read evidence. |
+| `verify(summary?, gaps?, remediation?)` | Check citations and the proposed conclusion. It may return one review of already-read evidence. Omit `gaps` or pass `[]` when nothing remains unresolved. Standalone placeholders such as `"None"` are ignored. |
 | `finish()` | Save the verified Assessment v2 |
 
 Each overview has bounded previews and gives separate cursors for fields, events,
@@ -79,6 +79,51 @@ as separate findings. Confirming one blocker leaves other evidence-backed leads
 open when they could still prevent recovery.
 
 ## Incremental assessment and investigation workspace
+
+After inspecting the root, the planner uses `submit_plan` to publish up to eight
+ranked hypotheses in a single draft revision. The planner can attach a
+canonical `edgeId` to a concrete relationship check. The gateway reserves room
+for up to four observed broken or proposed inferred relationships in the
+snapshot's root component. Repeated edges to the same missing dependency
+share a check. One additional check can cover a resource with captured warning
+events and logs, including resources connected to explicitly related nodes.
+With a reserved runtime check, verification before planning queues the reserved
+checks. If the run must finalize before scheduling a check, it records a gap. The
+gateway runs concrete relationship checks before free-form branches and
+follows the model's priority within each group. All sessions share the
+immutable snapshot, validated findings, and the run budget. Each branch has a
+stable ID. The investigation journal tags branch activity with that ID.
+
+The gateway marks a branch as checking when its session starts. The model uses
+`close_branch` with a status, outcome, exact source IDs, and optional runbook.
+The tool uses `blocker` only for a fault that impedes recovery. The stored
+branch status is `confirmed`. Healthy observations use `ruled_out`.
+The gateway binds the result to the active branch. The model can queue an
+independent lead using `add_branch`. Confirmed and
+ruled-out outcomes cite delivered sources. Inspecting a concrete check's node
+also delivers its exact relationship fields. A comparison cites the source
+records for both sides. Confirmed branches can link to an existing finding with
+the optional `findingId`. A stable relationship finding ID or matching citations
+can also reuse an existing finding. If a free-form branch repeats or subsets the supporting evidence of a saved
+finding, the tool asks it to reuse the finding or cite the separate cause
+directly. Detector summaries do not establish a separate cause. Distinct relationship checks keep distinct
+findings even when they share evidence. The gateway verifies the combined
+assessment and records uncompleted or unscheduled checks as explicit gaps. If
+the budget runs out it keeps confirmed findings and identifies unfinished
+checks in a partial result. The UI displays the full snapshot graph
+and separate hypothesis cards. Confirmed branches can include up to three
+advisory runbook steps with an action and a verification check. Branches from
+older runs may omit the runbook. Each branch can use up to 12 model requests and
+10 reads, with a two-minute timeout per branch. A timed-out branch records a gap
+and leaves the remaining branches eligible to run within the overall budget.
+At finalization, unfinished branches become gaps and checks beyond the displayed
+unscheduled list are counted. The gateway stops scheduling additional requests for that branch after
+80,000 input or 16,000 output tokens. All usage also counts toward the run limit.
+Rejected draft writes emit `draft_change_deferred` with the gateway validation
+message in `validationDetail`. Invalid tool arguments emit
+`tool_arguments_invalid` with sanitized field names and error kinds. Active
+branch rejections carry `branchId`. Older
+drafts may omit branches, edge IDs, or finding IDs. Older events may omit validation details.
 
 After the first request, the runner sends the compact startup map, a bounded
 projection of recently delivered exact evidence, section receipts, accepted
@@ -171,7 +216,7 @@ agent mode. Invalid output may be retried at most twice within the shared reques
 budget, then fails explicitly. It never becomes Assessment v1. These checks prove
 reference integrity, not semantic entailment of a claim by its citations.
 An unknown or already closed tool call may also be corrected at most twice within
-the same 40-request ceiling. Such a call never executes a snapshot read; it
+the same 100-request ceiling. Such a call never executes a snapshot read; it
 produces `unavailable_tool` progress without recording its name or arguments.
 Registered argument-schema corrections are bounded. The runner rejects an
 unknown cursor and a supported or partially supported finding without exact
@@ -206,12 +251,12 @@ no token/cost estimate is fabricated for such an attempt.
 
 ## Bounds and terminal outcomes
 
-Default limits: 40 model requests (including corrections), up to 50 snapshot read
+Default limits: 100 model requests (including corrections), up to 50 snapshot read
 calls and 49 finding write attempts, plus finalization within an SDK ceiling of 102
 total tool calls; 400k cumulative input tokens, 75k cumulative output tokens, 8k maximum output
 per request (or a lower user-configured `maxTokens`), five seconds per tool and
 600 seconds per gateway run. Backend allows 610 seconds for dispatch/settlement
-and accepts model turns through 40 and at most 384 gateway progress events.
+and accepts model turns through 40 and at most 512 gateway progress events.
 SDK transport retries are disabled.
 Provider-reported token limits are checked after responses;
 the last response can cross a token bound. Byte limits and request/tool ceilings
@@ -228,7 +273,7 @@ the last request and reserve exploration plus the finalization turns; output
 reserves two per-request output caps plus a forecast of the next exploratory
 response. This is an early-stop forecast, not a preflight token guarantee: a third
 completion turn may not fit after large outputs. A large context jump can still
-reach the hard provider-reported limit. The 40-request ceiling remains a hard maximum.
+reach the hard provider-reported limit. The 100-request ceiling remains a hard maximum.
 An already exhausted request limit does not emit a fictitious next model turn;
 the stream returns `budget_exhausted`, which the backend persists as the reason.
 
@@ -242,6 +287,9 @@ Missing evidence alone does not imply execution failure: a completed inconclusiv
 assessment may set `needsMoreInfo=true`.
 
 Backend persists attempts/progress in `analysis_attempts` and `analysis_progress`.
+SQLite connections wait briefly for competing writers. Terminal updates take the
+writer lock before reading attempt state, so a competing run does not invalidate
+a read snapshot during settlement.
 Only a running attempt can commit a final result. Result, terminal event and SQL
 request state are committed atomically before WebSocket fan-out. Detailed outcomes
 are `completed`, `partial`, `failed`, `cancelled`, `timed_out`, or `interrupted`.

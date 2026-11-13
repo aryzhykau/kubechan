@@ -559,7 +559,7 @@ def test_request_exhaustion_does_not_emit_a_nonexistent_model_turn(payload):
 
 
 @pytest.mark.parametrize("exhaust", [False, True])
-def test_default_budget_allows_37_reads_and_finalization_through_request_40(payload, exhaust):
+def test_40_request_budget_allows_37_reads_and_finalization_through_request_40(payload, exhaust):
     turns, progress = [], []
     for i in range(37):
         payload["sources"].append({"id": f"field:check-{i}", "type": "resource_field",
@@ -586,10 +586,10 @@ def test_default_budget_allows_37_reads_and_finalization_through_request_40(payl
     async def sink(event): progress.append(event)
     if exhaust:
         with pytest.raises(UsageLimitExceeded):
-            asyncio.run(run_snapshot_agent(request(payload), sink, model=FunctionModel(model)))
+            asyncio.run(run_snapshot_agent(request(payload), sink, model=FunctionModel(model), budget=AgentBudget(requests=40)))
         assert progress[-1]["executionLimit"] == {"kind": "requests", "used": 40, "maximum": 40}
     else:
-        result = asyncio.run(run_snapshot_agent(request(payload), sink, model=FunctionModel(model)))
+        result = asyncio.run(run_snapshot_agent(request(payload), sink, model=FunctionModel(model), budget=AgentBudget(requests=40)))
         assert result.agentExecution is not None and result.assessment is not None and result.tokenUsage is not None
         assert result.agentExecution["requests"] == 40 and result.agentExecution["toolCalls"] == 37
         assert result.agentExecution["status"] == "partial"

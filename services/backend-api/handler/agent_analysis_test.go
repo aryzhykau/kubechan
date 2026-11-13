@@ -147,7 +147,7 @@ func TestSnapshotAgentRejectsWrongAttemptLegacyAndMissingResult(t *testing.T) {
 	}
 }
 
-func TestSnapshotAgentAccepts40ModelRequestsAnd50Reads(t *testing.T) {
+func TestSnapshotAgentAccepts100ModelRequestsAnd50Reads(t *testing.T) {
 	h, req := setupAgent(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var received llmAnalyzeRequest
@@ -162,7 +162,7 @@ func TestSnapshotAgentAccepts40ModelRequestsAnd50Reads(t *testing.T) {
 			}
 		}
 		emit(agentProgress{Stage: "indexing", Phase: "completed"})
-		for turn := 1; turn <= 40; turn++ {
+		for turn := 1; turn <= agentMaxModelRequests; turn++ {
 			emit(agentProgress{Stage: "model_request", Phase: "started", Turn: turn})
 			emit(agentProgress{Stage: "context_delivered", Phase: "completed", Turn: turn, Exposed: &agentExposure{}, TurnTokens: &agentTurnTokens{Input: 8000, Output: 150}})
 			if turn > 37 {
@@ -191,7 +191,7 @@ func TestSnapshotAgentAccepts40ModelRequestsAnd50Reads(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &progress); err != nil {
 		t.Fatal(err)
 	}
-	if progress.Status != "completed" || len(progress.Events) != 182 {
+	if progress.Status != "completed" || len(progress.Events) != 302 {
 		t.Fatalf("progress = %s", w.Body.String())
 	}
 	turns, reads := 0, 0
@@ -206,7 +206,7 @@ func TestSnapshotAgentAccepts40ModelRequestsAnd50Reads(t *testing.T) {
 			reads++
 		}
 	}
-	if turns != 40 || reads != 50 {
+	if turns != agentMaxModelRequests || reads != 50 {
 		t.Fatalf("model requests=%d, reads=%d", turns, reads)
 	}
 }
@@ -217,8 +217,8 @@ func TestAgentProgressRejectsRequestsAndEventsBeyondRaisedBounds(t *testing.T) {
 		event agentProgress
 		want  string
 	}{
-		{agentProgress{Turn: 41, ProducerSeq: 1}, "invalid agent progress event"},
-		{agentProgress{Turn: 40, ProducerSeq: agentMaxProgressEvents + 1}, "agent progress budget exceeded"},
+		{agentProgress{Turn: agentMaxModelRequests + 1, ProducerSeq: 1}, "invalid agent progress event"},
+		{agentProgress{Turn: agentMaxModelRequests, ProducerSeq: agentMaxProgressEvents + 1}, "agent progress budget exceeded"},
 	} {
 		event := test.event
 		event.Version, event.Stage, event.Phase = 1, "model_request", "started"
@@ -240,6 +240,7 @@ func TestAgentActivityAndFailureDetailsSurviveRESTAndBroadcast(t *testing.T) {
 		for i, event := range []agentProgress{
 			{Stage: "get_events", Phase: "completed", Target: &agentProgressTarget{NodeID: "gateway", Resource: v1alpha1.ResourceRef{Name: "UNTRUSTED-LABEL"}}, Availability: "not_collected"},
 			{Stage: "validating", Phase: "failed", ReasonCode: "output_schema_invalid", ValidationFields: []agentValidationField{{Path: "nodeInsights.4.comment", Kind: "missing"}}},
+			{Stage: "validating", Phase: "failed", ReasonCode: "draft_change_deferred", ValidationDetail: "A cited source ID was not delivered."},
 			{Stage: "execution_limit", Phase: "failed", ExecutionLimit: &agentExecutionLimit{Kind: "requests", Used: 8, Maximum: 8}},
 		} {
 			event.Version, event.RunID, event.AnalysisRequestID, event.AttemptID = 1, received.DiagnosticRunID, received.AnalysisRequestID, received.AttemptID
@@ -260,7 +261,7 @@ func TestAgentActivityAndFailureDetailsSurviveRESTAndBroadcast(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &progress); err != nil {
 		t.Fatal(err)
 	}
-	if progress.Status != "failed" || progress.ReasonCode != "budget_exhausted" || len(progress.Events) != 5 {
+	if progress.Status != "failed" || progress.ReasonCode != "budget_exhausted" || len(progress.Events) != 6 {
 		t.Fatalf("progress = %s", w.Body.String())
 	}
 	if progress.Events[1].Target.Resource.Name != "gateway" || progress.Events[1].Availability != "not_collected" || strings.Contains(w.Body.String(), "UNTRUSTED-LABEL") {
@@ -269,7 +270,10 @@ func TestAgentActivityAndFailureDetailsSurviveRESTAndBroadcast(t *testing.T) {
 	if progress.Events[2].ValidationFields[0].Path != "nodeInsights.4.comment" {
 		t.Fatalf("lost validation detail: %s", w.Body.String())
 	}
-	if progress.Events[3].ExecutionLimit == nil || progress.Events[3].ExecutionLimit.Kind != "requests" {
+	if progress.Events[3].ValidationDetail != "A cited source ID was not delivered." {
+		t.Fatal("lost draft rejection detail")
+	}
+	if progress.Events[4].ExecutionLimit == nil || progress.Events[4].ExecutionLimit.Kind != "requests" {
 		t.Fatal("lost execution limit detail")
 	}
 	hub := h.Hub.(*agentTestHub)
@@ -281,7 +285,7 @@ func TestAgentActivityAndFailureDetailsSurviveRESTAndBroadcast(t *testing.T) {
 			activity = append(activity, event)
 		}
 	}
-	if len(activity) != 5 || len(activity[2].ValidationFields) != 1 {
+	if len(activity) != 6 || len(activity[2].ValidationFields) != 1 || activity[3].ValidationDetail != progress.Events[3].ValidationDetail {
 		t.Fatalf("broadcasts = %q", hub.events)
 	}
 	for i, event := range activity {
@@ -468,5 +472,86 @@ func TestEvidenceAndAgentDispatchStateCommitAtomically(t *testing.T) {
 	_ = h.DB.QueryRow(`SELECT COUNT(*) FROM evidence`).Scan(&count)
 	if count != 0 {
 		t.Fatalf("partial evidence committed: %d records", count)
+	}
+}
+
+func TestSnapshotAgentSettlesWhileAnotherRunWrites(t *testing.T) {
+	for _, gatewayFails := range []bool{false, true} {
+		name := "result"
+		if gatewayFails {
+			name = "gateway_failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, req := setupAgent(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var received llmAnalyzeRequest
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Error(err)
+					return
+				}
+				encoder := json.NewEncoder(w)
+				writeAgentProgress(t, encoder, received, 1, "indexing")
+				w.(http.Flusher).Flush()
+				deadline := time.Now().Add(2 * time.Second)
+				for {
+					var count int
+					err := h.DB.QueryRow("SELECT COUNT(*) FROM analysis_progress WHERE attempt_id = ?", received.AttemptID).Scan(&count)
+					if err != nil || time.Now().After(deadline) {
+						t.Errorf("first event did not persist: count=%d err=%v", count, err)
+						return
+					}
+					if count == 1 {
+						break
+					}
+					time.Sleep(time.Millisecond)
+				}
+				// Hold SQLite's writer while the next frame reaches the backend.
+				tx, err := h.DB.Begin()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer func() { _ = tx.Rollback() }()
+				if _, err := tx.Exec("INSERT INTO analysis_requests(id, diagnostic_run_id, status) VALUES ('other-request', 'other-run', 'in_progress')"); err != nil {
+					t.Error(err)
+					return
+				}
+				if gatewayFails {
+					err = encoder.Encode(map[string]any{"type": "error", "code": "provider_error"})
+				} else {
+					writeAgentProgress(t, encoder, received, 2, "get_graph_neighbors")
+				}
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				w.(http.Flusher).Flush()
+				time.Sleep(200 * time.Millisecond)
+				if err := tx.Commit(); err != nil {
+					t.Error(err)
+					return
+				}
+				if !gatewayFails {
+					if err := encoder.Encode(map[string]any{"type": "result", "result": testAgentResult(received)}); err != nil {
+						t.Error(err)
+					}
+				}
+			}))
+			defer server.Close()
+			h.LLMGatewayURL = server.URL
+			h.dispatchSnapshotAgent(req)
+			wantStatus, wantReason, wantEvents := "completed", "", 3
+			if gatewayFails {
+				wantStatus, wantReason, wantEvents = "failed", "provider_error", 2
+			}
+			var status, reason string
+			var events, terminal int
+			err := h.DB.QueryRow(`SELECT status, reason_code, (SELECT COUNT(*) FROM analysis_progress WHERE attempt_id = a.id),
+				(SELECT COUNT(*) FROM analysis_progress WHERE attempt_id = a.id AND event_id = 'terminal') FROM analysis_attempts a`).
+				Scan(&status, &reason, &events, &terminal)
+			if err != nil || status != wantStatus || reason != wantReason || events != wantEvents || terminal != 1 {
+				t.Fatalf("got status=%q reason=%q events=%d terminal=%d err=%v", status, reason, events, terminal, err)
+			}
+		})
 	}
 }

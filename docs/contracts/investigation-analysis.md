@@ -171,14 +171,12 @@ If a valid causal-path step identifies a deterministic graph relationship but th
 
 The Assessment route is `/incidents/:incidentId/assessments/:runId`.
 
-- Old runs without a graph show an explicit compatibility message.
-- Selecting a node, edge, candidate, or claim opens its exact evidence.
-- Hovering or focusing a node shows its validated model insight and relevance; older runs fall back to deterministic technical metadata.
-- Node insights render in a viewport-clamped HTML overlay above the graph, with a relevance-specific KubeChan reaction image and technical metadata. Long content wraps inside the overlay and scrolls when it exceeds the browser height.
-- Relationship labels remain hidden until the corresponding edge is hovered or keyboard-focused.
-- The resource/relationship inspector is below the graph so the graph keeps the full workspace width.
-- Broken topology, proposed topology, and healthy topology use different semantic styling.
-- Graph selection is keyboard accessible.
+- **Summary** opens by default and shows the diagnosis, confirmed blockers, unresolved checks, and the recovery runbook. Each blocker shows its finding in a separate row that expands to reveal evidence and recovery steps. The full assessment text can be expanded below the structured findings.
+- **Workspace** lists the investigation branches with their current status. The selected branch shows its outcome and exact evidence, with a separate recovery view.
+- **Graph** shows the dependency map and a persistent inspector for the selected branch, node, edge, candidate, or source. The inspector sits beside the graph on wide screens and below it on narrow screens.
+- Branch selection is shared across the three views. Graph items support keyboard selection. The resource inspector shows validated model insights when available, alongside technical metadata.
+- Broken topology is visually distinct from observed topology. Proposed and inferred topology use amber dashed lines.
+- Older runs without recorded branches retain their findings, runbook, and graph where available. Runs without a graph show an explicit compatibility message.
 - The evidence ledger displays only citations that survived gateway validation.
 
 ## Changing the contract

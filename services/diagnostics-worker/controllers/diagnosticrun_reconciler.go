@@ -301,7 +301,7 @@ func (r *DiagnosticRunReconciler) collect(
 		}
 		rre.Events = events
 		spec, err := r.collectResourceSpec(ctx, rr.namespace, rr.kind, rr.name, rr.apiGroup)
-		if err != nil && !(rr.origin == "root" && apierrors.IsNotFound(err)) {
+		if err != nil && (rr.origin != "root" || !apierrors.IsNotFound(err)) {
 			errs = append(errs, fmt.Sprintf("spec for related %s/%s: %s", rr.kind, rr.name, err))
 		}
 		rre.Spec = spec

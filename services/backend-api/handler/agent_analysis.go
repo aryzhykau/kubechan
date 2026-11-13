@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -33,6 +34,7 @@ type agentProgress struct {
 	Phase              string                 `json:"phase"`
 	OccurredAt         string                 `json:"occurredAt"`
 	RecordedAt         string                 `json:"recordedAt"`
+	BranchID           string                 `json:"branchId,omitempty"`
 	ToolCallID         string                 `json:"toolCallId,omitempty"`
 	ReturnedCount      int                    `json:"returnedCount,omitempty"`
 	Turn               int                    `json:"turn,omitempty"`
@@ -41,6 +43,7 @@ type agentProgress struct {
 	Target             *agentProgressTarget   `json:"target,omitempty"`
 	PreviousLogs       bool                   `json:"previousLogs,omitempty"`
 	Availability       string                 `json:"availability,omitempty"`
+	ValidationDetail   string                 `json:"validationDetail,omitempty"`
 	ValidationFields   []agentValidationField `json:"validationFields,omitempty"`
 	ExecutionLimit     *agentExecutionLimit   `json:"executionLimit,omitempty"`
 	Exposed            *agentExposure         `json:"exposed,omitempty"`
@@ -77,8 +80,8 @@ var agentErrorCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 // Keep these transport bounds aligned with llm-gateway's AgentBudget. Allow
 // progress for every read, model request and bounded output/protocol repair.
 const (
-	agentMaxModelRequests  = 40
-	agentMaxProgressEvents = 384
+	agentMaxModelRequests  = 100
+	agentMaxProgressEvents = 512
 	agentRunTimeout        = 610 * time.Second
 )
 
@@ -135,6 +138,9 @@ func (h *Internal) persistAgentProgress(ctx context.Context, event agentProgress
 	}
 	if len(event.ValidationFields) > 8 || (event.Availability != "" && event.Availability != "collected" && event.Availability != "not_collected") || (event.ReasonCode != "" && !agentErrorCode.MatchString(event.ReasonCode)) {
 		return errors.New("invalid agent progress details")
+	}
+	if event.ValidationDetail != "" && (event.Stage != "validating" || event.Phase != "failed" || event.ReasonCode != "draft_change_deferred" || len(event.ValidationDetail) > 240) {
+		return errors.New("invalid agent validation detail")
 	}
 	for _, field := range event.ValidationFields {
 		if len(field.Path) > 160 || !agentFieldPath.MatchString(field.Path) || !agentErrorCode.MatchString(field.Kind) {
@@ -228,11 +234,15 @@ func (h *Internal) dispatchSnapshotAgent(req llmAnalyzeRequest) {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			state, reason = "cancelled", "cancelled"
 		}
-		h.failAgentAttempt(req.AttemptID, state, reason)
+		if state != "cancelled" {
+			slog.Warn("snapshot agent stream stopped", "diagnosticRunId", req.DiagnosticRunID, "attemptId", req.AttemptID, "reason", reason, "error", err)
+		}
+		h.recordAgentFailure(req.AttemptID, state, reason)
 		return
 	}
 	if err = h.completeAgentAttempt(req, result); err != nil {
-		h.failAgentAttempt(req.AttemptID, "failed", "result_storage_failed")
+		slog.Warn("snapshot agent result rejected", "diagnosticRunId", req.DiagnosticRunID, "attemptId", req.AttemptID, "error", err)
+		h.recordAgentFailure(req.AttemptID, "failed", "result_storage_failed")
 	}
 }
 
@@ -304,7 +314,7 @@ func (h *Internal) callSnapshotAgent(ctx context.Context, req llmAnalyzeRequest)
 				return result, err
 			}
 			if err = h.persistAgentProgress(ctx, frame.Event); err != nil {
-				return result, err
+				return result, fmt.Errorf("persisting agent progress frame %d: %w", producerSeq, err)
 			}
 		case "result":
 			if gotResult {
@@ -383,30 +393,43 @@ func (h *Internal) completeAgentAttempt(req llmAnalyzeRequest, result llmAnalyze
 	return nil
 }
 
-func (h *Internal) failAgentAttempt(attemptID, state, reason string) bool {
-	ctx := context.Background()
+func (h *Internal) recordAgentFailure(attemptID, state, reason string) {
+	if err := h.failAgentAttempt(attemptID, state, reason); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		slog.Error("persisting snapshot agent terminal state", "attemptId", attemptID, "state", state, "reason", reason, "error", err)
+	}
+}
+
+func (h *Internal) failAgentAttempt(attemptID, state, reason string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return false
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	event := agentProgress{AttemptID: attemptID, Stage: state, Phase: "failed", ReasonCode: reason}
-	if tx.QueryRowContext(ctx, `SELECT diagnostic_run_id, analysis_request_id FROM analysis_attempts WHERE id = ? AND status = 'running'`, attemptID).Scan(&event.RunID, &event.AnalysisRequestID) != nil {
-		return false
+	// Take the writer lock before reading. A read transaction can fail its
+	// upgrade immediately if another writer committed since its snapshot.
+	err = tx.QueryRowContext(ctx, `UPDATE analysis_attempts SET status = ?, stage = ?, reason_code = ?, updated_at = ?
+		WHERE id = ? AND status = 'running' RETURNING diagnostic_run_id, analysis_request_id`,
+		state, state, reason, now, attemptID).Scan(&event.RunID, &event.AnalysisRequestID)
+	if err != nil {
+		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE analysis_attempts SET status = ?, stage = ?, reason_code = ?, updated_at = ? WHERE id = ? AND status = 'running'`, state, state, reason, time.Now().UTC().Format(time.RFC3339Nano), attemptID); err != nil {
-		return false
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE analysis_requests SET status = 'failed', completed_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), event.AnalysisRequestID); err != nil {
-		return false
+	if _, err = tx.ExecContext(ctx, `UPDATE analysis_requests SET status = 'failed', completed_at = ? WHERE id = ?`, now, event.AnalysisRequestID); err != nil {
+		return err
 	}
 	event, err = appendAgentEvent(ctx, tx, event, "terminal")
-	if err != nil || tx.Commit() != nil {
-		return false
+	if err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
 	}
 	h.patchAnalysisState(event.RunID, v1alpha1.DiagnosticRunAnalysisStateFailed, "")
 	h.broadcastAgent(event)
-	return true
+	return nil
 }
 
 // GetAnalysisProgress returns persisted state, including after reconnect/reload.
@@ -472,8 +495,13 @@ func (h *Internal) CancelAnalysis(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "no running snapshot agent")
 		return
 	}
-	if !h.failAgentAttempt(attemptID, "cancelled", "cancelled") {
-		writeError(w, http.StatusConflict, "analysis already settled")
+	if err := h.failAgentAttempt(attemptID, "cancelled", "cancelled"); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusConflict, "analysis already settled")
+		} else {
+			slog.Error("persisting snapshot agent cancellation", "attemptId", attemptID, "error", err)
+			writeError(w, http.StatusServiceUnavailable, "cannot persist analysis cancellation")
+		}
 		return
 	}
 	h.agentMu.Lock()

@@ -381,6 +381,7 @@ export interface AnalysisProgressEvent {
   phase: 'started' | 'completed' | 'failed'
   occurredAt: string
   recordedAt: string
+  branchId?: string
   toolCallId?: string
   returnedCount?: number
   reasonCode?: string
@@ -388,13 +389,14 @@ export interface AnalysisProgressEvent {
   target?: { nodeId: string; resource: ResourceRef }
   previousLogs?: boolean
   availability?: 'collected' | 'not_collected'
+  validationDetail?: string
   validationFields?: Array<{ path: string; kind: string }>
   executionLimit?: { kind: 'requests' | 'input_tokens' | 'output_tokens' | 'tool_calls'; used: number; maximum: number }
   exposed?: InvestigationScope
   investigationGraph?: InvestigationScope
   turnTokens?: { input: number; output: number }
   draft?: AssessmentDraft
-  change?: { kind: 'claim' | 'hypothesis' | 'gap' | 'remediation' | 'review' | 'graph' | 'conclusion' | 'path' | 'retracted'; id: string }
+  change?: { kind: 'claim' | 'hypothesis' | 'gap' | 'remediation' | 'review' | 'graph' | 'conclusion' | 'path' | 'retracted' | 'branch'; id: string }
 }
 
 export interface InvestigationScope {
@@ -410,6 +412,18 @@ export interface AssessmentDraft {
   hasConclusion: boolean
   assessment: AssessmentV2
   graph: InvestigationScope
+  branches?: Array<{
+    id: string
+    nodeId: string
+    edgeId?: string
+    findingId?: string
+    question: string
+    status: 'open' | 'checking' | 'confirmed' | 'ruled_out' | 'gap'
+    priority?: number
+    outcome: string
+    runbook?: Array<{ action: string; verification: string }>
+    sourceIds: string[]
+  }>
 }
 
 export interface AnalysisProgress {

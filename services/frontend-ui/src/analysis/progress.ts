@@ -142,7 +142,7 @@ const VALIDATION_REASONS: Record<string, string> = {
 }
 
 function validationEventReason(event: AnalysisProgressEvent): string {
-  const reason = VALIDATION_REASONS[event.reasonCode ?? ''] ?? 'The response needs correction before it can be accepted.'
+  const reason = event.validationDetail ?? VALIDATION_REASONS[event.reasonCode ?? ''] ?? 'The response needs correction before it can be accepted.'
   const fields = event.validationFields?.map(field => `${field.path} (${field.kind.replace(/_/g, ' ')})`).join(', ')
   return fields ? `${reason} Fields: ${fields}.` : reason
 }
